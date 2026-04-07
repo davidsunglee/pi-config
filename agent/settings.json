@@ -1,0 +1,33 @@
+{
+  "lastChangelogVersion": "0.65.0",
+  "defaultProvider": "anthropic",
+  "defaultModel": "claude-opus-4-6",
+  "defaultThinkingLevel": "high",
+  "compaction": {
+    "enabled": false
+  },
+  "hideThinkingBlock": false,
+  "theme": "carbonfox",
+  "packages": [
+    "npm:pi-subagents",
+    "npm:pi-web-access"
+  ],
+  "enabledModels": [
+    "anthropic/claude-opus-4-6",
+    "anthropic/claude-sonnet-4-6",
+    "anthropic/claude-haiku-4-5",
+    "openai-codex/gpt-5.4",
+    "openai-codex/gpt-5.4-mini",
+    "google-gemini-cli/gemini-3.1-pro-preview",
+    "google-gemini-cli/gemini-3-flash-preview"
+  ],
+  "modelTiers": {
+    "capable": "anthropic/claude-opus-4-6",
+    "standard": "anthropic/claude-sonnet-4-6",
+    "cheap": "anthropic/claude-haiku-4-5",
+    "crossProvider": {
+      "capable": "openai-codex/gpt-5.4",
+      "standard": "openai-codex/gpt-5.4-mini"
+    }
+  }
+}
