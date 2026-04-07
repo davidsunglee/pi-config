@@ -51,6 +51,7 @@ type FooterColors = {
 	contextWindow: string | number;
 	branch:        string | number;
 	pwd:           string | number;
+	sessionName:   string | number;
 	statuses:      string | number;
 	symbols:       string | number;
 };
@@ -67,6 +68,7 @@ const THEME_COLORS: Record<string, Partial<FooterColors>> = {
 		contextWindow: "#7b7c7e",  // gray — readable but subtler than contextUsage
 		branch:        "#25be6a",  // green — success
 		pwd:           "#ee5396",  // red — pink-red
+		sessionName:   "#be95ff",  // magenta — soft lavender accent
 		statuses:      "#535353",  // dimGray — dim
 		symbols:       "#484848",  // darkGray — borderMuted
 	},
@@ -79,8 +81,22 @@ const THEME_COLORS: Record<string, Partial<FooterColors>> = {
 		contextWindow: "#b3b9b8",  // light gray — softer denominator / window size
 		branch:        "#8ccf7e",  // green — git branch / success
 		pwd:           "#e57474",  // red — directory path accent from Everblush palette
+		sessionName:   "#c47fd5",  // magenta — violet accent
 		statuses:      "#5c6466",  // dim gray — subdued status line
 		symbols:       "#5c6466",  // dim gray — slightly brighter separators and punctuation
+	},
+	"nord-dark": {
+		modelName:     "#88c0d0",  // nord8 — accent blue
+		tokens:        "#81a1c1",  // nord9 — subtle/muted blue
+		cost:          "#ebcb8b",  // nord13 — yellow/gold
+		cache:         "#4c566a",  // nord3 — muted/dim
+		contextUsage:  "#88c0d0",  // nord8 — slightly brighter blue than tokens
+		contextWindow: "#d8dee9",  // nord4 — silver/bright gray
+		branch:        "#a3be8c",  // nord14 — green
+		pwd:           "#d08770",  // nord12 — orange
+		sessionName:   "#b48ead",  // nord15 — mauve accent
+		statuses:      "#4c566a",  // nord3 — muted
+		symbols:       "#4c566a",  // nord3 — muted
 	},
 };
 
@@ -88,13 +104,14 @@ const THEME_COLORS: Record<string, Partial<FooterColors>> = {
 
 const DEFAULT_TOKENS: Record<keyof FooterColors, ThemeColor> = {
 	modelName:     "accent",
-	tokens:        "muted",
+	tokens:        "border",
 	cost:          "warning",
 	cache:         "muted",
-	contextUsage:  "muted",
+	contextUsage:  "accent",
 	contextWindow: "dim",
 	branch:        "success",
-	pwd:           "dim",
+	pwd:           "error",
+	sessionName:   "warning",
 	statuses:      "dim",
 	symbols:       "borderMuted",
 };
@@ -299,7 +316,7 @@ export default function (pi: ExtensionAPI) {
 					if (sessionName) {
 						pwdLine +=
 							colorize("symbols", " • ") +
-							colorize("pwd", sessionName);
+							colorize("sessionName", sessionName);
 					}
 
 					const line1 = truncateToWidth(
