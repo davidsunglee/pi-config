@@ -7,7 +7,7 @@
     "enabled": false
   },
   "hideThinkingBlock": false,
-  "theme": "carbonfox",
+  "theme": "everblush",
   "packages": [
     "npm:pi-subagents",
     "npm:pi-web-access"
