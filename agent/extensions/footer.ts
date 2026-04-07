@@ -70,6 +70,18 @@ const THEME_COLORS: Record<string, Partial<FooterColors>> = {
 		statuses:      "#535353",  // dimGray — dim
 		symbols:       "#484848",  // darkGray — borderMuted
 	},
+	everblush: {
+		modelName:     "#67b0e8",  // blue — primary accent
+		tokens:        "#71baf2",  // bright blue — a touch brighter than model name
+		cost:          "#ccb77a",  // muted gold — softer cost emphasis
+		cache:         "#5c6466",  // dim gray — subtle
+		contextUsage:  "#6cbfbf",  // cyan — readable emphasis distinct from tokens
+		contextWindow: "#b3b9b8",  // light gray — softer denominator / window size
+		branch:        "#8ccf7e",  // green — git branch / success
+		pwd:           "#e57474",  // red — directory path accent from Everblush palette
+		statuses:      "#5c6466",  // dim gray — subdued status line
+		symbols:       "#5c6466",  // dim gray — slightly brighter separators and punctuation
+	},
 };
 
 // ─── Default theme-token fallbacks ───────────────────────────────────────────
@@ -344,7 +356,7 @@ export default function (pi: ExtensionAPI) {
 					let contextDisplay: string;
 					if (contextPercent === "?") {
 						contextDisplay =
-							colorize("symbols", "?/") +
+							colorize("symbols", "? / ") +
 							colorize("contextWindow", formatTokens(contextWindow)) +
 							autoIndicator;
 					} else {
@@ -363,7 +375,7 @@ export default function (pi: ExtensionAPI) {
 						contextDisplay =
 							pctStr +
 							pctSuffix +
-							colorize("symbols", "/") +
+							colorize("symbols", " / ") +
 							colorize("contextWindow", formatTokens(contextWindow)) +
 							autoIndicator;
 					}
