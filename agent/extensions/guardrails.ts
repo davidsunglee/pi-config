@@ -1,5 +1,3 @@
-// https://github.com/michalvavra/agents
-
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { realpath } from "node:fs/promises";
 import * as path from "node:path";
@@ -87,13 +85,21 @@ function isSecretsFile(name: string) {
 
 function isCredentialsPath(info: PathInfo) {
   const basename = info.basename.toLowerCase();
-  const segments = info.segments.map((segment) => segment.toLowerCase());
 
-  return (
-    segments.includes("credentials") ||
-    basename === "credentials" ||
-    basename === "application_default_credentials.json"
-  );
+  if (basename === "credentials" || basename === "application_default_credentials.json") {
+    return true;
+  }
+
+  const parts = basename.split(".");
+  const stem = parts.shift() ?? "";
+  const extensions = parts;
+
+  if (stem !== "credentials") {
+    return false;
+  }
+
+  const allowedExtensions = new Set(["json", "yaml", "yml", "toml", "txt", "cfg", "ini", "env", "enc"]);
+  return extensions.length > 0 && extensions.every((extension) => allowedExtensions.has(extension));
 }
 
 function hardProtectedPath(info: PathInfo) {
@@ -153,24 +159,63 @@ function bashWriteProtectedPath(info: PathInfo) {
   if (isEnvFile(basename)) return "environment file";
   if (isDevVarsFile(basename)) return "dev vars file";
   if (isPrivateKeyFile(basename)) return "private key file";
+  if (isSshKeyName(basename)) return "SSH key";
   if (info.segments.includes(".ssh")) return ".ssh directory";
 
   return undefined;
 }
 
-function extractSimpleBashWriteTargets(command: string) {
-  const patterns = [
-    /(?:^|[;&|]\s*|\s)>>?\s*(["']?[^\s"';&|)]+["']?)/g,
-    /\btee\b(?:\s+-[^\s]+)*\s+(["']?[^\s"';&|)]+["']?)/g,
-    /\b(?:cp|mv)\b(?:\s+-[^\s]+)*\s+[^\s;&|)]+\s+(["']?[^\s"';&|)]+["']?)/g,
-  ];
+function tokenizeShellish(command: string) {
+  const matches = command.match(/"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\S+/g) ?? [];
+  return matches.map((token) => token.replace(/^['"]|['"]$/g, ""));
+}
 
+function isControlToken(token: string) {
+  return ["|", "||", "&&", ";"].includes(token);
+}
+
+function extractSimpleBashWriteTargets(command: string) {
   const targets = new Set<string>();
-  for (const pattern of patterns) {
-    for (const match of command.matchAll(pattern)) {
-      const rawTarget = match[1]?.trim();
-      if (!rawTarget) continue;
-      targets.add(rawTarget.replace(/^['"]|['"]$/g, ""));
+
+  for (const match of command.matchAll(/(?:^|[;&|]\s*|\s)>>?\s*(["']?[^\s"';&|)]+["']?)/g)) {
+    const rawTarget = match[1]?.trim();
+    if (!rawTarget) continue;
+    targets.add(rawTarget.replace(/^['"]|['"]$/g, ""));
+  }
+
+  const tokens = tokenizeShellish(command);
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i];
+
+    if (token === "tee") {
+      const teeTargets: string[] = [];
+      let j = i + 1;
+      while (j < tokens.length && !isControlToken(tokens[j])) {
+        if (!tokens[j].startsWith("-")) {
+          teeTargets.push(tokens[j]);
+        }
+        j++;
+      }
+      for (const target of teeTargets) {
+        targets.add(target);
+      }
+      i = j - 1;
+      continue;
+    }
+
+    if (token === "cp" || token === "mv") {
+      const args: string[] = [];
+      let j = i + 1;
+      while (j < tokens.length && !isControlToken(tokens[j])) {
+        if (!tokens[j].startsWith("-")) {
+          args.push(tokens[j]);
+        }
+        j++;
+      }
+      if (args.length >= 2) {
+        targets.add(args.at(-1));
+      }
+      i = j - 1;
     }
   }
 
