@@ -9,27 +9,142 @@ import * as path from "node:path";
  * - Blocks dangerous bash commands (rm -rf, sudo, chmod 777, etc.)
  * - Protects sensitive paths from writes (.env, node_modules, .git, keys)
  */
+type PathCandidate = {
+  path: string;
+  basename: string;
+  segments: string[];
+};
+
 function toMatchPath(filePath: string) {
   return path.normalize(filePath).replace(/\\/g, "/");
 }
 
-async function getProtectedPathCandidates(filePath: string, cwd: string) {
+function toPathCandidate(filePath: string): PathCandidate {
   const normalizedPath = toMatchPath(filePath);
-  const absolutePath = toMatchPath(path.resolve(cwd, normalizedPath));
-  const candidates = new Set([normalizedPath, absolutePath]);
+  const segments = normalizedPath.split("/").filter((segment) => segment.length > 0);
+  const basename = segments.at(-1) ?? normalizedPath;
 
-  try {
-    candidates.add(toMatchPath(await realpath(absolutePath)));
-  } catch {
-    try {
-      const realParent = await realpath(path.dirname(absolutePath));
-      candidates.add(toMatchPath(path.join(realParent, path.basename(absolutePath))));
-    } catch {
-      // Best-effort only: the path may not exist yet and its parent may also be unresolved.
-    }
+  return {
+    path: normalizedPath,
+    basename,
+    segments,
+  };
+}
+
+function isEnvFile(basename: string) {
+  return basename === ".env" || (basename.startsWith(".env.") && !basename.startsWith(".env.example"));
+}
+
+function isDevVarsFile(basename: string) {
+  return basename === ".dev.vars" || basename.startsWith(".dev.vars.");
+}
+
+function isPrivateKeyFile(basename: string) {
+  return basename.endsWith(".pem") || basename.endsWith(".key");
+}
+
+function isSshPrivateKeyName(basename: string) {
+  return ["id_rsa", "id_ed25519", "id_ed25519_github", "id_ecdsa"].includes(basename);
+}
+
+function isSecretsFile(basename: string) {
+  return /secrets?\.(json|ya?ml|toml)$/i.test(basename);
+}
+
+function isCredentialsPath(filePath: string) {
+  const { basename, segments } = toPathCandidate(filePath);
+  const lowercaseBasename = basename.toLowerCase();
+  const lowercaseSegments = segments.map((segment) => segment.toLowerCase());
+
+  if (lowercaseSegments.includes("credentials")) {
+    return true;
   }
 
-  return [...candidates];
+  if (lowercaseBasename === "credentials" || lowercaseBasename === "application_default_credentials.json") {
+    return true;
+  }
+
+  const parts = lowercaseBasename.split(".");
+  const stem = parts.shift() ?? "";
+  const extensions = parts;
+
+  if (!stem.includes("credentials")) {
+    return false;
+  }
+
+  if (extensions.length === 0) {
+    return stem.endsWith("-credentials") || stem.endsWith("_credentials");
+  }
+
+  const allowedExtensions = new Set([
+    "json",
+    "yaml",
+    "yml",
+    "toml",
+    "txt",
+    "cfg",
+    "ini",
+    "env",
+    "enc",
+    "local",
+    "production",
+    "staging",
+    "development",
+    "dev",
+    "prod",
+  ]);
+
+  return extensions.every((extension) => allowedExtensions.has(extension));
+}
+
+async function resolveNearestExistingPath(absolutePath: string) {
+  const suffix: string[] = [];
+  let ancestor = absolutePath;
+
+  while (true) {
+    try {
+      const resolvedAncestor = await realpath(ancestor);
+      return path.join(resolvedAncestor, ...suffix);
+    } catch {
+      const parent = path.dirname(ancestor);
+      if (parent === ancestor) {
+        return undefined;
+      }
+
+      suffix.unshift(path.basename(ancestor));
+      ancestor = parent;
+    }
+  }
+}
+
+async function getProtectedPathCandidates(filePath: string, cwd: string) {
+  const candidates = new Map<string, PathCandidate>();
+  const addCandidate = (candidatePath: string) => {
+    const candidate = toPathCandidate(candidatePath);
+    candidates.set(candidate.path, candidate);
+  };
+
+  addCandidate(filePath);
+
+  const absolutePath = path.resolve(cwd, filePath);
+  const resolvedTarget = await resolveNearestExistingPath(absolutePath);
+
+  if (resolvedTarget) {
+    let resolvedCwd: string;
+    try {
+      resolvedCwd = await realpath(cwd);
+    } catch {
+      resolvedCwd = path.resolve(cwd);
+    }
+
+    addCandidate(path.relative(resolvedCwd, resolvedTarget) || ".");
+  }
+
+  return [...candidates.values()];
+}
+
+function isRawDeviceOverwrite(command: string) {
+  return />\s*\/dev\/(?!(?:null|zero|random|urandom|stdin|stdout|stderr)(?:$|[\s;&|)]))/.test(command);
 }
 
 export default function (pi: ExtensionAPI) {
@@ -37,30 +152,30 @@ export default function (pi: ExtensionAPI) {
     { pattern: /\brm\s+(-[^\s]*r|--recursive)/, desc: "recursive delete" }, // rm -rf, rm -r, rm --recursive
     { pattern: /\bfind\b.*(?:\s-delete\b|\s-exec\s+rm\b)/, desc: "recursive delete (find)" }, // find / -delete, find -exec rm
     { pattern: /\bsudo\b/, desc: "sudo command" }, // sudo anything
-    { pattern: /\b(chmod|chown)\b.*\b777\b/, desc: "dangerous permissions" }, // chmod 777 (won't match 7770, etc.)
+    { pattern: /\bchmod\b(?:\s+-[^\s]+)*\s+[0-7]*777\b/, desc: "dangerous permissions" }, // chmod 777, 0777, 1777, etc.
     { pattern: /\bmkfs\b/, desc: "filesystem format" }, // mkfs.ext4, mkfs.xfs
     { pattern: /\bdd\b.*\bof=\/dev\//, desc: "raw device write" }, // dd if=x of=/dev/sda
-    { pattern: />\s*\/dev\/(?!null|zero|random|urandom|stdin|stdout|stderr)/, desc: "raw device overwrite" }, // > /dev/sda, /dev/nvme0n1 (not /dev/null)
+    { matches: isRawDeviceOverwrite, desc: "raw device overwrite" }, // > /dev/sda, /dev/nvme0n1 (not exact safe pseudo-devices)
     { pattern: /\bkill\s+-9\s+-1\b/, desc: "kill all processes" }, // kill -9 -1
     { pattern: /:\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;/, desc: "fork bomb" }, // :(){:|:&};:
   ];
 
   const protectedPaths = [
-    { pattern: /\.env($|\.(?!example))/, desc: "environment file" }, // .env, .env.local (but not .env.example)
-    { pattern: /\.dev\.vars($|\.)/, desc: "dev vars file" }, // .dev.vars, .dev.vars.local
-    { pattern: /node_modules\//, desc: "node_modules" }, // node_modules/
-    { pattern: /^\.git\/|\/\.git\//, desc: "git directory" }, // .git/
-    { pattern: /\.pem$|\.key$/, desc: "private key file" }, // *.pem, *.key
-    { pattern: /id_rsa|id_ed25519|id_ed25519_github|id_ecdsa/, desc: "SSH key" }, // id_rsa, id_ed25519
-    { pattern: /\.ssh\//, desc: ".ssh directory" }, // .ssh/
-    { pattern: /secrets?\.(json|ya?ml|toml)$/i, desc: "secrets file" }, // secrets.json, secret.yaml
-    { pattern: /(?:^|\/)credentials(?:\.(json|ya?ml|toml|txt|cfg))?$/i, desc: "credentials file" }, // credentials, credentials.json, credentials.yaml
+    { matches: ({ basename }: PathCandidate) => isEnvFile(basename), desc: "environment file" }, // .env, .env.local (but not .env.example)
+    { matches: ({ basename }: PathCandidate) => isDevVarsFile(basename), desc: "dev vars file" }, // .dev.vars, .dev.vars.local
+    { matches: ({ segments }: PathCandidate) => segments.includes("node_modules"), desc: "node_modules" }, // node_modules/
+    { matches: ({ segments }: PathCandidate) => segments.includes(".git"), desc: "git directory" }, // .git/
+    { matches: ({ basename }: PathCandidate) => isPrivateKeyFile(basename), desc: "private key file" }, // *.pem, *.key
+    { matches: ({ basename }: PathCandidate) => isSshPrivateKeyName(basename), desc: "SSH key" }, // id_rsa, id_ed25519
+    { matches: ({ segments }: PathCandidate) => segments.includes(".ssh"), desc: ".ssh directory" }, // .ssh/
+    { matches: ({ basename }: PathCandidate) => isSecretsFile(basename), desc: "secrets file" }, // secrets.json, secret.yaml
+    { matches: ({ path }: PathCandidate) => isCredentialsPath(path), desc: "credentials file" }, // credentials/, credentials.yml.enc, application_default_credentials.json
   ];
 
   const softProtectedPaths = [
-    { pattern: /package-lock\.json$/, desc: "package-lock.json" },
-    { pattern: /yarn\.lock$/, desc: "yarn.lock" },
-    { pattern: /pnpm-lock\.yaml$/, desc: "pnpm-lock.yaml" },
+    { matches: ({ basename }: PathCandidate) => basename === "package-lock.json", desc: "package-lock.json" },
+    { matches: ({ basename }: PathCandidate) => basename === "yarn.lock", desc: "yarn.lock" },
+    { matches: ({ basename }: PathCandidate) => basename === "pnpm-lock.yaml", desc: "pnpm-lock.yaml" },
   ];
 
   const dangerousBashWrites = [
@@ -78,8 +193,8 @@ export default function (pi: ExtensionAPI) {
     if (event.toolName === "bash") {
       const command = event.input.command as string;
 
-      for (const { pattern, desc } of dangerousCommands) {
-        if (pattern.test(command)) {
+      for (const { pattern, matches, desc } of dangerousCommands) {
+        if (pattern?.test(command) || matches?.(command)) {
           if (!ctx.hasUI) {
             return { block: true, reason: `Blocked ${desc} (no UI to confirm)` };
           }
@@ -107,15 +222,15 @@ export default function (pi: ExtensionAPI) {
       const filePath = event.input.path as string;
       const pathCandidates = await getProtectedPathCandidates(filePath, ctx.cwd);
 
-      for (const { pattern, desc } of protectedPaths) {
-        if (pathCandidates.some((candidate) => pattern.test(candidate))) {
+      for (const { matches, desc } of protectedPaths) {
+        if (pathCandidates.some((candidate) => matches(candidate))) {
           ctx.ui.notify(`🛡️ Blocked write to ${desc}: ${filePath}`, "warning");
           return { block: true, reason: `Protected path: ${desc}` };
         }
       }
 
-      for (const { pattern, desc } of softProtectedPaths) {
-        if (pathCandidates.some((candidate) => pattern.test(candidate))) {
+      for (const { matches, desc } of softProtectedPaths) {
+        if (pathCandidates.some((candidate) => matches(candidate))) {
           if (!ctx.hasUI) {
             return { block: true, reason: `Protected path (no UI): ${desc}` };
           }
@@ -138,4 +253,3 @@ export default function (pi: ExtensionAPI) {
     return undefined;
   });
 }
-
