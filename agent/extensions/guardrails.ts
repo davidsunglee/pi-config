@@ -1,6 +1,7 @@
 // https://github.com/michalvavra/agents
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { realpath } from "node:fs/promises";
 import * as path from "node:path";
 
 /**
@@ -8,6 +9,29 @@ import * as path from "node:path";
  * - Blocks dangerous bash commands (rm -rf, sudo, chmod 777, etc.)
  * - Protects sensitive paths from writes (.env, node_modules, .git, keys)
  */
+function toMatchPath(filePath: string) {
+  return path.normalize(filePath).replace(/\\/g, "/");
+}
+
+async function getProtectedPathCandidates(filePath: string, cwd: string) {
+  const normalizedPath = toMatchPath(filePath);
+  const absolutePath = toMatchPath(path.resolve(cwd, normalizedPath));
+  const candidates = new Set([normalizedPath, absolutePath]);
+
+  try {
+    candidates.add(toMatchPath(await realpath(absolutePath)));
+  } catch {
+    try {
+      const realParent = await realpath(path.dirname(absolutePath));
+      candidates.add(toMatchPath(path.join(realParent, path.basename(absolutePath))));
+    } catch {
+      // Best-effort only: the path may not exist yet and its parent may also be unresolved.
+    }
+  }
+
+  return [...candidates];
+}
+
 export default function (pi: ExtensionAPI) {
   const dangerousCommands = [
     { pattern: /\brm\s+(-[^\s]*r|--recursive)/, desc: "recursive delete" }, // rm -rf, rm -r, rm --recursive
@@ -81,17 +105,17 @@ export default function (pi: ExtensionAPI) {
 
     if (event.toolName === "write" || event.toolName === "edit") {
       const filePath = event.input.path as string;
-      const normalizedPath = path.normalize(filePath);
+      const pathCandidates = await getProtectedPathCandidates(filePath, ctx.cwd);
 
       for (const { pattern, desc } of protectedPaths) {
-        if (pattern.test(normalizedPath)) {
+        if (pathCandidates.some((candidate) => pattern.test(candidate))) {
           ctx.ui.notify(`🛡️ Blocked write to ${desc}: ${filePath}`, "warning");
           return { block: true, reason: `Protected path: ${desc}` };
         }
       }
 
       for (const { pattern, desc } of softProtectedPaths) {
-        if (pattern.test(normalizedPath)) {
+        if (pathCandidates.some((candidate) => pattern.test(candidate))) {
           if (!ctx.hasUI) {
             return { block: true, reason: `Protected path (no UI): ${desc}` };
           }
