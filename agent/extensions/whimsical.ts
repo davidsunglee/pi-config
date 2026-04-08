@@ -24,7 +24,6 @@ const messages = [
   "Channeling...",
   "Choreographing...",
   "Churning...",
-  "Clauding...",
   "Coalescing...",
   "Cogitating...",
   "Combobulating...",
