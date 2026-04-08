@@ -54,7 +54,7 @@ export default function (pi: ExtensionAPI) {
     { pattern: /id_rsa|id_ed25519|id_ed25519_github|id_ecdsa/, desc: "SSH key" }, // id_rsa, id_ed25519
     { pattern: /\.ssh\//, desc: ".ssh directory" }, // .ssh/
     { pattern: /secrets?\.(json|ya?ml|toml)$/i, desc: "secrets file" }, // secrets.json, secret.yaml
-    { pattern: /credentials/i, desc: "credentials file" }, // credentials, CREDENTIALS
+    { pattern: /(?:^|\/)credentials(?:\.(json|ya?ml|toml|txt|cfg))?$/i, desc: "credentials file" }, // credentials, credentials.json, credentials.yaml
   ];
 
   const softProtectedPaths = [
