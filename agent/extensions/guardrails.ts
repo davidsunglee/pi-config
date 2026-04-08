@@ -23,7 +23,7 @@ export default function (pi: ExtensionAPI) {
 
   const protectedPaths = [
     { pattern: /\.env($|\.(?!example))/, desc: "environment file" }, // .env, .env.local (but not .env.example)
-    { pattern: /\.dev\.vars($|\.[^/]+$)/, desc: "dev vars file" }, // .dev.vars
+    { pattern: /\.dev\.vars($|\.)/, desc: "dev vars file" }, // .dev.vars, .dev.vars.local
     { pattern: /node_modules\//, desc: "node_modules" }, // node_modules/
     { pattern: /^\.git\/|\/\.git\//, desc: "git directory" }, // .git/
     { pattern: /\.pem$|\.key$/, desc: "private key file" }, // *.pem, *.key
