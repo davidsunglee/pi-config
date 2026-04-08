@@ -11,11 +11,12 @@ import * as path from "node:path";
 export default function (pi: ExtensionAPI) {
   const dangerousCommands = [
     { pattern: /\brm\s+(-[^\s]*r|--recursive)/, desc: "recursive delete" }, // rm -rf, rm -r, rm --recursive
+    { pattern: /\bfind\b.*(?:\s-delete\b|\s-exec\s+rm\b)/, desc: "recursive delete (find)" }, // find / -delete, find -exec rm
     { pattern: /\bsudo\b/, desc: "sudo command" }, // sudo anything
-    { pattern: /\b(chmod|chown)\b.*777/, desc: "dangerous permissions" }, // chmod 777, chown 777
+    { pattern: /\b(chmod|chown)\b.*\b777\b/, desc: "dangerous permissions" }, // chmod 777 (won't match 7770, etc.)
     { pattern: /\bmkfs\b/, desc: "filesystem format" }, // mkfs.ext4, mkfs.xfs
     { pattern: /\bdd\b.*\bof=\/dev\//, desc: "raw device write" }, // dd if=x of=/dev/sda
-    { pattern: />\s*\/dev\/sd[a-z]/, desc: "raw device overwrite" }, // echo x > /dev/sda
+    { pattern: />\s*\/dev\/(?!null|zero|random|urandom|stdin|stdout|stderr)/, desc: "raw device overwrite" }, // > /dev/sda, /dev/nvme0n1 (not /dev/null)
     { pattern: /\bkill\s+-9\s+-1\b/, desc: "kill all processes" }, // kill -9 -1
     { pattern: /:\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;/, desc: "fork bomb" }, // :(){:|:&};:
   ];
