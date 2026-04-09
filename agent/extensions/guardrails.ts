@@ -307,7 +307,7 @@ async function confirmDangerousCommand(
   return ok ? undefined : { block: true, reason: `Blocked ${desc} by user` };
 }
 
-function notifyIfUI(ctx: { hasUI?: boolean; ui?: { notify?: (message: string, level: string) => void } }, message: string, level: string) {
+function notifyIfUI(ctx: { hasUI?: boolean; ui?: { notify?: (message: string, type?: "info" | "warning" | "error") => void } }, message: string, level: "info" | "warning" | "error") {
   if (!ctx.hasUI || !ctx.ui?.notify) {
     return;
   }
