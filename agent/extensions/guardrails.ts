@@ -11,13 +11,44 @@ import * as path from "node:path";
  * - For stronger isolation or adversarial scenarios, rely on sandboxing rather than this file.
  * - Clarity and maintainability matter more than exhaustive coverage.
  *
- * Concrete policy:
- * - Dangerous bash commands are confirmed (or blocked in headless mode).
- * - Writes to clearly sensitive or tool-managed targets are hard-blocked.
- * - Important generated artifacts like lockfiles are soft-protected via confirmation.
- * - Bash write detection is heuristic and intentionally limited to common forms:
- *   redirection, tee, cp, mv, and dd output targets.
- * - Web-browser skill: --profile launch is confirmed, file:// navigation is blocked.
+ * Scope:
+ * - Intercepts `bash`, `write`, and `edit` tool calls.
+ * - For `bash`, it confirms recognizably dangerous commands, blocks writes to protected
+ *   paths detected via common write forms, and adds targeted browser/git guardrails.
+ * - For `write`/`edit`, it hard-blocks sensitive paths and soft-protects selected
+ *   generated artifacts like lockfiles.
+ *
+ * Representative hard-blocks:
+ * - Direct `write`/`edit` to sensitive or tool-managed paths like `.env`, `.dev.vars`,
+ *   `.git/config`, `.ssh/id_ed25519`, `config/secrets.yaml`, `node_modules/...`,
+ *   `.venv/...`, or Python cache/tool directories.
+ * - `bash` writes to those same protected targets when detected through common forms like
+ *   redirection, `tee`, `cp`, `mv`, and `dd of=...`.
+ * - Browser navigation to `file://...` URLs.
+ *
+ * Representative confirmation-gated operations:
+ * - Dangerous shell commands like `rm -rf dist`, `find . -delete`, `sudo ...`,
+ *   `mkfs.ext4 ...`, `kill -9 -1`, chmod 777, and fork bombs.
+ * - Raw device writes such as `dd of=/dev/sda ...` or `tee /dev/disk3s1`.
+ * - Git commands that commonly destroy work or bypass review flow:
+ *   `git reset --hard`, destructive `git clean -fd` / `git clean -f -d`,
+ *   `git push --force`, and direct pushes to protected branches like `main`/`master`.
+ * - Web-browser launch with `./scripts/start.js --profile`.
+ * - Direct `write`/`edit` to soft-protected files like `package-lock.json`,
+ *   `yarn.lock`, `pnpm-lock.yaml`, `poetry.lock`, `Cargo.lock`, and `go.sum`.
+ *
+ * Representative allowed operations:
+ * - Ordinary reads and unrelated tool calls.
+ * - Safe or ordinary shell commands like `chmod 755 script.sh`, `git status`,
+ *   `git diff`, `git reset --soft HEAD~1`, `git push origin feature-branch`,
+ *   and dry-run previews like `git clean -nfd` or `git push --dry-run origin main`.
+ * - Writes to non-sensitive examples/docs like `.env.example`, public `.pub` keys outside
+ *   protected directories, `.gradle/...`, and normal project files.
+ *
+ * Intentional limits:
+ * - Bash write detection is heuristic and intentionally limited to common write forms:
+ *   redirection, `tee`, `cp`, `mv`, and `dd` output targets.
+ * - Git/browser detection aims for common high-risk forms, not exhaustive command parsing.
  */
 
 type PathInfo = {
@@ -68,6 +99,18 @@ const dangerousCommands = [
   { pattern: /:\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;/, desc: "fork bomb" },
   { pattern: /\bchmod\b(?:\s+-[^\s]+)*\s+[0-7]*777\b/i, desc: "dangerous permissions" },
 ];
+
+const GIT_PROTECTED_BRANCHES = new Set(["main", "master"]);
+const GIT_GLOBAL_OPTIONS_WITH_VALUE = new Set([
+  "-C",
+  "-c",
+  "--git-dir",
+  "--work-tree",
+  "--namespace",
+  "--config-env",
+  "--exec-path",
+  "--super-prefix",
+]);
 
 function bashWriteProtectedPath(info: PathInfo) {
   return hardProtectedPath(info);
@@ -125,6 +168,11 @@ export default function (pi: ExtensionAPI) {
           return result;
         }
         break;
+      }
+
+      const gitGuardResult = await checkGitGuardrails(command, ctx);
+      if (gitGuardResult) {
+        return gitGuardResult;
       }
 
       const browserGuardResult = await checkBrowserGuardrails(command, ctx);
@@ -395,6 +443,47 @@ function extractNavUrl(command: string): string | undefined {
   return undefined;
 }
 
+async function checkGitGuardrails(
+  command: string,
+  ctx: { hasUI?: boolean; ui?: { confirm?: (title: string, body: string) => Promise<boolean> } },
+) {
+  const tokens = tokenizeShellish(command);
+
+  for (let i = 0; i < tokens.length - 1; i++) {
+    if (stripTrailingControlPunctuation(tokens[i]).toLowerCase() !== "git") {
+      continue;
+    }
+
+    const subcommandIndex = findGitSubcommandIndex(tokens, i);
+    if (subcommandIndex === undefined) {
+      continue;
+    }
+
+    const subcommand = stripTrailingControlPunctuation(tokens[subcommandIndex]).toLowerCase();
+    const args = collectShellishArgs(tokens, subcommandIndex + 1);
+
+    if (subcommand === "reset" && isHardGitReset(args)) {
+      return confirmDangerousCommand(ctx, "git hard reset", command);
+    }
+
+    if (subcommand === "clean" && isDestructiveGitClean(args)) {
+      return confirmDangerousCommand(ctx, "git clean with force + directory removal", command);
+    }
+
+    if (subcommand === "push" && !hasDryRunFlag(args)) {
+      if (isGitForcePush(args)) {
+        return confirmDangerousCommand(ctx, "git force push", command);
+      }
+
+      if (isProtectedBranchPush(args)) {
+        return confirmDangerousCommand(ctx, "git push to protected branch", command);
+      }
+    }
+  }
+
+  return undefined;
+}
+
 async function checkBrowserGuardrails(
   command: string,
   ctx: { hasUI?: boolean; ui?: { confirm?: (title: string, body: string) => Promise<boolean> } },
@@ -411,6 +500,139 @@ async function checkBrowserGuardrails(
   }
 
   return undefined;
+}
+
+function isHardGitReset(args: string[]) {
+  return args.includes("--hard");
+}
+
+function isDestructiveGitClean(args: string[]) {
+  let hasForce = false;
+  let hasDirectories = false;
+
+  for (const arg of args) {
+    if (arg === "--") {
+      break;
+    }
+
+    if (arg === "--dry-run") return false;
+
+    if (arg === "-f" || arg === "--force") {
+      hasForce = true;
+      continue;
+    }
+
+    if (arg === "-d") {
+      hasDirectories = true;
+      continue;
+    }
+
+    if (/^-[^-]/.test(arg)) {
+      if (arg.includes("n")) return false;
+      hasForce ||= arg.includes("f");
+      hasDirectories ||= arg.includes("d");
+    }
+  }
+
+  return hasForce && hasDirectories;
+}
+
+function hasDryRunFlag(args: string[]) {
+  for (const arg of args) {
+    if (arg === "--") return false;
+    if (arg === "--dry-run" || arg === "-n") return true;
+    if (hasShortOptionFlag(arg, "n")) return true;
+  }
+  return false;
+}
+
+function isGitForcePush(args: string[]) {
+  return args.some((arg) => arg === "--force" || arg === "--force-with-lease" || hasShortOptionFlag(arg, "f"));
+}
+
+function isProtectedBranchPush(args: string[]) {
+  const positionalArgs = args.filter((arg) => arg !== "--" && !arg.startsWith("-"));
+  if (positionalArgs.length < 2) {
+    return false;
+  }
+
+  return positionalArgs.slice(1).some((refspec) => isProtectedBranchRefspec(refspec));
+}
+
+function isProtectedBranchRefspec(refspec: string) {
+  const normalizedRefspec = refspec.replace(/^\+/, "");
+  const destination = normalizedRefspec.includes(":")
+    ? normalizedRefspec.split(":").at(-1) ?? ""
+    : normalizedRefspec;
+
+  return isProtectedBranchName(destination);
+}
+
+function isProtectedBranchName(ref: string) {
+  return GIT_PROTECTED_BRANCHES.has(ref.replace(/^refs\/heads\//, ""));
+}
+
+function collectShellishArgs(tokens: string[], startIndex: number) {
+  const args: string[] = [];
+
+  for (let i = startIndex; i < tokens.length; i++) {
+    const rawToken = tokens[i];
+    if (isControlToken(rawToken)) {
+      break;
+    }
+
+    const cleaned = stripTrailingControlPunctuation(rawToken);
+    if (cleaned) {
+      args.push(cleaned);
+    }
+
+    if (hasTrailingControlPunctuation(rawToken)) {
+      break;
+    }
+  }
+
+  return args;
+}
+
+function findGitSubcommandIndex(tokens: string[], gitIndex: number) {
+  for (let i = gitIndex + 1; i < tokens.length; i++) {
+    const rawToken = tokens[i];
+    if (isControlToken(rawToken)) {
+      return undefined;
+    }
+
+    const cleaned = stripTrailingControlPunctuation(rawToken);
+    if (!cleaned) {
+      continue;
+    }
+
+    if (cleaned === "--") {
+      const nextToken = tokens[i + 1];
+      return nextToken && !isControlToken(nextToken) ? i + 1 : undefined;
+    }
+
+    if (!cleaned.startsWith("-")) {
+      return i;
+    }
+
+    if (gitGlobalOptionConsumesValue(cleaned) && !cleaned.includes("=")) {
+      i++;
+    }
+
+    if (hasTrailingControlPunctuation(rawToken)) {
+      return undefined;
+    }
+  }
+
+  return undefined;
+}
+
+function gitGlobalOptionConsumesValue(arg: string) {
+  return GIT_GLOBAL_OPTIONS_WITH_VALUE.has(arg);
+}
+
+function hasShortOptionFlag(arg: string, flag: string) {
+  return /^-[^-]/.test(arg) && arg.includes(flag);
 }
 
 function isRawDevicePath(info: PathInfo) {
