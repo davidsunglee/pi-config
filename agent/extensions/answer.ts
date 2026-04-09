@@ -157,10 +157,11 @@ class QnAComponent implements Component {
 		const editorTheme: EditorTheme = {
 			borderColor: this.dim,
 			selectList: {
-				// @ts-expect-error API drift: selectedBg removed in newer pi-coding-agent
-				selectedBg: (s: string) => `\x1b[44m${s}\x1b[0m`,
-				matchHighlight: this.cyan,
-				itemSecondary: this.gray,
+				selectedPrefix: this.cyan,
+				selectedText: this.cyan,
+				description: this.gray,
+				scrollInfo: this.dim,
+				noMatch: this.dim,
 			},
 		};
 
@@ -605,9 +606,8 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	// Listen for trigger from other extensions (e.g., execute_command tool)
-	// @ts-expect-error API drift: pi.events.on typing changed in newer pi-coding-agent
-	pi.events.on("trigger:answer", (ctx: ExtensionContext) => {
-		answerHandler(ctx);
+	pi.events.on("trigger:answer", (data) => {
+		answerHandler(data as ExtensionContext);
 	});
 }
 
