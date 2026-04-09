@@ -29,9 +29,9 @@
  * Use `/todos` to bring up the visual todo manager or just let the LLM use them
  * naturally.
  */
-import { DynamicBorder, copyToClipboard, getMarkdownTheme, keyHint, type ExtensionAPI, type ExtensionContext, type Theme } from "@mariozechner/pi-coding-agent";
+import { DynamicBorder, copyToClipboard, getMarkdownTheme, keyHint, type ExtensionAPI, type ExtensionContext, type KeybindingsManager, type Theme } from "@mariozechner/pi-coding-agent";
 import { StringEnum } from "@mariozechner/pi-ai";
-import { Type } from "@sinclair/typebox";
+import { Type, type Static } from "@sinclair/typebox";
 import path from "node:path";
 import fs from "node:fs/promises";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
@@ -89,9 +89,7 @@ interface TodoSettings {
 	gcDays: number;
 }
 
-type KeybindingMatcher = {
-	matches: (keyData: string, keybindingId: string) => boolean;
-};
+type KeybindingMatcher = Pick<KeybindingsManager, "matches">;
 
 const TodoParams = Type.Object({
 	action: StringEnum([
@@ -741,7 +739,8 @@ function getTodoSettingsPath(todosDir: string): string {
 
 function normalizeTodoSettings(raw: Partial<TodoSettings>): TodoSettings {
 	const gc = raw.gc ?? DEFAULT_TODO_SETTINGS.gc;
-	const gcDays = Number.isFinite(raw.gcDays) ? raw.gcDays! : DEFAULT_TODO_SETTINGS.gcDays;
+	const rawGcDays = raw.gcDays;
+	const gcDays = rawGcDays !== undefined && Number.isFinite(rawGcDays) ? rawGcDays : DEFAULT_TODO_SETTINGS.gcDays;
 	return {
 		gc: Boolean(gc),
 		gcDays: Math.max(0, Math.floor(gcDays)),
@@ -1449,7 +1448,7 @@ export default function todosExtension(pi: ExtensionAPI) {
 			"Claim tasks before working on them to avoid conflicts, and close them when complete.", 
 		parameters: TodoParams,
 
-		async execute(_toolCallId, params: any, _signal, _onUpdate, ctx) {
+		async execute(_toolCallId, params: Static<typeof TodoParams>, _signal, _onUpdate, ctx) {
 			const todosDir = getTodosDir(ctx.cwd);
 			const action: TodoAction = params.action;
 
@@ -1725,7 +1724,7 @@ export default function todosExtension(pi: ExtensionAPI) {
 		},
 
 
-		renderCall(args: any, theme) {
+		renderCall(args: Static<typeof TodoParams>, theme) {
 			const action = typeof args.action === "string" ? args.action : "";
 			const id = typeof args.id === "string" ? args.id : "";
 			const normalizedId = id ? normalizeTodoId(id) : "";
@@ -1765,12 +1764,7 @@ export default function todosExtension(pi: ExtensionAPI) {
 				return new Text(text, 0, 0);
 			}
 
-			if (!(details as any).todo) {
-				const text = result.content[0];
-				return new Text(text?.type === "text" ? text.text : "", 0, 0);
-			}
-
-			let text = renderTodoDetail(theme, (details as any).todo, expanded);
+			let text = renderTodoDetail(theme, details.todo, expanded);
 			const actionLabel =
 				details.action === "create"
 					? "Created"
@@ -1812,7 +1806,7 @@ export default function todosExtension(pi: ExtensionAPI) {
 			}
 
 			let nextPrompt: string | null = null;
-			let rootTui: TUI | null = null;
+			let rootTui: TUI | undefined;
 			await ctx.ui.custom<void>((tui, theme, keybindings, done) => {
 				rootTui = tui;
 				let selector: TodoSelectorComponent | null = null;
@@ -1889,8 +1883,7 @@ export default function todosExtension(pi: ExtensionAPI) {
 							new TodoDetailOverlayComponent(
 								overlayTui,
 								overlayTheme,
-								// @ts-expect-error API drift: KeybindingsManager not assignable to KeybindingMatcher
-							overlayKeybindings,
+								overlayKeybindings,
 								record,
 								overlayDone,
 							),
@@ -2029,7 +2022,6 @@ export default function todosExtension(pi: ExtensionAPI) {
 				selector = new TodoSelectorComponent(
 					tui,
 					theme,
-					// @ts-expect-error API drift: KeybindingsManager not assignable to KeybindingMatcher
 					keybindings,
 					todos,
 					(todo) => {
@@ -2076,7 +2068,7 @@ export default function todosExtension(pi: ExtensionAPI) {
 
 			if (nextPrompt) {
 				ctx.ui.setEditorText(nextPrompt);
-				(rootTui as any)?.requestRender();
+				rootTui?.requestRender();
 			}
 		},
 	});
