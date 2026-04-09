@@ -2,31 +2,74 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { realpath } from "node:fs/promises";
 import * as path from "node:path";
 
+/**
+ * Pragmatic guardrails for common unsafe or dubious operations.
+ *
+ * Philosophy:
+ * - This is not a full security system and does not try to parse shell syntax completely.
+ * - It is meant to catch high-signal mistakes and add friction around risky actions.
+ * - For stronger isolation or adversarial scenarios, rely on sandboxing rather than this file.
+ * - Clarity and maintainability matter more than exhaustive coverage.
+ *
+ * Concrete policy:
+ * - Dangerous bash commands are confirmed (or blocked in headless mode).
+ * - Writes to clearly sensitive or tool-managed targets are hard-blocked.
+ * - Important generated artifacts like lockfiles are soft-protected via confirmation.
+ * - Bash write detection is heuristic and intentionally limited to common forms:
+ *   redirection, tee, cp, mv, and dd output targets.
+ */
+
 type PathInfo = {
   path: string;
   basename: string;
   segments: string[];
 };
 
+const HARD_PROTECTED_SEGMENTS = [
+  [".git", "git directory"],
+  [".ssh", ".ssh directory"],
+  ["node_modules", "node_modules"],
+  [".venv", "Python virtual environment"],
+  ["venv", "Python virtual environment"],
+] as const;
+
+const PYTHON_TOOL_AND_CACHE_SEGMENTS = [
+  ["__pycache__", "Python bytecode cache"],
+  [".pytest_cache", "pytest cache"],
+  [".mypy_cache", "mypy cache"],
+  [".ruff_cache", "ruff cache"],
+  [".tox", "tox environment"],
+  [".nox", "nox environment"],
+  [".pytype", "pytype cache"],
+  [".hypothesis", "hypothesis cache"],
+] as const;
+
+const SOFT_PROTECTED_BASENAMES = new Set([
+  "package-lock.json",
+  "yarn.lock",
+  "pnpm-lock.yaml",
+  "poetry.lock",
+  "Pipfile.lock",
+  "uv.lock",
+  "Cargo.lock",
+  "go.sum",
+  "go.work.sum",
+  "gradle.lockfile",
+  "gradle-wrapper.properties",
+]);
+
 const dangerousCommands = [
   { pattern: /\brm\s+(-[^\s]*r|--recursive)/i, desc: "recursive delete" },
   { pattern: /\bfind\b.*(?:\s-delete\b|\s-exec\s+rm\b)/i, desc: "recursive delete (find)" },
   { pattern: /\bsudo\b/i, desc: "sudo command" },
   { pattern: /\bmkfs\b/i, desc: "filesystem format" },
-  { pattern: /\bdd\b.*\bof=\/dev\//i, desc: "raw device write" },
+  { pattern: /\bkill\s+-9\s+-1\b/i, desc: "kill all processes" },
+  { pattern: /:\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;/, desc: "fork bomb" },
   { pattern: /\bchmod\b(?:\s+-[^\s]+)*\s+[0-7]*777\b/i, desc: "dangerous permissions" },
 ];
 
 function bashWriteProtectedPath(info: PathInfo) {
-  const basename = info.basename;
-
-  if (isEnvFile(basename)) return "environment file";
-  if (isDevVarsFile(basename)) return "dev vars file";
-  if (isPrivateKeyFile(basename)) return "private key file";
-  if (isSshKeyName(basename)) return "SSH key";
-  if (info.segments.includes(".ssh")) return ".ssh directory";
-
-  return undefined;
+  return hardProtectedPath(info);
 }
 
 function hardProtectedPath(info: PathInfo) {
@@ -35,19 +78,21 @@ function hardProtectedPath(info: PathInfo) {
 
   if (isEnvFile(basename)) return "environment file";
   if (isDevVarsFile(basename)) return "dev vars file";
-  if (segments.includes(".git")) return "git directory";
-  if (segments.includes(".ssh")) return ".ssh directory";
-  if (segments.includes("node_modules")) return "node_modules";
-  if (segments.includes(".venv") || segments.includes("venv")) return "Python virtual environment";
-  if (segments.includes("__pycache__")) return "Python bytecode cache";
-  if (segments.includes(".pytest_cache")) return "pytest cache";
-  if (segments.includes(".mypy_cache")) return "mypy cache";
-  if (segments.includes(".ruff_cache")) return "ruff cache";
-  if (segments.includes(".tox")) return "tox environment";
-  if (segments.includes(".nox")) return "nox environment";
-  if (segments.includes(".pytype")) return "pytype cache";
-  if (segments.includes(".hypothesis")) return "hypothesis cache";
-  if (segments.includes(".gradle")) return "Gradle cache";
+
+  for (const [segment, description] of HARD_PROTECTED_SEGMENTS) {
+    if (segments.includes(segment)) {
+      return description;
+    }
+  }
+
+  // Generated Python tool/cache directories are hard-blocked because direct edits are
+  // almost always dubious and usually indicate the wrong target was chosen.
+  for (const [segment, description] of PYTHON_TOOL_AND_CACHE_SEGMENTS) {
+    if (segments.includes(segment)) {
+      return description;
+    }
+  }
+
   if (isPrivateKeyFile(basename)) return "private key file";
   if (isSshKeyName(basename)) return "SSH key";
   if (isSecretsFile(basename)) return "secrets file";
@@ -61,23 +106,7 @@ function hardProtectedPath(info: PathInfo) {
 }
 
 function softProtectedPath(info: PathInfo) {
-  switch (info.basename) {
-    case "package-lock.json":
-    case "yarn.lock":
-    case "pnpm-lock.yaml":
-    case "poetry.lock":
-    case "Pipfile.lock":
-    case "uv.lock":
-    case "Cargo.lock":
-    case "go.sum":
-    case "go.work.sum":
-    case "gradle.lockfile":
-    case "gradle-wrapper.properties":
-    case "gradle-wrapper.jar":
-      return info.basename;
-    default:
-      return undefined;
-  }
+  return SOFT_PROTECTED_BASENAMES.has(info.basename) ? info.basename : undefined;
 }
 
 export default function (pi: ExtensionAPI) {
@@ -90,27 +119,39 @@ export default function (pi: ExtensionAPI) {
           continue;
         }
 
-        if (!ctx.hasUI) {
-          return { block: true, reason: `Blocked ${desc} (no UI to confirm)` };
-        }
-
-        const ok = await ctx.ui.confirm(`⚠️ Dangerous command: ${desc}`, command);
-        if (!ok) {
-          return { block: true, reason: `Blocked ${desc} by user` };
+        const result = await confirmDangerousCommand(ctx, desc, command);
+        if (result) {
+          return result;
         }
         break;
       }
 
       for (const target of extractSimpleBashWriteTargets(command)) {
         const candidates = await getPathCandidates(target, ctx.cwd);
+        let rawDeviceConfirmed = false;
+
         for (const candidate of candidates) {
+          if (isRawDevicePath(candidate)) {
+            const result = await confirmDangerousCommand(ctx, "raw device overwrite", command);
+            if (result) {
+              return result;
+            }
+
+            rawDeviceConfirmed = true;
+            break;
+          }
+
           const protectedDesc = bashWriteProtectedPath(candidate);
           if (!protectedDesc) {
             continue;
           }
 
-          ctx.ui.notify(`🛡️ Blocked bash write to ${protectedDesc}: ${target}`, "warning");
+          notifyIfUI(ctx, `🛡️ Blocked bash write to ${protectedDesc}: ${target}`, "warning");
           return { block: true, reason: `Bash command writes to protected path: ${protectedDesc}` };
+        }
+
+        if (rawDeviceConfirmed) {
+          continue;
         }
       }
 
@@ -127,7 +168,7 @@ export default function (pi: ExtensionAPI) {
           continue;
         }
 
-        ctx.ui.notify(`🛡️ Blocked write to ${protectedDesc}: ${filePath}`, "warning");
+        notifyIfUI(ctx, `🛡️ Blocked write to ${protectedDesc}: ${filePath}`, "warning");
         return { block: true, reason: `Protected path: ${protectedDesc}` };
       }
 
@@ -199,9 +240,33 @@ async function resolveNearestExistingPath(absolutePath: string) {
   }
 }
 
+async function confirmDangerousCommand(
+  ctx: { hasUI?: boolean; ui?: { confirm?: (title: string, body: string) => Promise<boolean> } },
+  desc: string,
+  command: string,
+) {
+  if (!ctx.hasUI || !ctx.ui?.confirm) {
+    return { block: true, reason: `Blocked ${desc} (no UI to confirm)` };
+  }
+
+  const ok = await ctx.ui.confirm(`⚠️ Dangerous command: ${desc}`, command);
+  return ok ? undefined : { block: true, reason: `Blocked ${desc} by user` };
+}
+
+function notifyIfUI(ctx: { hasUI?: boolean; ui?: { notify?: (message: string, level: string) => void } }, message: string, level: string) {
+  if (!ctx.hasUI || !ctx.ui?.notify) {
+    return;
+  }
+
+  ctx.ui.notify(message, level);
+}
+
 function extractSimpleBashWriteTargets(command: string) {
   const targets = new Set<string>();
 
+  // Heuristic parsing for common write forms only. This intentionally does not try to
+  // understand full shell grammar; deeper isolation should come from sandboxing.
+  // Supported common forms: redirection, tee, cp, mv, and dd output targets.
   for (const match of command.matchAll(/(?:^|[;&|]\s*|\s)>>?\s*(["']?[^\s"';&|)]+["']?)/g)) {
     const rawTarget = match[1]?.trim();
     if (!rawTarget) continue;
@@ -260,6 +325,37 @@ function extractSimpleBashWriteTargets(command: string) {
           }
         }
         i = j - 1;
+        continue;
+      }
+
+      if (token === "dd") {
+        let j = i + 1;
+        while (j < tokens.length && !isControlToken(tokens[j])) {
+          const rawToken = tokens[j];
+          const cleaned = stripTrailingControlPunctuation(rawToken);
+
+          if (cleaned.startsWith("of=")) {
+            const destination = cleaned.slice(3);
+            if (destination) {
+              targets.add(destination);
+            }
+          } else if (cleaned === "of") {
+            const nextToken = tokens[j + 1];
+            if (nextToken && !isControlToken(nextToken)) {
+              const destination = stripTrailingControlPunctuation(nextToken);
+              if (destination) {
+                targets.add(destination);
+              }
+              j++;
+            }
+          }
+
+          j++;
+          if (hasTrailingControlPunctuation(rawToken)) {
+            break;
+          }
+        }
+        i = j - 1;
       }
     }
   }
@@ -280,6 +376,22 @@ function toPathInfo(filePath: string): PathInfo {
 
 function normalize(filePath: string) {
   return path.normalize(filePath).replace(/\\/g, "/");
+}
+
+function isRawDevicePath(info: PathInfo) {
+  if (!info.path.startsWith("/dev/")) {
+    return false;
+  }
+
+  const name = info.basename;
+  return (
+    /^sd[a-z]\d*$/i.test(name) ||
+    /^vd[a-z]\d*$/i.test(name) ||
+    /^xvd[a-z]\d*$/i.test(name) ||
+    /^nvme\d+n\d+(?:p\d+)?$/i.test(name) ||
+    /^r?disk\d+(?:s\d+)?$/i.test(name) ||
+    /^mmcblk\d+(?:p\d+)?$/i.test(name)
+  );
 }
 
 function isEnvFile(name: string) {
@@ -325,6 +437,10 @@ function isCredentialsPath(info: PathInfo) {
   return extensions.length > 0 && extensions.every((extension) => allowedExtensions.has(extension));
 }
 
+function isControlToken(token: string) {
+  return ["|", "||", "&&", ";"].includes(stripTrailingControlPunctuation(token));
+}
+
 function tokenizeShellish(command: string) {
   const matches = command.match(/"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\S+/g) ?? [];
   return matches.map((token) => token.replace(/^['"]|['"]$/g, ""));
@@ -338,6 +454,3 @@ function hasTrailingControlPunctuation(token: string) {
   return stripTrailingControlPunctuation(token) !== token;
 }
 
-function isControlToken(token: string) {
-  return ["|", "||", "&&", ";"].includes(stripTrailingControlPunctuation(token));
-}
