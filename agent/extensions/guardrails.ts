@@ -205,45 +205,62 @@ function extractSimpleBashWriteTargets(command: string) {
   for (const match of command.matchAll(/(?:^|[;&|]\s*|\s)>>?\s*(["']?[^\s"';&|)]+["']?)/g)) {
     const rawTarget = match[1]?.trim();
     if (!rawTarget) continue;
-    targets.add(rawTarget.replace(/^['"]|['"]$/g, ""));
+    targets.add(stripTrailingControlPunctuation(rawTarget.replace(/^['"]|['"]$/g, "")));
   }
 
-  const tokens = tokenizeShellish(command);
-  for (let i = 0; i < tokens.length; i++) {
-    const token = tokens[i];
+  const commandChunks = command
+    .split(/\r?\n/)
+    .map((chunk) => chunk.trim())
+    .filter(Boolean);
 
-    if (token === "tee") {
-      const teeTargets: string[] = [];
-      let j = i + 1;
-      while (j < tokens.length && !isControlToken(tokens[j])) {
-        if (!tokens[j].startsWith("-")) {
-          teeTargets.push(tokens[j]);
-        }
-        j++;
-      }
-      for (const target of teeTargets) {
-        targets.add(target);
-      }
-      i = j - 1;
-      continue;
-    }
+  for (const chunk of commandChunks) {
+    const tokens = tokenizeShellish(chunk);
+    for (let i = 0; i < tokens.length; i++) {
+      const token = stripTrailingControlPunctuation(tokens[i]);
 
-    if (token === "cp" || token === "mv") {
-      const args: string[] = [];
-      let j = i + 1;
-      while (j < tokens.length && !isControlToken(tokens[j])) {
-        if (!tokens[j].startsWith("-")) {
-          args.push(tokens[j]);
+      if (token === "tee") {
+        const teeTargets: string[] = [];
+        let j = i + 1;
+        while (j < tokens.length && !isControlToken(tokens[j])) {
+          const rawToken = tokens[j];
+          const cleaned = stripTrailingControlPunctuation(rawToken);
+          if (cleaned && !cleaned.startsWith("-")) {
+            teeTargets.push(cleaned);
+          }
+          j++;
+          if (hasTrailingControlPunctuation(rawToken)) {
+            break;
+          }
         }
-        j++;
-      }
-      if (args.length >= 2) {
-        const destination = args.at(-1);
-        if (destination) {
-          targets.add(destination);
+        for (const target of teeTargets) {
+          targets.add(target);
         }
+        i = j - 1;
+        continue;
       }
-      i = j - 1;
+
+      if (token === "cp" || token === "mv") {
+        const args: string[] = [];
+        let j = i + 1;
+        while (j < tokens.length && !isControlToken(tokens[j])) {
+          const rawToken = tokens[j];
+          const cleaned = stripTrailingControlPunctuation(rawToken);
+          if (cleaned && !cleaned.startsWith("-")) {
+            args.push(cleaned);
+          }
+          j++;
+          if (hasTrailingControlPunctuation(rawToken)) {
+            break;
+          }
+        }
+        if (args.length >= 2) {
+          const destination = args.at(-1);
+          if (destination) {
+            targets.add(destination);
+          }
+        }
+        i = j - 1;
+      }
     }
   }
 
@@ -278,6 +295,10 @@ function isPrivateKeyFile(name: string) {
 }
 
 function isSshKeyName(name: string) {
+  if (name.endsWith(".pub") || name.endsWith("-cert.pub")) {
+    return false;
+  }
+
   return /^id_(rsa|ecdsa|ed25519)(?:[._-].+)?$/i.test(name);
 }
 
@@ -296,7 +317,7 @@ function isCredentialsPath(info: PathInfo) {
   const stem = parts.shift() ?? "";
   const extensions = parts;
 
-  if (stem !== "credentials") {
+  if (!/(^|[-_])credentials$/.test(stem)) {
     return false;
   }
 
@@ -309,6 +330,14 @@ function tokenizeShellish(command: string) {
   return matches.map((token) => token.replace(/^['"]|['"]$/g, ""));
 }
 
+function stripTrailingControlPunctuation(token: string) {
+  return token.replace(/(?:;|\|\||&&|\||\))+$/, "");
+}
+
+function hasTrailingControlPunctuation(token: string) {
+  return stripTrailingControlPunctuation(token) !== token;
+}
+
 function isControlToken(token: string) {
-  return ["|", "||", "&&", ";"].includes(token);
+  return ["|", "||", "&&", ";"].includes(stripTrailingControlPunctuation(token));
 }
