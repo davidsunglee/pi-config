@@ -25,7 +25,6 @@ import {
 	truncateToWidth,
 	visibleWidth,
 } from "@mariozechner/pi-tui";
-import { sliceByColumn } from "@mariozechner/pi-tui/dist/utils.js";
 import os from "node:os";
 import path from "node:path";
 import fs from "node:fs/promises";
@@ -47,6 +46,83 @@ const TOD_BUCKETS: { key: TodKey; label: string; from: number; to: number }[] = 
 	{ key: "evening", label: "Evening (17–21)", from: 17, to: 21 },
 	{ key: "night", label: "Night (22–23)", from: 22, to: 23 },
 ];
+
+const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+
+function extractAnsiCodeLocal(str: string, pos: number): { code: string; length: number } | null {
+	if (pos >= str.length || str[pos] !== "\x1b") return null;
+
+	const next = str[pos + 1];
+	if (next === "[") {
+		let j = pos + 2;
+		while (j < str.length && !/[mGKHJ]/.test(str[j]!)) j++;
+		if (j < str.length) return { code: str.substring(pos, j + 1), length: j + 1 - pos };
+		return null;
+	}
+
+	if (next === "]") {
+		let j = pos + 2;
+		while (j < str.length) {
+			if (str[j] === "\x07") return { code: str.substring(pos, j + 1), length: j + 1 - pos };
+			if (str[j] === "\x1b" && str[j + 1] === "\\") return { code: str.substring(pos, j + 2), length: j + 2 - pos };
+			j++;
+		}
+		return null;
+	}
+
+	if (next === "_") {
+		let j = pos + 2;
+		while (j < str.length) {
+			if (str[j] === "\x07") return { code: str.substring(pos, j + 1), length: j + 1 - pos };
+			if (str[j] === "\x1b" && str[j + 1] === "\\") return { code: str.substring(pos, j + 2), length: j + 2 - pos };
+			j++;
+		}
+		return null;
+	}
+
+	return null;
+}
+
+export function sliceByColumnLocal(line: string, startCol: number, length: number, strict = false): string {
+	if (length <= 0) return "";
+	const endCol = startCol + length;
+	let result = "";
+	let currentCol = 0;
+	let i = 0;
+	let pendingAnsi = "";
+
+	while (i < line.length) {
+		const ansi = extractAnsiCodeLocal(line, i);
+		if (ansi) {
+			if (currentCol >= startCol && currentCol < endCol) result += ansi.code;
+			else if (currentCol < startCol) pendingAnsi += ansi.code;
+			i += ansi.length;
+			continue;
+		}
+
+		let textEnd = i;
+		while (textEnd < line.length && !extractAnsiCodeLocal(line, textEnd)) textEnd++;
+
+		for (const { segment } of graphemeSegmenter.segment(line.slice(i, textEnd))) {
+			const w = visibleWidth(segment);
+			const inRange = currentCol >= startCol && currentCol < endCol;
+			const fits = !strict || currentCol + w <= endCol;
+			if (inRange && fits) {
+				if (pendingAnsi) {
+					result += pendingAnsi;
+					pendingAnsi = "";
+				}
+				result += segment;
+			}
+			currentCol += w;
+			if (currentCol >= endCol) break;
+		}
+		i = textEnd;
+		if (currentCol >= endCol) break;
+	}
+
+	return result;
+}
 
 function todBucketForHour(hour: number): TodKey {
 	for (const b of TOD_BUCKETS) {
@@ -982,7 +1058,7 @@ function fitRight(text: string, width: number): string {
 	let w = visibleWidth(text);
 	let t = text;
 	if (w > width) {
-		t = sliceByColumn(t, w - width, width, true);
+		t = sliceByColumnLocal(t, w - width, width, true);
 		w = visibleWidth(t);
 	}
 	return " ".repeat(Math.max(0, width - w)) + t;
@@ -1227,7 +1303,7 @@ function renderLeftRight(left: string, right: string, width: number): string {
 	const rightW = visibleWidth(rightText);
 	if (rightW > remaining) {
 		// Keep the *rightmost* part visible.
-		rightText = sliceByColumn(rightText, rightW - remaining, remaining, true);
+		rightText = sliceByColumnLocal(rightText, rightW - remaining, remaining, true);
 	}
 	const pad = Math.max(0, remaining - visibleWidth(rightText));
 	return left + " ".repeat(pad) + rightText;
