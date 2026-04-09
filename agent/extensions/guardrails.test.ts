@@ -650,6 +650,173 @@ test("allows writes inside .gradle directories", async () => {
   assert.equal(result, undefined);
 });
 
+// -- Web-browser skill guardrails --
+
+test("blocks file:// navigation in browser", async () => {
+  const handler = createToolHandler();
+
+  const result = await handler(
+    { toolName: "bash", input: { command: "./scripts/nav.js file:///etc/passwd" } },
+    { cwd: process.cwd(), hasUI: true },
+  );
+
+  assert.deepEqual(result, {
+    block: true,
+    reason: "Blocked file:// navigation in browser",
+  });
+});
+
+test("blocks file:// navigation with quoted URL", async () => {
+  const handler = createToolHandler();
+
+  const result = await handler(
+    { toolName: "bash", input: { command: "./scripts/nav.js 'file:///Users/david/.ssh/id_ed25519'" } },
+    { cwd: process.cwd(), hasUI: false },
+  );
+
+  assert.deepEqual(result, {
+    block: true,
+    reason: "Blocked file:// navigation in browser",
+  });
+});
+
+test("blocks FILE:// navigation (case-insensitive)", async () => {
+  const handler = createToolHandler();
+
+  const result = await handler(
+    { toolName: "bash", input: { command: "./scripts/nav.js FILE:///etc/hosts" } },
+    { cwd: process.cwd(), hasUI: false },
+  );
+
+  assert.deepEqual(result, {
+    block: true,
+    reason: "Blocked file:// navigation in browser",
+  });
+});
+
+test("blocks file:// navigation with double-quoted URL", async () => {
+  const handler = createToolHandler();
+
+  const result = await handler(
+    { toolName: "bash", input: { command: './scripts/nav.js "file:///etc/passwd"' } },
+    { cwd: process.cwd(), hasUI: false },
+  );
+
+  assert.deepEqual(result, {
+    block: true,
+    reason: "Blocked file:// navigation in browser",
+  });
+});
+
+test("blocks file:// navigation when --new flag precedes URL", async () => {
+  const handler = createToolHandler();
+
+  const result = await handler(
+    { toolName: "bash", input: { command: "./scripts/nav.js --new file:///etc/passwd" } },
+    { cwd: process.cwd(), hasUI: false },
+  );
+
+  assert.deepEqual(result, {
+    block: true,
+    reason: "Blocked file:// navigation in browser",
+  });
+});
+
+test("allows normal https navigation", async () => {
+  const handler = createToolHandler();
+
+  const result = await handler(
+    { toolName: "bash", input: { command: "./scripts/nav.js https://example.com" } },
+    { cwd: process.cwd(), hasUI: false },
+  );
+
+  assert.equal(result, undefined);
+});
+
+test("allows nav.js --new with https URL", async () => {
+  const handler = createToolHandler();
+
+  const result = await handler(
+    { toolName: "bash", input: { command: "./scripts/nav.js https://example.com --new" } },
+    { cwd: process.cwd(), hasUI: false },
+  );
+
+  assert.equal(result, undefined);
+});
+
+test("blocks start.js --profile without UI", async () => {
+  const handler = createToolHandler();
+
+  const result = await handler(
+    { toolName: "bash", input: { command: "./scripts/start.js --profile" } },
+    { cwd: process.cwd(), hasUI: false },
+  );
+
+  assert.deepEqual(result, {
+    block: true,
+    reason: "Blocked browser launch with your real Chrome profile (cookies, logins) (no UI to confirm)",
+  });
+});
+
+test("lets users cancel --profile launch", async () => {
+  const handler = createToolHandler();
+  const confirmations: Array<{ title: string; body: string }> = [];
+
+  const result = await handler(
+    { toolName: "bash", input: { command: "./scripts/start.js --profile" } },
+    {
+      cwd: process.cwd(),
+      hasUI: true,
+      ui: {
+        async confirm(title: string, body: string) {
+          confirmations.push({ title, body });
+          return false;
+        },
+      },
+    },
+  );
+
+  assert.deepEqual(result, {
+    block: true,
+    reason: "Blocked browser launch with your real Chrome profile (cookies, logins) by user",
+  });
+  assert.equal(confirmations.length, 1);
+  assert.match(confirmations[0]!.title, /Chrome profile/);
+});
+
+test("allows --profile launch after UI confirmation", async () => {
+  const handler = createToolHandler();
+  let confirmationCount = 0;
+
+  const result = await handler(
+    { toolName: "bash", input: { command: "./scripts/start.js --profile" } },
+    {
+      cwd: process.cwd(),
+      hasUI: true,
+      ui: {
+        async confirm() {
+          confirmationCount += 1;
+          return true;
+        },
+      },
+    },
+  );
+
+  assert.equal(result, undefined);
+  assert.equal(confirmationCount, 1);
+});
+
+test("allows start.js without --profile", async () => {
+  const handler = createToolHandler();
+
+  const result = await handler(
+    { toolName: "bash", input: { command: "./scripts/start.js" } },
+    { cwd: process.cwd(), hasUI: false },
+  );
+
+  assert.equal(result, undefined);
+});
+
 test("allows unrelated tool calls", async () => {
   const handler = createToolHandler();
 
