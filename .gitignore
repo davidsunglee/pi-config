@@ -1,7 +1,13 @@
+# mac
 **/.DS_Store
 
+# git
+.worktrees/
+
+# pi agent
 agent/auth.json
 agent/run-history.jsonl
 agent/sessions
-.worktrees/
 
+# node
+agent/node_modules/
