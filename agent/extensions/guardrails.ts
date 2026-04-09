@@ -17,6 +17,7 @@ import * as path from "node:path";
  * - Important generated artifacts like lockfiles are soft-protected via confirmation.
  * - Bash write detection is heuristic and intentionally limited to common forms:
  *   redirection, tee, cp, mv, and dd output targets.
+ * - Web-browser skill: --profile launch is confirmed, file:// navigation is blocked.
  */
 
 type PathInfo = {
@@ -124,6 +125,11 @@ export default function (pi: ExtensionAPI) {
           return result;
         }
         break;
+      }
+
+      const browserGuardResult = await checkBrowserGuardrails(command, ctx);
+      if (browserGuardResult) {
+        return browserGuardResult;
       }
 
       for (const target of extractSimpleBashWriteTargets(command)) {
@@ -376,6 +382,35 @@ function toPathInfo(filePath: string): PathInfo {
 
 function normalize(filePath: string) {
   return path.normalize(filePath).replace(/\\/g, "/");
+}
+
+function extractNavUrl(command: string): string | undefined {
+  const match = command.match(/nav\.js\s+(.*)/)
+  if (!match) return undefined;
+  const args = match[1].match(/["']([^"']+)["']|\S+/g) ?? [];
+  for (const arg of args) {
+    const cleaned = arg.replace(/^["']|["']$/g, "");
+    if (!cleaned.startsWith("-")) return cleaned;
+  }
+  return undefined;
+}
+
+async function checkBrowserGuardrails(
+  command: string,
+  ctx: { hasUI?: boolean; ui?: { confirm?: (title: string, body: string) => Promise<boolean> } },
+) {
+  // Block file:// navigation — circumvents all file-path protections via the browser.
+  const navUrl = extractNavUrl(command);
+  if (navUrl && /^file:\/\//i.test(navUrl)) {
+    return { block: true, reason: "Blocked file:// navigation in browser" };
+  }
+
+  // Confirm --profile launch — copies real Chrome profile with all cookies and logins.
+  if (/start\.js\b.*--profile\b/.test(command)) {
+    return confirmDangerousCommand(ctx, "browser launch with your real Chrome profile (cookies, logins)", command);
+  }
+
+  return undefined;
 }
 
 function isRawDevicePath(info: PathInfo) {
