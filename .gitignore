@@ -3,4 +3,5 @@
 agent/auth.json
 agent/run-history.jsonl
 agent/sessions
+.worktrees/
 
