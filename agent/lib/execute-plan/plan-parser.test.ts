@@ -553,6 +553,14 @@ describe("validatePlan", () => {
     assert.ok(result.errors.some(e => /goal/i.test(e)), `Expected goal error, got: ${JSON.stringify(result.errors)}`);
   });
 
+  it("validation fails if architecture summary is missing", () => {
+    const content = FIXTURE_PLAN.replace(/## Architecture Summary\n[\s\S]*?(?=\n## )/, "");
+    const plan = parsePlan(content, "missing-arch.md");
+    const result = validatePlan(plan);
+    assert.equal(result.valid, false);
+    assert.ok(result.errors.some(e => /architecture/i.test(e)), `Expected architecture error, got: ${JSON.stringify(result.errors)}`);
+  });
+
   it("(i) validation fails if file structure section is missing", () => {
     const plan = parsePlan(FIXTURE_MISSING_FILE_STRUCTURE, "missing-fs.md");
     const result = validatePlan(plan);
