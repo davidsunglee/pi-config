@@ -259,8 +259,10 @@ export interface CodeReviewSummary {
  *   prompt. Same model unless `model` is overridden.
  * - `"accept"`: Accept the current state. For DONE_WITH_CONCERNS: log
  *   concerns and proceed. For code review: proceed despite findings.
- * - `"escalate"`: Present to user via requestFailureAction(). The agent is
- *   saying "I can't decide this."
+ * - `"escalate"`: The agent cannot decide — present to user via
+ *   requestFailureAction(). The engine constructs a FailureContext from the
+ *   judgment context (using taskNumber: 0 for non-task-specific judgments
+ *   like final code review).
  */
 export type JudgmentAction =
   | "retry"
