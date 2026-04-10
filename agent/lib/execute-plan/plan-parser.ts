@@ -293,6 +293,11 @@ export function validatePlan(plan: Plan): { valid: boolean; errors: string[] } {
     errors.push("Missing required section: Goal");
   }
 
+  // Required section: architecture summary
+  if (!plan.header.architectureSummary.trim()) {
+    errors.push("Missing required section: Architecture Summary");
+  }
+
   // Required section: file structure
   if (plan.fileStructure.length === 0) {
     // Check if the section exists but has no entries, vs. section is absent
