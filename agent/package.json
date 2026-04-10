@@ -3,7 +3,7 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --experimental-test-coverage --test extensions/**/*.test.ts"
+    "test": "node --experimental-strip-types --experimental-test-coverage --test extensions/**/*.test.ts lib/**/*.test.ts"
   },
   "devDependencies": {
     "@mariozechner/pi-coding-agent": "^0.66.1",
