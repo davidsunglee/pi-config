@@ -95,7 +95,10 @@ function buildCommitMessage(
  * Resets the last wave commit, discarding all changes from that commit.
  */
 export async function resetWaveCommit(io: ExecutionIO, cwd: string): Promise<void> {
-  await io.exec("git", ["reset", "--hard", "HEAD~1"], cwd);
+  const result = await io.exec("git", ["reset", "--hard", "HEAD~1"], cwd);
+  if (result.exitCode !== 0) {
+    throw new Error(`git reset failed (exit ${result.exitCode}): ${result.stderr}`);
+  }
 }
 
 /** Returns true if the given SHA exists in the repository. */

@@ -79,6 +79,8 @@ export function parseCodeReviewOutput(output: string): CodeReviewSummary {
   let inStrengths = false;
   let inRecommendations = false;
   let inOverall = false;
+  // Template format: ### Issues section with #### severity subsections
+  let inIssuesSection = false;
 
   const flushFinding = () => {
     if (currentTitle && currentSeverity) {
@@ -97,7 +99,7 @@ export function parseCodeReviewOutput(output: string): CodeReviewSummary {
   for (const line of lines) {
     const trimmed = line.trim();
 
-    // Detect severity sections
+    // Detect severity sections — original format: ## Critical, ## Important, ## Minor
     const h2Match = trimmed.match(/^##\s+(.+)/);
     if (h2Match && !trimmed.startsWith("###")) {
       flushFinding();
@@ -105,6 +107,7 @@ export function parseCodeReviewOutput(output: string): CodeReviewSummary {
       inStrengths = false;
       inRecommendations = false;
       inOverall = false;
+      inIssuesSection = false;
 
       if (section.includes("critical")) {
         currentSeverity = "critical";
@@ -127,12 +130,100 @@ export function parseCodeReviewOutput(output: string): CodeReviewSummary {
       continue;
     }
 
-    // Detect finding titles (### headers under severity sections)
+    // Detect h3 headers — used as either:
+    //   (a) Finding titles under severity sections (original format)
+    //   (b) Section markers in template format: ### Issues, ### Strengths, ### Recommendations
     const h3Match = trimmed.match(/^###\s+(.+)/);
-    if (h3Match && currentSeverity) {
-      flushFinding();
-      currentTitle = h3Match[1];
+    if (h3Match && !trimmed.startsWith("####")) {
+      const h3Text = h3Match[1].toLowerCase();
+
+      // Template format section markers
+      if (h3Text.includes("issues")) {
+        flushFinding();
+        inIssuesSection = true;
+        currentSeverity = null;
+        inStrengths = false;
+        inRecommendations = false;
+        inOverall = false;
+        continue;
+      }
+      if (h3Text.includes("strength")) {
+        flushFinding();
+        inIssuesSection = false;
+        currentSeverity = null;
+        inStrengths = true;
+        inRecommendations = false;
+        inOverall = false;
+        continue;
+      }
+      if (h3Text.includes("recommendation")) {
+        flushFinding();
+        inIssuesSection = false;
+        currentSeverity = null;
+        inStrengths = false;
+        inRecommendations = true;
+        inOverall = false;
+        continue;
+      }
+      if (h3Text.includes("overall")) {
+        flushFinding();
+        inIssuesSection = false;
+        currentSeverity = null;
+        inStrengths = false;
+        inRecommendations = false;
+        inOverall = true;
+        continue;
+      }
+
+      // Original format: finding title under a severity section
+      if (currentSeverity) {
+        flushFinding();
+        currentTitle = h3Match[1];
+        continue;
+      }
       continue;
+    }
+
+    // Detect h4 headers — template format severity subsections under ### Issues
+    const h4Match = trimmed.match(/^####\s+(.+)/);
+    if (h4Match && inIssuesSection) {
+      flushFinding();
+      const h4Text = h4Match[1].toLowerCase();
+      if (h4Text.includes("critical")) {
+        currentSeverity = "critical";
+      } else if (h4Text.includes("important")) {
+        currentSeverity = "important";
+      } else if (h4Text.includes("minor")) {
+        currentSeverity = "minor";
+      } else {
+        currentSeverity = null;
+      }
+      continue;
+    }
+
+    // Detect numbered list items as findings under severity sections (template format)
+    // Matches: "1. **title**" or "1. title"
+    if (currentSeverity) {
+      const numberedMatch = trimmed.match(/^\d+\.\s+\*\*(.+?)\*\*/);
+      if (numberedMatch) {
+        flushFinding();
+        currentTitle = numberedMatch[1];
+        // Capture any remaining text after the bold title as the start of details
+        const afterBold = trimmed.replace(/^\d+\.\s+\*\*.+?\*\*\s*[-–:]?\s*/, "").trim();
+        if (afterBold) {
+          currentDetails.push(afterBold);
+        }
+        continue;
+      }
+      // Plain numbered item: "1. Some finding title" — only when no current title
+      if (!currentTitle) {
+        const plainNumberedMatch = trimmed.match(/^\d+\.\s+(.+)/);
+        if (plainNumberedMatch) {
+          flushFinding();
+          currentTitle = plainNumberedMatch[1];
+          continue;
+        }
+      }
     }
 
     // Collect details for current finding
@@ -141,16 +232,30 @@ export function parseCodeReviewOutput(output: string): CodeReviewSummary {
       continue;
     }
 
-    // Collect strengths
-    if (inStrengths && trimmed.startsWith("-")) {
-      strengths.push(trimmed.slice(1).trim());
-      continue;
+    // Collect strengths (bullet or numbered)
+    if (inStrengths) {
+      if (trimmed.startsWith("-")) {
+        strengths.push(trimmed.slice(1).trim());
+        continue;
+      }
+      const numberedStrength = trimmed.match(/^\d+\.\s+(.+)/);
+      if (numberedStrength) {
+        strengths.push(numberedStrength[1]);
+        continue;
+      }
     }
 
-    // Collect recommendations
-    if (inRecommendations && trimmed.startsWith("-")) {
-      recommendations.push(trimmed.slice(1).trim());
-      continue;
+    // Collect recommendations (bullet or numbered)
+    if (inRecommendations) {
+      if (trimmed.startsWith("-")) {
+        recommendations.push(trimmed.slice(1).trim());
+        continue;
+      }
+      const numberedRec = trimmed.match(/^\d+\.\s+(.+)/);
+      if (numberedRec) {
+        recommendations.push(numberedRec[1]);
+        continue;
+      }
     }
 
     // Collect overall assessment
@@ -753,7 +858,40 @@ export class PlanExecutionEngine {
       return true;
     }
 
-    // Stop
+    if (exhaustedResponse.action === "escalate") {
+      const failureAction = await callbacks.requestFailureAction({
+        taskNumber: 0,
+        wave: wave.number,
+        error: `Wave ${wave.number} failed after ${MAX_WAVE_RETRIES} attempts.`,
+        attempts: MAX_WAVE_RETRIES,
+        maxAttempts: MAX_WAVE_RETRIES,
+      });
+      if (failureAction === "retry") {
+        return true; // Retry wave
+      }
+      if (failureAction === "skip") {
+        // Commit what we have and move on
+        const waveTasks = wave.taskNumbers.map((num) => {
+          const task = plan.tasks.find((t) => t.number === num);
+          return { number: num, title: task?.title ?? `Task ${num}` };
+        });
+        const commitSha = await commitWave(
+          io, workspacePath, wave.number, plan.header.goal, waveTasks,
+        );
+        await updateWaveStatus(io, cwd, planFileName, wave.number, "done", commitSha);
+        callbacks.onProgress({
+          type: "wave_completed",
+          wave: wave.number,
+          commitSha,
+        });
+        return true;
+      }
+      // stop
+      await this.persistStoppedState(planFileName, wave.number, "Wave retries exhausted and escalated — stopped");
+      return false;
+    }
+
+    // Stop (default)
     await this.persistStoppedState(planFileName, wave.number, "Wave retries exhausted");
     return false;
   }
@@ -1037,6 +1175,25 @@ export class PlanExecutionEngine {
       return true;
     }
 
+    if (exhaustedResponse.action === "escalate") {
+      const failureAction = await callbacks.requestFailureAction({
+        taskNumber: result.taskNumber,
+        wave: wave.number,
+        error: result.output,
+        attempts: MAX_TASK_RETRIES,
+        maxAttempts: MAX_TASK_RETRIES,
+      });
+      if (failureAction === "retry") {
+        return true; // Continue processing
+      }
+      if (failureAction === "skip") {
+        return true;
+      }
+      // stop
+      await this.persistStoppedState(planFileName, wave.number, `Task ${result.taskNumber} retries exhausted and escalated — stopped`);
+      return false;
+    }
+
     await this.persistStoppedState(planFileName, wave.number, `Task ${result.taskNumber} retries exhausted`);
     return false;
   }
@@ -1090,6 +1247,18 @@ export class PlanExecutionEngine {
 
         if (response.action === "retry") return { result: "retry" as const, context: response.context ?? null, model: response.model ?? null };
         if (response.action === "stop") return { result: "stop" as const, context: null, model: null };
+        if (response.action === "escalate") {
+          const failureAction = await callbacks.requestFailureAction({
+            taskNumber: taskNum,
+            wave: wave.number,
+            error: result.output,
+            attempts: 1,
+            maxAttempts: 1,
+          });
+          if (failureAction === "retry") return { result: "retry" as const, context: null, model: null };
+          if (failureAction === "stop") return { result: "stop" as const, context: null, model: null };
+          // skip — fall through to continue to next task's review
+        }
         // skip/accept — continue to next task's review
       }
     }

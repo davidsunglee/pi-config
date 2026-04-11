@@ -301,6 +301,20 @@ describe("resetWaveCommit", () => {
     assert.equal(first.cmd, "git");
     assert.deepEqual(first.args, ["reset", "--hard", "HEAD~1"]);
   });
+
+  it("throws on non-zero exit code", async () => {
+    const io = {
+      exec: async (_cmd: string, _args: string[], _cwd: string) => {
+        return { stdout: "", stderr: "fatal: not a git repository", exitCode: 128 };
+      },
+    } as unknown as ExecutionIO;
+
+    await assert.rejects(
+      () => resetWaveCommit(io, TEST_CWD),
+      /git reset failed.*exit 128/,
+      "Should throw when git reset exits with non-zero code",
+    );
+  });
 });
 
 describe("verifyCommitExists", () => {
