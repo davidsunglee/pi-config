@@ -331,7 +331,7 @@ export interface JudgmentResponse {
  * Discriminated union of progress events emitted by the engine.
  */
 export type ProgressEvent =
-  | { type: "wave_started"; wave: number; taskNumbers: number[] }
+  | { type: "wave_started"; wave: number; totalWaves: number; taskNumbers: number[] }
   | { type: "wave_completed"; wave: number; commitSha: string }
   | { type: "task_started"; taskNumber: number; wave: number }
   | { type: "task_progress"; taskNumber: number; wave: number; status: string }
