@@ -1277,19 +1277,36 @@ describe("PlanExecutionEngine", () => {
       });
 
       const engine = new PlanExecutionEngine(io, TEST_CWD, TEST_AGENT_DIR);
-      try {
-        await engine.execute(PLAN_PATH, callbacks);
-      } catch {
-        // Expected — stop causes the engine to throw/halt
-      }
+      await engine.execute(PLAN_PATH, callbacks);
 
       // Should persist stopped state
       const stoppedStates = stateWrites.filter((s) => s.status === "stopped");
       assert.ok(stoppedStates.length > 0, "Stopped state should be persisted");
+
+      // execution_completed should NOT be emitted on stop
+      const progressCalls = callbacks.calls["onProgress"] ?? [];
+      const completedEvents = progressCalls.filter(
+        (c: any[]) => c[0].type === "execution_completed",
+      );
+      assert.equal(completedEvents.length, 0, "Should not emit execution_completed on stop");
+
+      // Plan should NOT be moved to done
+      const donePath = join(TEST_CWD, ".pi", "plans", "done", PLAN_FILE_NAME);
+      assert.equal(io.files.has(donePath), false, "Plan should NOT be moved to done on stop");
+
+      // State file should NOT be deleted (should still exist for resume)
+      const stateFilePath = join(TEST_CWD, ".pi/plan-runs", PLAN_FILE_NAME + ".state.json");
+      assert.ok(io.files.has(stateFilePath), "State file should NOT be deleted on stop");
+
+      // execution_stopped should be emitted
+      const stoppedEvents = progressCalls.filter(
+        (c: any[]) => c[0].type === "execution_stopped",
+      );
+      assert.ok(stoppedEvents.length > 0, "Should emit execution_stopped on stop");
     });
 
     // (h) JudgmentResponse "provide_context": re-dispatches with context appended
-    it("provide_context re-dispatches with context appended", async () => {
+    it("provide_context re-dispatches with context appended and persists context/model", async () => {
       const io = createMockIO();
       seedFiles(io);
 
@@ -1321,10 +1338,20 @@ describe("PlanExecutionEngine", () => {
         };
       };
 
+      const stateWrites: RunState[] = [];
+      const origWriteFile = io.writeFile.bind(io);
+      io.writeFile = async (path: string, content: string) => {
+        if (path.includes(".state.json")) {
+          try { stateWrites.push(JSON.parse(content)); } catch { /* ignore */ }
+        }
+        return origWriteFile(path, content);
+      };
+
       const callbacks = createMockCallbacks({
         requestJudgment: async () => ({
           action: "provide_context" as const,
           context: "The API uses JSON format.",
+          model: "claude-sonnet-4-20250514",
         }),
       });
 
@@ -1340,6 +1367,23 @@ describe("PlanExecutionEngine", () => {
       assert.ok(
         secondDispatch.task.includes("The API uses JSON format."),
         "Second dispatch should include provided context",
+      );
+
+      // retryState should persist context and model
+      const retryStates = stateWrites.filter(
+        (s) => s.retryState && s.retryState.tasks["1"],
+      );
+      assert.ok(retryStates.length > 0, "Should persist retry state for task 1");
+      const lastRetryState = retryStates[retryStates.length - 1];
+      assert.equal(
+        lastRetryState.retryState.tasks["1"].lastContext,
+        "The API uses JSON format.",
+        "lastContext should be persisted from judgment response",
+      );
+      assert.equal(
+        lastRetryState.retryState.tasks["1"].lastModel,
+        "claude-sonnet-4-20250514",
+        "lastModel should be persisted from judgment response",
       );
     });
 
@@ -1613,14 +1657,16 @@ describe("PlanExecutionEngine", () => {
       assert.ok(codeReviewEvents[0][0].review, "Event should include review summary");
     });
 
-    // (n) persists retryState.finalReview for final-review retries
-    it("persists retryState.finalReview for final-review retries", async () => {
+    // (n) persists retryState.finalReview for final-review retries and dispatches fix-up work
+    it("persists retryState.finalReview for final-review retries and dispatches fix-up work before re-review", async () => {
       const io = createMockIO();
       seedFiles(io);
 
 
       let reviewCount = 0;
+      const dispatchedAgentOrder: string[] = [];
       io.dispatchSubagent = async (config) => {
+        dispatchedAgentOrder.push(config.agent);
         if (config.agent === "code-reviewer") {
           reviewCount++;
           return {
@@ -1663,7 +1709,7 @@ describe("PlanExecutionEngine", () => {
           if (req.type === "code_review") {
             judgmentCount++;
             if (judgmentCount <= 2) {
-              return { action: "retry" as const };
+              return { action: "retry" as const, context: "fix the bugs", model: "claude-opus-4-20250514" };
             }
             return { action: "accept" as const };
           }
@@ -1679,6 +1725,33 @@ describe("PlanExecutionEngine", () => {
         (s) => s.retryState && s.retryState.finalReview !== null,
       );
       assert.ok(hasFinalReviewRetry, "retryState.finalReview should be persisted during final review retries");
+
+      // Verify context and model are persisted in finalReview retry state
+      const finalReviewStates = stateWrites.filter(
+        (s) => s.retryState && s.retryState.finalReview !== null,
+      );
+      assert.ok(finalReviewStates.length > 0, "Should have final review retry states");
+      const lastFinalReview = finalReviewStates[finalReviewStates.length - 1];
+      assert.equal(
+        lastFinalReview.retryState.finalReview!.lastContext,
+        "fix the bugs",
+        "lastContext should be persisted from judgment response in final review retry",
+      );
+      assert.equal(
+        lastFinalReview.retryState.finalReview!.lastModel,
+        "claude-opus-4-20250514",
+        "lastModel should be persisted from judgment response in final review retry",
+      );
+
+      // Verify fix-up implementer dispatch happens before re-review
+      // After the first code-reviewer dispatch, there should be an implementer fix-up, then another code-reviewer
+      const afterFirstReview = dispatchedAgentOrder.slice(
+        dispatchedAgentOrder.indexOf("code-reviewer") + 1,
+      );
+      const fixupIdx = afterFirstReview.indexOf("implementer");
+      const secondReviewIdx = afterFirstReview.indexOf("code-reviewer");
+      assert.ok(fixupIdx >= 0, "Should dispatch implementer for fix-up work after code review retry");
+      assert.ok(secondReviewIdx > fixupIdx, "Fix-up implementer should be dispatched before re-review");
     });
 
     // (o) persists state after each wave
@@ -1750,11 +1823,7 @@ describe("PlanExecutionEngine", () => {
         return result;
       };
 
-      try {
-        await engine.execute(PLAN_PATH, callbacks);
-      } catch {
-        // May throw on stop
-      }
+      await engine.execute(PLAN_PATH, callbacks);
 
       // Wave 1 should have committed
       const progressCalls = callbacks.calls["onProgress"] ?? [];
@@ -1763,24 +1832,27 @@ describe("PlanExecutionEngine", () => {
       );
       assert.ok(waveCompleted.length >= 1, "First wave should commit before stopping");
 
-      // Should have stopped (not completed)
-      const executionCompleted = progressCalls.filter(
+      // execution_completed should NOT be emitted when stopped
+      const completedEvents = progressCalls.filter(
         (c: any[]) => c[0].type === "execution_completed",
       );
-      // If cancellation halts during wave 2 iteration, execution_completed should not fire
-      // or only wave 1 completed
+      assert.equal(completedEvents.length, 0, "Should not emit execution_completed on stop");
+
+      // Plan should NOT be moved to done
+      const donePath = join(TEST_CWD, ".pi", "plans", "done", PLAN_FILE_NAME);
+      assert.equal(io.files.has(donePath), false, "Plan should NOT be moved to done on stop");
+
+      // execution_stopped should be emitted
       const executionStopped = progressCalls.filter(
         (c: any[]) => c[0].type === "execution_stopped",
       );
-      // At least one of: stopped or did not start wave 2
+      assert.ok(executionStopped.length > 0, "Should emit execution_stopped");
+
+      // Wave 2 should not have started
       const wave2Started = progressCalls.filter(
         (c: any[]) => c[0].type === "wave_started" && c[0].wave === 2,
       );
-      // Either wave 2 didn't start, or we got a stop
-      assert.ok(
-        wave2Started.length === 0 || executionStopped.length > 0,
-        "Should stop after first wave or emit execution_stopped",
-      );
+      assert.equal(wave2Started.length, 0, "Wave 2 should not start after cancellation");
     });
 
     // (q) "stop after task" cancellation: doesn't commit partial wave
@@ -1876,11 +1948,7 @@ Low risk.
         return origDispatch(config, options);
       };
 
-      try {
-        await engine.execute(PLAN_PATH, callbacks);
-      } catch {
-        // May throw on stop
-      }
+      await engine.execute(PLAN_PATH, callbacks);
 
       // Should NOT have committed wave (partial wave)
       const progressCalls = callbacks.calls["onProgress"] ?? [];
@@ -1888,6 +1956,22 @@ Low risk.
         (c: any[]) => c[0].type === "wave_completed",
       );
       assert.equal(waveCompleted.length, 0, "Should NOT commit partial wave on task cancellation");
+
+      // execution_completed should NOT be emitted
+      const completedEvents = progressCalls.filter(
+        (c: any[]) => c[0].type === "execution_completed",
+      );
+      assert.equal(completedEvents.length, 0, "Should not emit execution_completed on task cancellation");
+
+      // Plan should NOT be moved to done
+      const donePath = join(TEST_CWD, ".pi", "plans", "done", PLAN_FILE_NAME);
+      assert.equal(io.files.has(donePath), false, "Plan should NOT be moved to done on task cancellation");
+
+      // execution_stopped should be emitted
+      const stoppedEvents = progressCalls.filter(
+        (c: any[]) => c[0].type === "execution_stopped",
+      );
+      assert.ok(stoppedEvents.length > 0, "Should emit execution_stopped on task cancellation");
     });
   });
 
@@ -1941,6 +2025,118 @@ Low risk.
       );
       assert.equal(taskProgressEvents[0][0].taskNumber, 1);
       assert.ok(taskProgressEvents[0][0].wave >= 1, "Should include wave number");
+    });
+
+    // (b) Live-progress test for initial TaskQueue.run() path
+    it("emits task_progress events from initial TaskQueue dispatch (not just retry)", async () => {
+      const io = createMockIO();
+      seedFiles(io);
+
+      io.dispatchSubagent = async (config, options) => {
+        // Simulate live progress from first dispatch
+        options?.onProgress?.(config.taskNumber, "compiling code...");
+        return {
+          taskNumber: config.taskNumber,
+          status: "DONE" as const,
+          output: "done",
+          concerns: null, needs: null, blocker: null,
+          filesChanged: [],
+        };
+      };
+
+      const callbacks = createMockCallbacks();
+      const engine = new PlanExecutionEngine(io, TEST_CWD, TEST_AGENT_DIR);
+      await engine.execute(PLAN_PATH, callbacks);
+
+      // Verify task_progress events from the initial dispatch
+      const progressCalls = callbacks.calls["onProgress"] ?? [];
+      const taskProgressEvents = progressCalls.filter(
+        (c: any[]) => c[0].type === "task_progress" && c[0].status === "compiling code...",
+      );
+      assert.ok(
+        taskProgressEvents.length > 0,
+        "Should emit task_progress event from initial TaskQueue dispatch onProgress callback",
+      );
+    });
+  });
+
+  describe("regression-retry path", () => {
+    // (c) Assert that resetWaveCommit is called and retryState.waves is persisted on regression-retry
+    it("calls resetWaveCommit and persists retryState.waves on regression-retry", async () => {
+      let testRunCount = 0;
+      const execCalls: Array<{ cmd: string; args: string[] }> = [];
+      const io = createMockIO(undefined, async (cmd, args, _cwd) => {
+        execCalls.push({ cmd, args: [...args] });
+        if (cmd === "git" && args[0] === "rev-parse" && args.includes("--git-dir")) {
+          return { stdout: ".git\n", stderr: "", exitCode: 0 };
+        }
+        if (cmd === "git" && args[0] === "rev-parse" && args.includes("--abbrev-ref")) {
+          return { stdout: "feature/test\n", stderr: "", exitCode: 0 };
+        }
+        if (cmd === "git" && args[0] === "rev-parse" && args.includes("HEAD")) {
+          return { stdout: "abc123def456\n", stderr: "", exitCode: 0 };
+        }
+        if (cmd === "kill" && args[0] === "-0") {
+          return { stdout: "", stderr: "No such process", exitCode: 1 };
+        }
+        if (cmd === "npm" && args[0] === "test") {
+          testRunCount++;
+          // First call = baseline (passes), subsequent = regression then pass
+          if (testRunCount === 1) {
+            return { stdout: "All tests passed", stderr: "", exitCode: 0 };
+          }
+          if (testRunCount === 2) {
+            return { stdout: "not ok 1 - widget test\nFAILED", stderr: "", exitCode: 1 };
+          }
+          return { stdout: "All tests passed", stderr: "", exitCode: 0 };
+        }
+        return { stdout: "", stderr: "", exitCode: 0 };
+      });
+      seedFiles(io);
+
+      io.dispatchSubagent = async (config) => ({
+        taskNumber: config.taskNumber,
+        status: "DONE" as const,
+        output: "done",
+        concerns: null, needs: null, blocker: null,
+        filesChanged: [],
+      });
+
+      const stateWrites: RunState[] = [];
+      const origWriteFile = io.writeFile.bind(io);
+      io.writeFile = async (path: string, content: string) => {
+        if (path.includes(".state.json")) {
+          try { stateWrites.push(JSON.parse(content)); } catch { /* ignore */ }
+        }
+        return origWriteFile(path, content);
+      };
+
+      const callbacks = createMockCallbacks({
+        requestSettings: async () => ({
+          execution: "parallel" as const,
+          tdd: true,
+          finalReview: false,
+          specCheck: false,
+          integrationTest: true,
+          testCommand: "npm test",
+        }),
+        requestTestRegressionAction: async () => "retry",
+      });
+
+      const engine = new PlanExecutionEngine(io, TEST_CWD, TEST_AGENT_DIR);
+      await engine.execute(PLAN_PATH, callbacks);
+
+      // Verify resetWaveCommit was called (git reset HEAD~1)
+      const resetCalls = execCalls.filter(
+        (c) => c.cmd === "git" && c.args[0] === "reset" && c.args.includes("HEAD~1"),
+      );
+      assert.ok(resetCalls.length > 0, "resetWaveCommit should call git reset HEAD~1 on regression-retry");
+
+      // Verify retryState.waves was persisted
+      const hasWaveRetry = stateWrites.some(
+        (s) => s.retryState && Object.keys(s.retryState.waves).length > 0,
+      );
+      assert.ok(hasWaveRetry, "retryState.waves should be persisted on regression-retry");
     });
   });
 });

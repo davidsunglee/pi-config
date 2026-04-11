@@ -387,7 +387,7 @@ export class PlanExecutionEngine {
       }
 
       // ── Step 11: Execute waves (stub) ────────────────────────────
-      await this.executeWaves(
+      const completed = await this.executeWaves(
         plan,
         waves,
         settings,
@@ -398,25 +398,44 @@ export class PlanExecutionEngine {
         persistedRetryState,
       );
 
-      // ── Step 14: Release lock ────────────────────────────────────
-      await releaseLock(io, cwd, planFileName);
-      lockAcquired = false;
+      if (completed) {
+        // ── Step 14: Release lock ────────────────────────────────────
+        await releaseLock(io, cwd, planFileName);
+        lockAcquired = false;
 
-      // ── Step 15: Completion — move plan, close todo, delete state
-      await movePlanToDone(io, cwd, planPath);
+        // ── Step 15: Completion — move plan, close todo, delete state
+        await movePlanToDone(io, cwd, planPath);
 
-      const todoId = extractSourceTodoId(plan);
-      if (todoId) {
-        await closeTodo(io, cwd, todoId, planFileName);
+        const todoId = extractSourceTodoId(plan);
+        if (todoId) {
+          await closeTodo(io, cwd, todoId, planFileName);
+        }
+
+        await deleteState(io, cwd, planFileName);
+        stateCreated = false;
+
+        callbacks.onProgress({
+          type: "execution_completed",
+          totalWaves: waves.length,
+        });
+      } else {
+        // Stopped path: release lock, persist stopped state, emit execution_stopped
+        await releaseLock(io, cwd, planFileName);
+        lockAcquired = false;
+
+        await updateState(io, cwd, planFileName, (s) => ({
+          ...s,
+          status: "stopped" as const,
+          stoppedAt: new Date().toISOString(),
+          stopGranularity: this.cancellation.granularity,
+        }));
+
+        callbacks.onProgress({
+          type: "execution_stopped",
+          wave: 0,
+          reason: "Execution stopped by user or judgment",
+        });
       }
-
-      await deleteState(io, cwd, planFileName);
-      stateCreated = false;
-
-      callbacks.onProgress({
-        type: "execution_completed",
-        totalWaves: waves.length,
-      });
     } catch (err) {
       errorOccurred = true;
       errorValue = err;
@@ -462,7 +481,7 @@ export class PlanExecutionEngine {
     callbacks: EngineCallbacks,
     startFromWave?: number,
     persistedRetryState?: RetryState,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const io = this.io;
     const cwd = this.cwd;
     const agentDir = this.agentDir;
@@ -487,7 +506,7 @@ export class PlanExecutionEngine {
           granularity: this.cancellation.granularity!,
         });
         await this.persistStoppedState(planFileName, wave.number, "Cancellation requested before wave start");
-        return;
+        return false;
       }
 
       // (a) Emit wave_started, update wave state to "in-progress"
@@ -519,7 +538,7 @@ export class PlanExecutionEngine {
 
       if (!waveSuccess) {
         // Wave was stopped or exhausted
-        return;
+        return false;
       }
 
       // Update completedWaves for context in subsequent waves
@@ -538,7 +557,7 @@ export class PlanExecutionEngine {
           granularity: "wave",
         });
         await this.persistStoppedState(planFileName, wave.number, "Cancelled after wave completion");
-        return;
+        return false;
       }
     }
 
@@ -548,8 +567,10 @@ export class PlanExecutionEngine {
         plan, waves, settings, modelTiers, planFileName, callbacks,
         workspacePath, persistedRetryState,
       );
-      if (!reviewSuccess) return;
+      if (!reviewSuccess) return false;
     }
+
+    return true;
   }
 
   /**
@@ -904,7 +925,7 @@ export class PlanExecutionEngine {
         case "provide_context": {
           // Re-dispatch with context appended
           attempts++;
-          await this.persistTaskRetryState(planFileName, result.taskNumber, attempts, MAX_TASK_RETRIES, "Needs context");
+          await this.persistTaskRetryState(planFileName, result.taskNumber, attempts, MAX_TASK_RETRIES, "Needs context", response.context, response.model);
 
           const taskSpec = this.buildTaskSpec(task);
           const context = buildTaskContext(plan, task, wave, completedWaves, plan.tasks);
@@ -943,7 +964,7 @@ export class PlanExecutionEngine {
 
         case "retry": {
           attempts++;
-          await this.persistTaskRetryState(planFileName, result.taskNumber, attempts, MAX_TASK_RETRIES, result.output);
+          await this.persistTaskRetryState(planFileName, result.taskNumber, attempts, MAX_TASK_RETRIES, result.output, response.context, response.model);
 
           const taskSpec = this.buildTaskSpec(task);
           const context = buildTaskContext(plan, task, wave, completedWaves, plan.tasks);
@@ -1216,11 +1237,26 @@ export class PlanExecutionEngine {
               maxAttempts: MAX_REVIEW_RETRIES,
               lastFailure: "Code review requires changes",
               lastFailureAt: new Date().toISOString(),
-              lastContext: null,
-              lastModel: null,
+              lastContext: response.context ?? null,
+              lastModel: response.model ?? null,
             },
           },
         }));
+
+        // Dispatch fix-up work with findings before re-review
+        const fixupPrompt = `Fix the following code review findings:\n\n${summary.rawOutput}\n\nAddress all critical and important issues.`;
+        const fixupConfig: SubagentConfig = {
+          agent: "implementer",
+          taskNumber: 0,
+          task: fixupPrompt,
+          model: response.model ?? resolveReviewModel(modelTiers, "code"),
+          cwd: workspacePath,
+        };
+        await io.dispatchSubagent(fixupConfig);
+
+        // Commit fixes
+        await commitWave(io, workspacePath, waves.length + attempt + 1, "Code review fixes", []);
+
         continue;
       }
 
@@ -1278,6 +1314,8 @@ export class PlanExecutionEngine {
     attempts: number,
     maxAttempts: number,
     lastFailure: string,
+    context?: string | null,
+    model?: string | null,
   ): Promise<void> {
     const io = this.io;
     const cwd = this.cwd;
@@ -1294,8 +1332,8 @@ export class PlanExecutionEngine {
             maxAttempts,
             lastFailure,
             lastFailureAt: new Date().toISOString(),
-            lastContext: null,
-            lastModel: null,
+            lastContext: context ?? null,
+            lastModel: model ?? null,
           },
         },
       },
