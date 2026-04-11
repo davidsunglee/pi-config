@@ -285,6 +285,23 @@ export async function dispatchWorker(
           return;
         }
 
+        // Emit progress from intermediate streamed events for real-time status.
+        if (event.type === "content_block_start") {
+          const block = event.content_block as { type?: string; name?: string } | undefined;
+          if (block?.type === "tool_use" && typeof block.name === "string") {
+            options?.onProgress?.(config.taskNumber, `Using tool: ${block.name}`);
+          } else if (block?.type === "thinking") {
+            options?.onProgress?.(config.taskNumber, "Thinking...");
+          } else if (block?.type === "text") {
+            options?.onProgress?.(config.taskNumber, "Writing response...");
+          }
+        } else if (event.type === "message_start") {
+          const msg = event.message as { role?: string } | undefined;
+          if (msg?.role === "assistant") {
+            options?.onProgress?.(config.taskNumber, "Worker started");
+          }
+        }
+
         // Extract the final assistant text output.
         if (event.type === "message_end" && event.message) {
           const msg = event.message as { role?: string; content?: Array<{ type: string; text?: string }> };
