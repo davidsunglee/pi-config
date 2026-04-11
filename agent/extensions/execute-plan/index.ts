@@ -398,8 +398,9 @@ async function handleExecutePlan(
             break;
           }
         }
-      } catch {
-        // Swallow TUI errors so they don't crash the engine
+      } catch (err) {
+        // Log TUI errors so they're visible for debugging, but don't propagate
+        console.error("[execute-plan] TUI rendering error in onProgress:", err);
       }
     },
   };
@@ -443,6 +444,16 @@ async function handleExecutePlan(
           done,
         );
       });
+    }
+
+    if (ctx.hasUI) {
+      ctx.ui.notify("Plan execution completed successfully.", "info");
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[execute-plan] Engine error:", message);
+    if (ctx.hasUI) {
+      ctx.ui.notify(`Plan execution failed: ${message}`, "error");
     }
   } finally {
     // Cleanup
