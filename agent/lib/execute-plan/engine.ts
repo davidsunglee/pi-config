@@ -522,6 +522,7 @@ export class PlanExecutionEngine {
       callbacks.onProgress({
         type: "wave_started",
         wave: wave.number,
+        totalWaves: waves.length,
         taskNumbers: wave.taskNumbers,
       });
 

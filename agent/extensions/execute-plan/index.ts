@@ -19,6 +19,7 @@ import {
   PlanExecutionEngine,
   isGitRepo,
   isDirty,
+  isMainBranch,
   type EngineCallbacks,
   type CodeReviewSummary,
   type ProgressEvent,
@@ -89,29 +90,26 @@ export default function (pi: ExtensionAPI): void {
     }),
     execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
       const planPath = (params as { path?: string }).path;
-      try {
-        await handleExecutePlan(planPath, ctx);
-        return {
-          content: [{ type: "text" as const, text: "Plan execution completed." }],
-          details: { success: true },
-        };
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        return {
-          content: [{ type: "text" as const, text: `Plan execution failed: ${message}` }],
-          details: { success: false, error: message },
-        };
-      }
+      const result = await handleExecutePlan(planPath, ctx);
+      return {
+        content: [{ type: "text" as const, text: result.message }],
+        details: { success: result.completed },
+      };
     },
   });
 }
 
 // ── Shared execution handler ────────────────────────────────────────
 
+interface ExecutePlanResult {
+  completed: boolean;
+  message: string;
+}
+
 async function handleExecutePlan(
   planPath: string | undefined,
   ctx: ExtensionContext,
-): Promise<void> {
+): Promise<ExecutePlanResult> {
   const cwd = ctx.cwd;
   const agentDir = path.dirname(path.dirname(path.dirname(import.meta.url.replace("file://", ""))));
 
@@ -123,8 +121,9 @@ async function handleExecutePlan(
 
   // Precondition: git repo
   if (!(await isGitRepo(tempIO, cwd))) {
-    ctx.ui.notify("Not a git repository. execute-plan requires git.", "error");
-    return;
+    const msg = "execute-plan requires a git repository.";
+    ctx.ui.notify(msg, "error");
+    return { completed: false, message: msg };
   }
 
   // Precondition: dirty tree warning
@@ -151,13 +150,15 @@ async function handleExecutePlan(
         (f) => f.endsWith(".md") && f !== "done",
       );
     } catch {
-      ctx.ui.notify("No .pi/plans/ directory found.", "error");
-      return;
+      const msg = "No .pi/plans/ directory found.";
+      ctx.ui.notify(msg, "error");
+      return { completed: false, message: msg };
     }
 
     if (planFiles.length === 0) {
-      ctx.ui.notify("No plan files found in .pi/plans/.", "info");
-      return;
+      const msg = "No plan files found in .pi/plans/.";
+      ctx.ui.notify(msg, "info");
+      return { completed: false, message: msg };
     }
 
     if (planFiles.length === 1) {
@@ -167,7 +168,7 @@ async function handleExecutePlan(
         "Select a plan to execute:",
         planFiles,
       );
-      if (!selected) return;
+      if (!selected) return { completed: false, message: "Plan selection cancelled." };
       resolvedPlanPath = path.join(plansDir, selected);
     }
   }
@@ -318,6 +319,7 @@ async function handleExecutePlan(
         switch (event.type) {
           case "wave_started": {
             currentWave = event.wave;
+            totalWaves = event.totalWaves;
             taskStatuses.clear();
             for (const tn of event.taskNumbers) {
               taskStatuses.set(tn, "pending");
@@ -447,14 +449,23 @@ async function handleExecutePlan(
     }
 
     if (ctx.hasUI) {
-      ctx.ui.notify("Plan execution completed successfully.", "info");
+      let successMsg = "Plan execution completed successfully.";
+      const onMain = await isMainBranch(io, cwd);
+      if (!onMain) {
+        successMsg +=
+          " Consider using /finishing-a-development-branch to complete your work.";
+      }
+      ctx.ui.notify(successMsg, "info");
     }
+
+    return { completed: true, message: "Plan execution completed." };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error("[execute-plan] Engine error:", message);
     if (ctx.hasUI) {
       ctx.ui.notify(`Plan execution failed: ${message}`, "error");
     }
+    return { completed: false, message: `Plan execution failed: ${message}` };
   } finally {
     // Cleanup
     ctx.ui.setWidget("execute-plan-progress", undefined);
