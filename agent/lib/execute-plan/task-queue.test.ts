@@ -38,7 +38,10 @@ function createMockIO(
   ) => Promise<SubagentResult>,
 ): ExecutionIO {
   return {
-    dispatchSubagent: async (config, options) => {
+    dispatchSubagent: async (
+      config: SubagentConfig,
+      options?: { signal?: AbortSignal; onProgress?: (taskNumber: number, status: string) => void },
+    ) => {
       return handler(config, options);
     },
   } as unknown as ExecutionIO;

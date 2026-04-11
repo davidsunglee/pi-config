@@ -22,7 +22,7 @@ function makeMockPI() {
     registerTool: (_tool: unknown) => {
       // Capture execute handler for testing tool invocations
       const tool = _tool as {
-        execute: (toolCallId: string, params: Record<string, unknown>) => Promise<unknown>;
+        execute: (toolCallId: string, params: Record<string, unknown>, signal: undefined, onUpdate: undefined, ctx: unknown) => Promise<unknown>;
       };
       registeredToolHandler = (params) => tool.execute("test-call-id", params, undefined, undefined, {} as never);
     },
@@ -108,10 +108,10 @@ test("resolver called with no pending request returns error", async () => {
   // Invoke the registered tool with no pending resolver
   const result = await (mockPI as unknown as { invokeRegisteredTool: (p: Record<string, unknown>) => Promise<unknown> }).invokeRegisteredTool({
     action: "retry",
-  }) as { error: string };
+  }) as { content: Array<{ type: string; text: string }>; details: { error?: boolean } };
 
-  assert.ok(result.error !== undefined, "Should return an error when no resolver exists");
-  assert.match(result.error, /No pending/);
+  assert.ok(result.details.error === true, "Should return error details when no resolver exists");
+  assert.match(result.content[0].text, /No pending/);
 });
 
 test("requestJudgment Promise rejects after timeout", async () => {
@@ -237,9 +237,9 @@ test("registerJudgmentTool resolves pending promise via getResolver", async () =
   const result = await (mockPI as unknown as { invokeRegisteredTool: (p: Record<string, unknown>) => Promise<unknown> }).invokeRegisteredTool({
     action: "retry",
     context: "Additional context",
-  }) as Record<string, unknown>;
+  }) as { content: Array<{ type: string; text: string }>; details: Record<string, unknown> };
 
-  assert.ok(!result.error, `Tool should not return error, got: ${JSON.stringify(result)}`);
+  assert.ok(!result.details.error, `Tool should not return error, got: ${JSON.stringify(result)}`);
 
   const resolved = await promise;
   assert.equal(resolved.action, "retry");

@@ -142,7 +142,8 @@ describe("extractSourceTodoId", () => {
 // ── (d) closeTodo ────────────────────────────────────────────────────
 
 describe("closeTodo", () => {
-  it("(d) reads todo file, updates status to done, appends completion note", async () => {
+  it("(d) reads todo file, updates status to done, preserves body", async () => {
+    const originalBody = "Notes about the work go here.";
     const todoContent = `{
   "id": "deadbeef",
   "title": "Add tests",
@@ -151,7 +152,7 @@ describe("closeTodo", () => {
   "created_at": "2026-01-25T17:00:00.000Z"
 }
 
-Notes about the work go here.`;
+${originalBody}`;
 
     const files = new Map([
       ["/fake/cwd/.pi/todos/deadbeef.md", todoContent],
@@ -167,11 +168,10 @@ Notes about the work go here.`;
     const parsed = JSON.parse(updated!.slice(0, updated!.indexOf('\n\n')));
     assert.equal(parsed.status, "done");
 
-    // Completion note should be appended
-    assert.ok(
-      updated!.includes("2026-04-10-my-plan.md"),
-      "Should include plan filename in completion note",
-    );
+    // Body must be preserved exactly
+    const bodyStart = updated!.indexOf('\n\n') + 2;
+    const newBody = updated!.slice(bodyStart);
+    assert.strictEqual(newBody, originalBody, "Body must be preserved exactly");
   });
 
   it("(e) silently skips if todo file doesn't exist", async () => {
@@ -362,23 +362,23 @@ Also a [link](https://example.com).`;
     assert.equal(parsed["created_at"], "2026-04-01T09:00:00.000Z");
     assert.equal(parsed["assigned_to_session"], "session-abc123.json");
 
-    // ── (c) Markdown body is preserved ────────────────────────────────
-    assert.ok(
-      body.includes("## Overview"),
-      "Body should contain heading",
-    );
-    assert.ok(
-      body.includes("### Subtasks"),
-      "Body should contain subheading",
-    );
-    assert.ok(
-      body.includes("Design the API"),
-      "Body should contain task list items",
-    );
-    assert.ok(
-      body.includes("[link](https://example.com)"),
-      "Body should contain link",
-    );
+    // ── (c) Markdown body is preserved exactly ────────────────────────
+    const originalBody = `## Overview
+
+This todo tracks implementation of feature X.
+
+### Subtasks
+
+- [ ] Design the API
+- [ ] Write tests
+- [ ] Implement the logic
+
+### Notes
+
+Some notes with **bold** and _italic_ text.
+Also a [link](https://example.com).`;
+
+    assert.strictEqual(body, originalBody, "Body must be preserved exactly");
 
     // ── (d) Result is re-parseable ────────────────────────────────────
     // Already verified above by JSON.parse succeeding without throwing

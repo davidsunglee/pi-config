@@ -319,6 +319,9 @@ export async function findActiveRunInRepo(
     const state = await readState(io, cwd, planName);
     if (state === null) continue;
 
+    // Only consider states with status "running"
+    if (state.status !== "running") continue;
+
     // Only consider states with a lock
     if (state.lock === null) continue;
 

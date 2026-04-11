@@ -99,8 +99,8 @@ function isTodoClosed(status: string): boolean {
 // ── closeTodo ────────────────────────────────────────────────────────
 
 /**
- * Deterministically closes a todo by reading its file, updating the
- * status field to "done", and appending a completion note.
+ * Deterministically closes a todo by reading its file and updating the
+ * status field to "done". The body is preserved byte-for-byte.
  *
  * Silently skips if:
  * - The todo file does not exist.
@@ -148,12 +148,9 @@ export async function closeTodo(
   parsed["status"] = "done";
 
   const updatedFrontMatter = JSON.stringify(parsed, null, 2);
-  const completionNote = `Completed by plan: ${planFileName}`;
-  const updatedBody = body
-    ? `${body}\n\n${completionNote}`
-    : completionNote;
-
-  const updatedContent = `${updatedFrontMatter}\n\n${updatedBody}`;
+  const updatedContent = body
+    ? `${updatedFrontMatter}\n\n${body}`
+    : updatedFrontMatter;
   await io.writeFile(todoPath, updatedContent);
 }
 
