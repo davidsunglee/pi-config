@@ -170,7 +170,16 @@ export async function loadAgentConfig(
     return null;
   }
 
-  const { frontmatter, body } = parseFrontmatter<Record<string, string>>(content);
+  let frontmatter: Record<string, string>;
+  let body: string;
+  try {
+    const parsed = parseFrontmatter<Record<string, string>>(content);
+    frontmatter = parsed.frontmatter;
+    body = parsed.body;
+  } catch {
+    // Malformed YAML frontmatter — treat as missing config.
+    return null;
+  }
 
   if (!frontmatter.name || !frontmatter.description) {
     return null;
@@ -308,7 +317,7 @@ export async function dispatchWorker(
           if (msg.role === "assistant" && Array.isArray(msg.content)) {
             for (const part of msg.content) {
               if (part.type === "text" && typeof part.text === "string") {
-                finalOutput = part.text;
+                finalOutput += part.text;
                 options?.onProgress?.(config.taskNumber, part.text.slice(0, 100));
               }
             }

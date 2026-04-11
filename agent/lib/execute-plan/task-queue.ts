@@ -78,9 +78,20 @@ export class TaskQueue {
           results.set(config.taskNumber, result);
           onTaskComplete?.(result);
         })()
-          .catch(() => {
-            // Swallow errors from individual tasks; they do not contribute
-            // to the results map. The caller observes absence in the map.
+          .catch((err) => {
+            // Surface dispatch failures as BLOCKED results so the caller
+            // always sees an entry for every scheduled task.
+            const errorResult: SubagentResult = {
+              taskNumber: config.taskNumber,
+              status: "BLOCKED",
+              output: "",
+              concerns: null,
+              needs: null,
+              blocker: `Dispatch error: ${err instanceof Error ? err.message : String(err)}`,
+              filesChanged: [],
+            };
+            results.set(config.taskNumber, errorResult);
+            onTaskComplete?.(errorResult);
           })
           .finally(() => {
             inFlight.delete(task);

@@ -183,6 +183,13 @@ async function handleExecutePlan(
   // Create engine
   const engine = new PlanExecutionEngine(io, cwd, agentDir);
 
+  // Guard against concurrent invocations overwriting an active bridge.
+  if (currentBridge !== null) {
+    const msg = "Another execute-plan invocation is already in progress.";
+    ctx.ui.notify(msg, "error");
+    return { completed: false, message: msg };
+  }
+
   // Create judgment bridge for this execution
   currentBridge = createJudgmentBridge(piRef!);
 

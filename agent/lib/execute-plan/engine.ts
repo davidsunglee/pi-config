@@ -617,7 +617,7 @@ export class PlanExecutionEngine {
       // (b) Fill worker prompts and dispatch tasks
       const dispatchSuccess = await this.dispatchWaveTasks(
         plan, wave, settings, modelTiers, planFileName, callbacks,
-        workspacePath, completedWaves,
+        workspacePath, completedWaves, persistedRetryState,
       );
 
       if (!dispatchSuccess) {
@@ -772,6 +772,7 @@ export class PlanExecutionEngine {
     callbacks: EngineCallbacks,
     workspacePath: string,
     completedWaves: WaveState[],
+    persistedRetryState?: RetryState,
   ): Promise<boolean> {
     const io = this.io;
     const cwd = this.cwd;
@@ -844,7 +845,12 @@ export class PlanExecutionEngine {
     // Process results and handle non-DONE statuses
     for (const taskNum of wave.taskNumbers) {
       const result = results.get(taskNum);
-      if (!result) continue;
+      if (!result) {
+        // A missing result means the task was never launched (e.g. abort).
+        // Treat as a fatal dispatch failure.
+        await this.persistStoppedState(planFileName, wave.number, `Task ${taskNum} produced no result (dispatch failure or abort)`);
+        return false;
+      }
 
       if (result.status === "DONE") {
         continue;
@@ -853,7 +859,7 @@ export class PlanExecutionEngine {
       // Handle BLOCKED, NEEDS_CONTEXT, DONE_WITH_CONCERNS via judgment
       const handled = await this.handleTaskResult(
         result, plan, wave, settings, modelTiers, planFileName, callbacks,
-        workspacePath, completedWaves, template,
+        workspacePath, completedWaves, template, persistedRetryState,
       );
 
       if (!handled) {
@@ -879,6 +885,7 @@ export class PlanExecutionEngine {
     workspacePath: string,
     completedWaves: WaveState[],
     template: string,
+    persistedRetryState?: RetryState,
   ): Promise<boolean> {
     const io = this.io;
     const cwd = this.cwd;
@@ -887,7 +894,8 @@ export class PlanExecutionEngine {
     const task = plan.tasks.find((t) => t.number === result.taskNumber);
     if (!task) return true;
 
-    let attempts = 0;
+    // Resume from persisted retry count if available
+    let attempts = persistedRetryState?.tasks[String(result.taskNumber)]?.attempts ?? 0;
 
     while (attempts < MAX_TASK_RETRIES) {
       // Build judgment request based on status
@@ -1152,11 +1160,13 @@ export class PlanExecutionEngine {
     // Read state for pre-execution SHA
     const state = await readState(io, cwd, planFileName);
     const baseSha = state?.preExecutionSha ?? "";
-    const headSha = await getHeadSha(io, workspacePath);
 
     let attempts = persistedRetryState?.finalReview?.attempts ?? 0;
 
     for (let attempt = attempts; attempt < MAX_REVIEW_RETRIES; attempt++) {
+      // Recompute HEAD SHA each iteration so fix-up commits are included
+      const headSha = await getHeadSha(io, workspacePath);
+
       // Build what was implemented
       const taskSummaries = plan.tasks
         .map((t) => `- Task ${t.number}: ${t.title}`)
@@ -1222,7 +1232,8 @@ export class PlanExecutionEngine {
         }));
 
         // Dispatch fix-up work with findings before re-review
-        const fixupPrompt = `Fix the following code review findings:\n\n${summary.rawOutput}\n\nAddress all critical and important issues.`;
+        const contextSection = response.context ? `\n\n## Additional Guidance\n\n${response.context}` : "";
+        const fixupPrompt = `Fix the following code review findings:\n\n${summary.rawOutput}\n\nAddress all critical and important issues.${contextSection}`;
         const fixupConfig: SubagentConfig = {
           agent: "implementer",
           taskNumber: 0,
@@ -1256,8 +1267,10 @@ export class PlanExecutionEngine {
       }
     }
 
-    // Exhausted
-    return true;
+    // Exhausted — all review retries used without accept/skip.
+    // Report failure so the engine returns "stopped" rather than "completed".
+    await this.persistStoppedState(planFileName, waves.length, "Final review retries exhausted");
+    return false;
   }
 
   /**
