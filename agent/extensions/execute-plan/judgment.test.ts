@@ -11,13 +11,20 @@ import {
 
 // ── Mock ExtensionAPI ──────────────────────────────────────────────────
 
+interface SentMessage {
+  customType: string;
+  content: Array<{ type: string; text?: string }> | string;
+  display: boolean;
+  details?: unknown;
+}
+
 function makeMockPI() {
-  const messages: string[] = [];
+  const messages: SentMessage[] = [];
   let registeredToolHandler: ((params: Record<string, unknown>) => Promise<unknown>) | null = null;
 
   const mockPI = {
-    sendUserMessage: (content: string) => {
-      messages.push(content);
+    sendMessage: (message: SentMessage) => {
+      messages.push(message);
     },
     registerTool: (_tool: unknown) => {
       // Capture execute handler for testing tool invocations
@@ -32,7 +39,7 @@ function makeMockPI() {
       return registeredToolHandler(params);
     },
   } as unknown as ExtensionAPI & {
-    getMessages: () => string[];
+    getMessages: () => SentMessage[];
     invokeRegisteredTool: (params: Record<string, unknown>) => Promise<unknown>;
   };
 
@@ -160,9 +167,9 @@ test("setResolver(null) clears the pending resolver", async () => {
 
 // ── sendJudgmentRequest tests ──────────────────────────────────────────
 
-test("sendJudgmentRequest calls sendUserMessage for 'blocked' request", () => {
+test("sendJudgmentRequest calls sendMessage for 'blocked' request", () => {
   const mockPI = makeMockPI();
-  const msgs = (mockPI as unknown as { getMessages: () => string[] }).getMessages();
+  const msgs = (mockPI as unknown as { getMessages: () => SentMessage[] }).getMessages();
 
   const request: JudgmentRequest = {
     type: "blocked",
@@ -175,15 +182,18 @@ test("sendJudgmentRequest calls sendUserMessage for 'blocked' request", () => {
   sendJudgmentRequest(mockPI as unknown as ExtensionAPI, request);
 
   assert.equal(msgs.length, 1);
-  const msg = msgs[0];
-  assert.ok(msg.includes("blocked") || msg.includes("BLOCKED"), `Expected message to mention 'blocked', got: ${msg}`);
-  assert.ok(msg.includes("3") || msg.includes("task"), `Expected message to mention task number 3, got: ${msg}`);
-  assert.ok(msg.includes("Cannot find the config file"), `Expected message to include blocker text, got: ${msg}`);
+  const sent = msgs[0];
+  assert.equal(sent.customType, "execute-plan-judgment");
+  assert.equal(sent.display, true);
+  const textContent = Array.isArray(sent.content) ? sent.content.map((c) => c.text ?? "").join("") : String(sent.content);
+  assert.ok(textContent.includes("blocked") || textContent.includes("BLOCKED"), `Expected message to mention 'blocked', got: ${textContent}`);
+  assert.ok(textContent.includes("3") || textContent.includes("task"), `Expected message to mention task number 3, got: ${textContent}`);
+  assert.ok(textContent.includes("Cannot find the config file"), `Expected message to include blocker text, got: ${textContent}`);
 });
 
-test("sendJudgmentRequest calls sendUserMessage for 'code_review' request", () => {
+test("sendJudgmentRequest calls sendMessage for 'code_review' request", () => {
   const mockPI = makeMockPI();
-  const msgs = (mockPI as unknown as { getMessages: () => string[] }).getMessages();
+  const msgs = (mockPI as unknown as { getMessages: () => SentMessage[] }).getMessages();
 
   const review: CodeReviewSummary = {
     findings: [
@@ -205,14 +215,17 @@ test("sendJudgmentRequest calls sendUserMessage for 'code_review' request", () =
   sendJudgmentRequest(mockPI as unknown as ExtensionAPI, request);
 
   assert.equal(msgs.length, 1);
-  const msg = msgs[0];
+  const sent = msgs[0];
+  assert.equal(sent.customType, "execute-plan-judgment");
+  assert.equal(sent.display, true);
+  const textContent = Array.isArray(sent.content) ? sent.content.map((c) => c.text ?? "").join("") : String(sent.content);
   assert.ok(
-    msg.includes("code_review") || msg.includes("code review") || msg.includes("CODE REVIEW"),
-    `Expected message to mention code review, got: ${msg}`,
+    textContent.includes("code_review") || textContent.includes("code review") || textContent.includes("CODE REVIEW"),
+    `Expected message to mention code review, got: ${textContent}`,
   );
   assert.ok(
-    msg.includes("Memory leak") || msg.includes("critical"),
-    `Expected message to include finding details, got: ${msg}`,
+    textContent.includes("Memory leak") || textContent.includes("critical"),
+    `Expected message to include finding details, got: ${textContent}`,
   );
 });
 

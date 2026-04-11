@@ -8,7 +8,7 @@
  *   current pending resolver, enabling clean separation between tool
  *   registration (done once at startup) and per-request Promise lifecycle.
  *
- * - `sendJudgmentRequest`: Sends a user message via `pi.sendUserMessage()`
+ * - `sendJudgmentRequest`: Sends a custom message via `pi.sendMessage()`
  *   describing the judgment request, varying content by request type.
  *
  * - `createJudgmentBridge`: Creates and manages the Promise lifecycle for
@@ -106,7 +106,7 @@ export function registerJudgmentTool(
 // ── sendJudgmentRequest ───────────────────────────────────────────────
 
 /**
- * Send a user message to the agent describing a judgment request.
+ * Send a custom message to the agent describing a judgment request.
  * Content varies by judgment type to give the agent appropriate context.
  */
 export function sendJudgmentRequest(
@@ -114,7 +114,12 @@ export function sendJudgmentRequest(
   request: JudgmentRequest,
 ): void {
   const content = buildJudgmentMessage(request);
-  pi.sendUserMessage(content);
+  pi.sendMessage({
+    customType: "execute-plan-judgment",
+    content: [{ type: "text", text: content }],
+    display: true,
+    details: { request },
+  });
 }
 
 function buildJudgmentMessage(request: JudgmentRequest): string {
