@@ -18,7 +18,7 @@ import type {
   SubagentResult,
   CodeReviewSummary,
 } from "./types.ts";
-import { PlanExecutionEngine } from "./engine.ts";
+import { PlanExecutionEngine, parseCodeReviewOutput } from "./engine.ts";
 
 // ── Minimal valid plan markdown ─────────────────────────────────────
 
@@ -400,16 +400,14 @@ describe("PlanExecutionEngine", () => {
 
       const engine = new PlanExecutionEngine(io, TEST_CWD, TEST_AGENT_DIR);
 
-      await assert.rejects(
-        () => engine.execute(PLAN_PATH, callbacks),
-        /main.*branch|cancel|abort|confirm/i,
-      );
+      // Should complete without error (clean early exit)
+      await engine.execute(PLAN_PATH, callbacks);
 
       assert.ok(callbacks.calls["confirmMainBranch"], "confirmMainBranch should be called");
 
       // State should NOT have been created since confirm returned false
       const stateFilePath = join(TEST_CWD, ".pi/plan-runs", PLAN_FILE_NAME + ".state.json");
-      assert.ok(!io.files.has(stateFilePath), "State file should not exist when confirmMainBranch returns false");
+      assert.equal(await io.fileExists(stateFilePath), false, "State file should not exist when confirmMainBranch returns false");
     });
   });
 
@@ -546,23 +544,25 @@ describe("PlanExecutionEngine", () => {
     it("writes preExecutionSha to state before first wave", async () => {
       const io = createMockIO();
       seedFiles(io);
+
+      // Track state writes to verify preExecutionSha was written
+      const stateWrites: RunState[] = [];
+      const originalWriteFile = io.writeFile.bind(io);
+      (io as any).writeFile = async (path: string, content: string) => {
+        if (path.includes(".state.json")) {
+          try { stateWrites.push(JSON.parse(content)); } catch { /* ignore */ }
+        }
+        return originalWriteFile(path, content);
+      };
+
       const callbacks = createMockCallbacks();
       const engine = new PlanExecutionEngine(io, TEST_CWD, TEST_AGENT_DIR);
 
       await engine.execute(PLAN_PATH, callbacks);
 
-      // Read state file and check preExecutionSha
-      const stateFilePath = join(TEST_CWD, ".pi/plan-runs", PLAN_FILE_NAME + ".state.json");
-      // State should have been deleted at completion, but preExecutionSha should have been
-      // written during execution. Since state is deleted at end, we check via progress events
-      // or we check that wave_started fired (which means state was created with SHA).
-      // Actually, state is deleted at completion. Let's verify via the progress events
-      // that wave_started was emitted, meaning execution proceeded past SHA recording.
-      const progressCalls = callbacks.calls["onProgress"] ?? [];
-      const waveStarted = progressCalls.filter(
-        (c: any[]) => c[0].type === "wave_started",
-      );
-      assert.ok(waveStarted.length > 0, "Waves should have started (meaning preExecutionSha was written)");
+      // Verify preExecutionSha was actually written to the state file
+      const hasPreExecSha = stateWrites.some((s) => s.preExecutionSha === "abc123def456");
+      assert.ok(hasPreExecSha, "preExecutionSha should be written to state file with the HEAD SHA");
     });
   });
 
@@ -749,6 +749,16 @@ describe("PlanExecutionEngine", () => {
         requestResumeAction: async () => "continue",
       });
 
+      // Track state writes to verify persisted state is preserved
+      const stateWrites: RunState[] = [];
+      const originalWriteFile = io.writeFile.bind(io);
+      (io as any).writeFile = async (path: string, content: string) => {
+        if (path.includes(".state.json")) {
+          try { stateWrites.push(JSON.parse(content)); } catch { /* ignore */ }
+        }
+        return originalWriteFile(path, content);
+      };
+
       const engine = new PlanExecutionEngine(io, TEST_CWD, TEST_AGENT_DIR);
       await engine.execute(PLAN_PATH, callbacks);
 
@@ -764,6 +774,22 @@ describe("PlanExecutionEngine", () => {
         (c: any[]) => c[0].wave === 1,
       );
       assert.equal(wave1Started.length, 0, "Wave 1 should not be started again (already done)");
+
+      // Verify persisted retry counters were NOT overwritten with empty state.
+      // The first state write after resume should still contain the persisted retryState.
+      // (If createState was wrongly called, it would zero out retryState.)
+      const firstWriteWithRetry = stateWrites.find(
+        (s) => s.retryState && Object.keys(s.retryState.tasks).length > 0,
+      );
+      assert.ok(
+        firstWriteWithRetry,
+        "Persisted retryState.tasks should be preserved in state file during resume (not overwritten)",
+      );
+      assert.equal(
+        firstWriteWithRetry!.retryState.tasks["2"]?.attempts,
+        1,
+        "Persisted retry count for task 2 should be preserved",
+      );
     });
   });
 
@@ -842,11 +868,11 @@ describe("PlanExecutionEngine", () => {
       // At some point during execution, lock should have been released (lock: null)
       // before state deletion. Since state is deleted, we check the write log.
       const lockReleased = stateWrites.some((s) => s.lock === null && s.status === "running");
-      // The lock should be released at some point
       assert.ok(
         stateWrites.length > 0,
         "State should have been written at least once during execution",
       );
+      assert.equal(lockReleased, true, "Lock should be released (lock: null) before state deletion");
     });
 
     it("releases lock even when execution throws", async () => {
@@ -906,6 +932,43 @@ describe("PlanExecutionEngine", () => {
       assert.ok(
         !callbacks.calls["confirmMainBranch"],
         "confirmMainBranch should NOT be called when off main branch",
+      );
+    });
+  });
+
+  // engine does not call requestWorktreeSetup when on main but already in a worktree
+  describe("in-worktree behavior", () => {
+    it("does not call requestWorktreeSetup when on main but already in a worktree", async () => {
+      // Simulate: on main branch AND inside a worktree (--git-dir returns a path containing .git/worktrees/)
+      const io = createMockIO(undefined, async (cmd, args, _cwd) => {
+        if (cmd === "git" && args[0] === "rev-parse" && args.includes("--git-dir")) {
+          // In a worktree, --git-dir returns a path like /repo/.git/worktrees/my-branch
+          return { stdout: "/repo/.git/worktrees/my-branch\n", stderr: "", exitCode: 0 };
+        }
+        if (cmd === "git" && args[0] === "rev-parse" && args.includes("--abbrev-ref")) {
+          return { stdout: "main\n", stderr: "", exitCode: 0 };
+        }
+        if (cmd === "git" && args[0] === "rev-parse" && args.includes("HEAD")) {
+          return { stdout: "abc123def456\n", stderr: "", exitCode: 0 };
+        }
+        if (cmd === "git" && args[0] === "check-ignore") {
+          return { stdout: "", stderr: "", exitCode: 0 };
+        }
+        if (cmd === "kill" && args[0] === "-0") {
+          return { stdout: "", stderr: "No such process", exitCode: 1 };
+        }
+        return { stdout: "", stderr: "", exitCode: 0 };
+      });
+      seedFiles(io);
+
+      const callbacks = createMockCallbacks();
+      const engine = new PlanExecutionEngine(io, TEST_CWD, TEST_AGENT_DIR);
+
+      await engine.execute(PLAN_PATH, callbacks);
+
+      assert.ok(
+        !callbacks.calls["requestWorktreeSetup"],
+        "requestWorktreeSetup should NOT be called when already in a worktree (even on main)",
       );
     });
   });
@@ -1320,6 +1383,19 @@ describe("PlanExecutionEngine", () => {
         (c: any[]) => c[0].type === "execution_completed",
       );
       assert.ok(completed.length > 0, "Execution should complete after accept");
+
+      // Should have emitted a task_progress event with the concerns
+      const concernEvents = progressCalls.filter(
+        (c: any[]) =>
+          c[0].type === "task_progress" &&
+          typeof c[0].status === "string" &&
+          c[0].status.includes("Accepted with concerns"),
+      );
+      assert.ok(concernEvents.length > 0, "Should emit task_progress with concerns on accept");
+      assert.ok(
+        concernEvents[0][0].status.includes("Code could be cleaner"),
+        "Concern message should be included in the progress event",
+      );
     });
 
     // (j) JudgmentResponse "escalate": calls callbacks.requestFailureAction
@@ -1813,5 +1889,140 @@ Low risk.
       );
       assert.equal(waveCompleted.length, 0, "Should NOT commit partial wave on task cancellation");
     });
+  });
+
+  describe("progress forwarding during retries", () => {
+    it("emits task_progress events from retried dispatch via onProgress", async () => {
+      const io = createMockIO();
+      seedFiles(io);
+
+      let task1Dispatches = 0;
+      io.dispatchSubagent = async (config, options) => {
+        if (config.taskNumber === 1) {
+          task1Dispatches++;
+          if (task1Dispatches === 1) {
+            return {
+              taskNumber: 1,
+              status: "BLOCKED" as const,
+              output: "blocked",
+              concerns: null,
+              needs: null,
+              blocker: "Missing dep",
+              filesChanged: [],
+            };
+          }
+          // On retry, fire onProgress to simulate live worker status
+          options?.onProgress?.(config.taskNumber, "working on retry...");
+        }
+        return {
+          taskNumber: config.taskNumber,
+          status: "DONE" as const,
+          output: "done",
+          concerns: null, needs: null, blocker: null,
+          filesChanged: [],
+        };
+      };
+
+      const callbacks = createMockCallbacks({
+        requestJudgment: async () => ({ action: "retry" as const }),
+      });
+
+      const engine = new PlanExecutionEngine(io, TEST_CWD, TEST_AGENT_DIR);
+      await engine.execute(PLAN_PATH, callbacks);
+
+      // Verify task_progress events were emitted from the retry dispatch
+      const progressCalls = callbacks.calls["onProgress"] ?? [];
+      const taskProgressEvents = progressCalls.filter(
+        (c: any[]) => c[0].type === "task_progress" && c[0].status === "working on retry...",
+      );
+      assert.ok(
+        taskProgressEvents.length > 0,
+        "Should emit task_progress event from retried dispatch onProgress callback",
+      );
+      assert.equal(taskProgressEvents[0][0].taskNumber, 1);
+      assert.ok(taskProgressEvents[0][0].wave >= 1, "Should include wave number");
+    });
+  });
+});
+
+// ── parseCodeReviewOutput unit tests ──────────────────────────────────
+
+describe("parseCodeReviewOutput", () => {
+  it("parses findings grouped by severity", () => {
+    const input = [
+      "## Critical",
+      "### SQL Injection",
+      "User input is not sanitized in query builder.",
+      "",
+      "### XSS Vulnerability",
+      "HTML output is not escaped.",
+      "",
+      "## Important",
+      "### Missing Error Handling",
+      "No try/catch around async operations.",
+      "",
+      "## Minor",
+      "### Inconsistent Naming",
+      "Some variables use camelCase, others use snake_case.",
+      "",
+      "## Strengths",
+      "- Good test coverage",
+      "- Clear module separation",
+      "",
+      "## Recommendations",
+      "- Add input validation",
+      "- Use parameterized queries",
+      "",
+      "## Overall",
+      "The code needs security improvements but has a solid foundation.",
+    ].join("\n");
+
+    const summary = parseCodeReviewOutput(input);
+
+    // Findings count
+    assert.equal(summary.findings.length, 4, "Should have 4 findings total");
+
+    // Severity grouping
+    const critical = summary.findings.filter((f) => f.severity === "critical");
+    const important = summary.findings.filter((f) => f.severity === "important");
+    const minor = summary.findings.filter((f) => f.severity === "minor");
+    assert.equal(critical.length, 2, "Should have 2 critical findings");
+    assert.equal(important.length, 1, "Should have 1 important finding");
+    assert.equal(minor.length, 1, "Should have 1 minor finding");
+
+    // Finding titles
+    assert.equal(critical[0].title, "SQL Injection");
+    assert.equal(critical[1].title, "XSS Vulnerability");
+    assert.equal(important[0].title, "Missing Error Handling");
+    assert.equal(minor[0].title, "Inconsistent Naming");
+
+    // Finding details
+    assert.ok(critical[0].details.includes("User input is not sanitized"));
+
+    // Strengths
+    assert.equal(summary.strengths.length, 2);
+    assert.ok(summary.strengths[0].includes("Good test coverage"));
+    assert.ok(summary.strengths[1].includes("Clear module separation"));
+
+    // Recommendations
+    assert.equal(summary.recommendations.length, 2);
+    assert.ok(summary.recommendations[0].includes("Add input validation"));
+    assert.ok(summary.recommendations[1].includes("Use parameterized queries"));
+
+    // Overall assessment
+    assert.ok(summary.overallAssessment.includes("security improvements"));
+    assert.ok(summary.overallAssessment.includes("solid foundation"));
+
+    // Raw output preserved
+    assert.equal(summary.rawOutput, input);
+  });
+
+  it("returns empty summary for output with no recognized sections", () => {
+    const summary = parseCodeReviewOutput("Nothing structured here.");
+
+    assert.equal(summary.findings.length, 0);
+    assert.equal(summary.strengths.length, 0);
+    assert.equal(summary.recommendations.length, 0);
+    assert.equal(summary.overallAssessment, "");
   });
 });
