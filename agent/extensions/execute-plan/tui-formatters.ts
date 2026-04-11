@@ -74,11 +74,11 @@ export function formatResumeStatus(state: RunState): ResumeStatusDisplay {
   // Status line
   let statusLine: string;
   if (state.status === "running") {
-    const pid = state.lock?.pid ?? "unknown";
-    statusLine = `Running (pid ${pid})`;
+    statusLine = `Previous execution did not exit cleanly.`;
   } else if (state.status === "stopped") {
     const stoppedAt = state.stoppedAt ? new Date(state.stoppedAt).toLocaleString() : "unknown time";
-    statusLine = `Stopped at ${stoppedAt}`;
+    const granularity = state.stopGranularity ? ` (after ${state.stopGranularity})` : "";
+    statusLine = `Stopped at ${stoppedAt}${granularity}`;
   } else {
     statusLine = `Completed`;
   }

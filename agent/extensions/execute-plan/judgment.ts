@@ -78,7 +78,7 @@ export function registerJudgmentTool(
         }),
       ),
     }),
-    execute: async (_toolCallId, params) => {
+    execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
       const response: JudgmentResponse = {
         action: params.action as JudgmentAction,
         ...(params.context !== undefined && { context: params.context as string }),
@@ -88,17 +88,16 @@ export function registerJudgmentTool(
       const resolver = getResolver();
       if (resolver === null) {
         return {
-          error:
-            "No pending judgment request. The execute_plan_judgment tool should only be called in response to a judgment request from the execute-plan engine.",
+          content: [{ type: "text" as const, text: "No pending judgment request. The execute_plan_judgment tool should only be called in response to a judgment request from the execute-plan engine." }],
+          details: { error: true },
         };
       }
 
       resolver(response);
 
       return {
-        success: true,
-        action: response.action,
-        message: `Judgment accepted: ${response.action}`,
+        content: [{ type: "text" as const, text: `Judgment recorded: ${response.action}` }],
+        details: { action: response.action },
       };
     },
   });

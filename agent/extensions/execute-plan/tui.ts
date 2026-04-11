@@ -42,7 +42,10 @@ import {
   formatResumeStatus,
   formatCodeReviewSummary,
   formatFailureContext,
+  formatWaveProgress,
 } from "./tui-formatters.ts";
+
+import { computeWaves } from "../../lib/execute-plan/wave-computation.ts";
 
 // ── Helpers ───────────────────────────────────────────────────────────
 
@@ -113,7 +116,8 @@ export class SettingsConfirmationComponent extends Container {
       new Text(theme.fg("accent", theme.bold(`Plan: ${plan.fileName}`)), 1, 0),
     );
     this.addChild(new Text(theme.fg("text", plan.header.goal), 1, 0));
-    this.addChild(new Text(theme.fg("muted", `${plan.tasks.length} tasks`), 1, 0));
+    const waveCount = computeWaves(plan.tasks, plan.dependencies).length;
+    this.addChild(new Text(theme.fg("muted", `${plan.tasks.length} tasks, ${waveCount} waves`), 1, 0));
     this.addChild(new Spacer(1));
 
     this.addChild(new Text(theme.fg("accent", theme.bold("Settings:")), 1, 0));
@@ -504,25 +508,11 @@ export class WaveProgressWidget extends Container {
 
   private rebuildContent(): void {
     this.contentContainer.clear();
-    const theme = this.theme;
+    const progressText = formatWaveProgress(this.waveNumber, this.totalWaves, this.taskStatuses);
 
-    this.contentContainer.addChild(
-      new Text(
-        theme.fg("accent", theme.bold(`Wave ${this.waveNumber}/${this.totalWaves}`)),
-        0,
-        0,
-      ),
-    );
-
-    for (const [taskNumber, status] of this.taskStatuses) {
-      const statusColor =
-        status === "done" ? "success" : status === "in-progress" ? "accent" : "muted";
+    for (const line of progressText.split("\n")) {
       this.contentContainer.addChild(
-        new Text(
-          `  ${theme.fg("muted", `Task ${taskNumber}:`)} ${theme.fg(statusColor, status)}`,
-          0,
-          0,
-        ),
+        new Text(line, 0, 0),
       );
     }
   }

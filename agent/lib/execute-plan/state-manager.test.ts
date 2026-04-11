@@ -728,4 +728,28 @@ describe("findActiveRunInRepo", () => {
     const result = await findActiveRunInRepo(io, TEST_CWD);
     assert.equal(result, null);
   });
+
+  it("ignores completed state with a live PID lock", async () => {
+    const io = createMockIO();
+    await createState(io, TEST_CWD, "plan-a", TEST_SETTINGS, TEST_WORKSPACE);
+
+    // Set status to completed but leave a live lock (simulates crash after completion)
+    await updateState(io, TEST_CWD, "plan-a", (s) => ({
+      ...s,
+      status: "completed" as const,
+      lock: { pid: 77777, session: "active-session", acquiredAt: new Date().toISOString() },
+    }));
+
+    // Override exec to simulate live process
+    const liveIo = createMockIO(io.files);
+    (liveIo as any).exec = async (cmd: string, args: string[]) => {
+      if (cmd === "kill" && args[0] === "-0") {
+        return { stdout: "", stderr: "", exitCode: 0 }; // process is live
+      }
+      return { stdout: "", stderr: "", exitCode: 0 };
+    };
+
+    const result = await findActiveRunInRepo(liveIo, TEST_CWD);
+    assert.equal(result, null, "Should not return completed state even with live PID lock");
+  });
 });

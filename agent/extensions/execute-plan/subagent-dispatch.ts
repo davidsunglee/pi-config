@@ -321,7 +321,11 @@ export async function dispatchWorker(
           wasAborted = true;
           proc.kill("SIGTERM");
           setTimeout(() => {
-            if (!proc.killed) proc.kill("SIGKILL");
+            try {
+              proc.kill("SIGKILL");
+            } catch {
+              // Process already exited
+            }
           }, 5000);
         };
         if (signal.aborted) {

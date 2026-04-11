@@ -185,13 +185,13 @@ test("formatResumeStatus statusLine reflects stopped status", () => {
   assert.match(result.statusLine.toLowerCase(), /stop/);
 });
 
-test("formatResumeStatus statusLine reflects running status", () => {
+test("formatResumeStatus statusLine reflects running (crashed) status", () => {
   const state = makeRunState({
     status: "running",
     lock: { pid: 1234, session: "sess-abc", acquiredAt: "2026-04-10T10:30:00.000Z" },
   });
   const result = formatResumeStatus(state);
-  assert.match(result.statusLine.toLowerCase(), /running/);
+  assert.match(result.statusLine.toLowerCase(), /did not exit cleanly/);
 });
 
 test("formatResumeStatus progressLine contains wave information", () => {
