@@ -86,13 +86,10 @@ function buildCommitMessage(
 }
 
 /**
- * Resets the last wave commit with a two-step process:
- * 1. git reset --soft HEAD~1  (undo commit, keep changes staged)
- * 2. git checkout -- .        (discard all working tree changes)
+ * Resets the last wave commit, discarding all changes from that commit.
  */
 export async function resetWaveCommit(io: ExecutionIO, cwd: string): Promise<void> {
-  await io.exec("git", ["reset", "--soft", "HEAD~1"], cwd);
-  await io.exec("git", ["checkout", "--", "."], cwd);
+  await io.exec("git", ["reset", "--hard", "HEAD~1"], cwd);
 }
 
 /** Returns true if the given SHA exists in the repository. */

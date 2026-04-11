@@ -283,8 +283,8 @@ describe("commitWave", () => {
 });
 
 describe("resetWaveCommit", () => {
-  // (g) does two-step reset: soft reset then checkout
-  it("performs git reset --soft HEAD~1 followed by git checkout -- .", async () => {
+  // (g) does hard reset to discard the last commit
+  it("performs git reset --hard HEAD~1", async () => {
     const calls: Array<{ cmd: string; args: string[] }> = [];
     const io = {
       exec: async (cmd: string, args: string[], _cwd: string) => {
@@ -295,14 +295,11 @@ describe("resetWaveCommit", () => {
 
     await resetWaveCommit(io, TEST_CWD);
 
-    assert.equal(calls.length, 2, "Should make exactly 2 git calls");
+    assert.equal(calls.length, 1, "Should make exactly 1 git call");
 
-    const [first, second] = calls;
+    const [first] = calls;
     assert.equal(first.cmd, "git");
-    assert.deepEqual(first.args, ["reset", "--soft", "HEAD~1"]);
-
-    assert.equal(second.cmd, "git");
-    assert.deepEqual(second.args, ["checkout", "--", "."]);
+    assert.deepEqual(first.args, ["reset", "--hard", "HEAD~1"]);
   });
 });
 
