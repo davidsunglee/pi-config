@@ -1764,7 +1764,8 @@ export default function todosExtension(pi: ExtensionAPI) {
 				return new Text(text, 0, 0);
 			}
 
-			let text = renderTodoDetail(theme, details.todo, expanded);
+			const singleDetails = details as Extract<TodoToolDetails, { todo: TodoRecord }>;
+			let text = renderTodoDetail(theme, singleDetails.todo, expanded);
 			const actionLabel =
 				details.action === "create"
 					? "Created"
