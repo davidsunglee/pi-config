@@ -257,7 +257,7 @@ async function handleExecutePlan(
     },
 
     async confirmMainBranch(branch) {
-      if (!ctx.hasUI) return false;
+      if (!ctx.hasUI) return true;
 
       return ctx.ui.custom<boolean>((tui, theme, keybindings, done) => {
         return new MainBranchWarningComponent(tui, theme, keybindings, branch, done);

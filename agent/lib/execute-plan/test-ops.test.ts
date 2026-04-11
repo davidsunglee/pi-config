@@ -35,7 +35,7 @@ describe("captureBaseline", () => {
     const io = createMockIO(
       new Map([
         [
-          "npm test",
+          "sh -c npm test",
           {
             stdout: "ok 1 - my test\nok 2 - another test\n",
             stderr: "",
@@ -55,7 +55,7 @@ describe("captureBaseline", () => {
     const io = createMockIO(
       new Map([
         [
-          "npm test",
+          "sh -c npm test",
           {
             stdout:
               "ok 1 - passing test\nnot ok 2 - failing test\nnot ok 3 - another failure\n",
@@ -78,7 +78,7 @@ describe("captureBaseline", () => {
     const io = createMockIO(
       new Map([
         [
-          "cargo test",
+          "sh -c cargo test",
           {
             stdout: "running 3 tests\ntest result: ok. 3 passed",
             stderr: "",
@@ -99,7 +99,7 @@ describe("runTests", () => {
     const io = createMockIO(
       new Map([
         [
-          "go test ./...",
+          "sh -c go test ./...",
           {
             stdout: "ok  \tgithub.com/foo/bar\t0.123s\n",
             stderr: "",
@@ -192,6 +192,60 @@ describe("compareResults", () => {
     const result = compareResults(baseline, current);
     assert.equal(result.passed, true);
     assert.deepEqual(result.newFailures, []);
+  });
+});
+
+// ── shell-safe execution ─────────────────────────────────────────────
+
+describe("captureBaseline shell execution", () => {
+  it("handles compound commands with pipes", async () => {
+    const io = createMockIO(
+      new Map([
+        [
+          "sh -c npm test && echo done",
+          {
+            stdout: "ok 1 - test\ndone\n",
+            stderr: "",
+            exitCode: 0,
+          },
+        ],
+      ]),
+    );
+    const result = await captureBaseline(io, TEST_CWD, "npm test && echo done");
+    assert.equal(result.exitCode, 0);
+    assert.ok(result.output.includes("done"));
+  });
+
+  it("handles commands with quoted arguments via shell", async () => {
+    const io = createMockIO(
+      new Map([
+        [
+          'sh -c pytest -k "test_important" --verbose',
+          {
+            stdout: "1 passed\n",
+            stderr: "",
+            exitCode: 0,
+          },
+        ],
+      ]),
+    );
+    const result = await captureBaseline(io, TEST_CWD, 'pytest -k "test_important" --verbose');
+    assert.equal(result.exitCode, 0);
+  });
+
+  it("uses sh -c to execute commands", async () => {
+    const calls: Array<{ cmd: string; args: string[] }> = [];
+    const io = {
+      exec: async (cmd: string, args: string[], _cwd: string) => {
+        calls.push({ cmd, args: [...args] });
+        return { stdout: "ok", stderr: "", exitCode: 0 };
+      },
+    } as unknown as ExecutionIO;
+
+    await captureBaseline(io, TEST_CWD, "npm test | grep pass");
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].cmd, "sh");
+    assert.deepEqual(calls[0].args, ["-c", "npm test | grep pass"]);
   });
 });
 

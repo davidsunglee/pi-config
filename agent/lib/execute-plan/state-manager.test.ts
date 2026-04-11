@@ -606,6 +606,45 @@ describe("validateResume", () => {
     assert.ok(result.issues.some(i => /branch/i.test(i)), "Issue should mention branch");
   });
 
+  it("checks git state at workspace path, not cwd, when they differ", async () => {
+    const io = createMockIO();
+    const state = await createState(io, TEST_CWD, PLAN_FILE, TEST_SETTINGS, TEST_WORKSPACE);
+    const stateWithSha = await updateState(io, TEST_CWD, PLAN_FILE, (s) => ({
+      ...s,
+      preExecutionSha: "abc123",
+    }));
+
+    // cwd is different from workspace path
+    const callerCwd = "/different/cwd";
+
+    // Track which cwd is passed to exec
+    const execCwds: string[] = [];
+    const checkIo = createMockIO(io.files);
+    (checkIo as any).exec = async (cmd: string, args: string[], cwd: string) => {
+      execCwds.push(cwd);
+      if (cmd === "git" && args.includes("--abbrev-ref")) {
+        return { stdout: TEST_WORKSPACE.branch + "\n", stderr: "", exitCode: 0 };
+      }
+      if (cmd === "git" && args.includes("rev-parse") && args.includes("HEAD")) {
+        return { stdout: "abc123\n", stderr: "", exitCode: 0 };
+      }
+      return { stdout: "", stderr: "", exitCode: 0 };
+    };
+    (checkIo as any).fileExists = async (path: string) => {
+      return path === TEST_WORKSPACE.path || io.files.has(path);
+    };
+
+    const result = await validateResume(checkIo, stateWithSha, callerCwd);
+    assert.equal(result.valid, true);
+    assert.deepEqual(result.issues, []);
+
+    // All git exec calls should have used workspace path, NOT callerCwd
+    for (const cwd of execCwds) {
+      assert.equal(cwd, TEST_WORKSPACE.path, "Git commands should run against workspace path, not caller cwd");
+    }
+    assert.ok(execCwds.length > 0, "Should have made at least one git exec call");
+  });
+
   it("reports issue when preExecutionSha does not match HEAD", async () => {
     const io = createMockIO();
     await createState(io, TEST_CWD, PLAN_FILE, TEST_SETTINGS, TEST_WORKSPACE);

@@ -142,8 +142,8 @@ function createMockIO(
     if (cmd === "kill" && args[0] === "-0") {
       return { stdout: "", stderr: "No such process", exitCode: 1 };
     }
-    // npm test
-    if (cmd === "npm" && args[0] === "test") {
+    // npm test (executed via sh -c)
+    if (cmd === "sh" && args[0] === "-c" && args[1]?.startsWith("npm test")) {
       return { stdout: "All tests passed", stderr: "", exitCode: 0 };
     }
     return { stdout: "", stderr: "", exitCode: 0 };
@@ -295,7 +295,7 @@ function onMainBranchHandler(): MockExecHandler {
     if (cmd === "kill" && args[0] === "-0") {
       return { stdout: "", stderr: "No such process", exitCode: 1 };
     }
-    if (cmd === "npm") {
+    if (cmd === "sh" && args[0] === "-c" && args[1]?.startsWith("npm")) {
       return { stdout: "All tests passed", stderr: "", exitCode: 0 };
     }
     return { stdout: "", stderr: "", exitCode: 0 };
@@ -1060,7 +1060,7 @@ describe("PlanExecutionEngine", () => {
       const testRuns: Array<{ cmd: string; args: string[] }> = [];
       const origExec = io.exec.bind(io);
       io.exec = async (cmd: string, args: string[], cwd: string) => {
-        if (cmd === "npm" && args[0] === "test") {
+        if (cmd === "sh" && args[0] === "-c" && args[1]?.startsWith("npm test")) {
           testRuns.push({ cmd, args: [...args] });
         }
         return origExec(cmd, args, cwd);
@@ -1109,7 +1109,7 @@ describe("PlanExecutionEngine", () => {
         if (cmd === "kill" && args[0] === "-0") {
           return { stdout: "", stderr: "No such process", exitCode: 1 };
         }
-        if (cmd === "npm" && args[0] === "test") {
+        if (cmd === "sh" && args[0] === "-c" && args[1]?.startsWith("npm test")) {
           testRunCount++;
           // First call = baseline (passes), subsequent = regression
           if (testRunCount === 1) {
@@ -2100,7 +2100,7 @@ Low risk.
         if (cmd === "kill" && args[0] === "-0") {
           return { stdout: "", stderr: "No such process", exitCode: 1 };
         }
-        if (cmd === "npm" && args[0] === "test") {
+        if (cmd === "sh" && args[0] === "-c" && args[1]?.startsWith("npm test")) {
           testRunCount++;
           // First call = baseline (passes), subsequent = regression then pass
           if (testRunCount === 1) {
@@ -2241,5 +2241,515 @@ describe("parseCodeReviewOutput", () => {
     assert.equal(summary.strengths.length, 0);
     assert.equal(summary.recommendations.length, 0);
     assert.equal(summary.overallAssessment, "");
+  });
+
+  it("parses template-compatible format with ### Issues and #### severity subsections", () => {
+    const input = [
+      "### Issues",
+      "",
+      "#### Critical",
+      "",
+      "1. **SQL Injection** - User input is not sanitized",
+      "   Details about the SQL injection issue.",
+      "",
+      "2. **XSS Vulnerability** - HTML output is not escaped",
+      "",
+      "#### Important (Should Fix)",
+      "",
+      "1. **Missing Error Handling** - No try/catch around async operations",
+      "",
+      "#### Minor (Nice to Have)",
+      "",
+      "1. **Inconsistent Naming** - Some variables use camelCase, others snake_case",
+      "",
+      "### Strengths",
+      "",
+      "1. Good test coverage",
+      "2. Clear module separation",
+      "",
+      "### Recommendations",
+      "",
+      "1. Add input validation",
+      "2. Use parameterized queries",
+      "",
+      "### Overall",
+      "The code needs security improvements but has a solid foundation.",
+    ].join("\n");
+
+    const summary = parseCodeReviewOutput(input);
+
+    // Findings count
+    assert.equal(summary.findings.length, 4, "Should have 4 findings total");
+
+    // Severity grouping
+    const critical = summary.findings.filter((f) => f.severity === "critical");
+    const important = summary.findings.filter((f) => f.severity === "important");
+    const minor = summary.findings.filter((f) => f.severity === "minor");
+    assert.equal(critical.length, 2, "Should have 2 critical findings");
+    assert.equal(important.length, 1, "Should have 1 important finding");
+    assert.equal(minor.length, 1, "Should have 1 minor finding");
+
+    // Finding titles
+    assert.equal(critical[0].title, "SQL Injection");
+    assert.equal(critical[1].title, "XSS Vulnerability");
+    assert.equal(important[0].title, "Missing Error Handling");
+    assert.equal(minor[0].title, "Inconsistent Naming");
+
+    // Details captured
+    assert.ok(critical[0].details.includes("Details about the SQL injection") || critical[0].details.includes("User input is not sanitized"));
+
+    // Strengths
+    assert.equal(summary.strengths.length, 2);
+    assert.ok(summary.strengths[0].includes("Good test coverage"));
+    assert.ok(summary.strengths[1].includes("Clear module separation"));
+
+    // Recommendations
+    assert.equal(summary.recommendations.length, 2);
+    assert.ok(summary.recommendations[0].includes("Add input validation"));
+    assert.ok(summary.recommendations[1].includes("Use parameterized queries"));
+
+    // Overall assessment
+    assert.ok(summary.overallAssessment.includes("security improvements"));
+
+    // Raw output preserved
+    assert.equal(summary.rawOutput, input);
+  });
+
+  it("backward-compatible: still parses original ## Critical + ### finding format", () => {
+    const input = [
+      "## Critical",
+      "### Old Style Finding",
+      "Details here.",
+      "",
+      "## Strengths",
+      "- Good coverage",
+    ].join("\n");
+
+    const summary = parseCodeReviewOutput(input);
+    assert.equal(summary.findings.length, 1);
+    assert.equal(summary.findings[0].severity, "critical");
+    assert.equal(summary.findings[0].title, "Old Style Finding");
+    assert.equal(summary.strengths.length, 1);
+    assert.ok(summary.strengths[0].includes("Good coverage"));
+  });
+
+  it("parses numbered findings without bold markers", () => {
+    const input = [
+      "### Issues",
+      "#### Critical",
+      "1. Missing authentication check",
+      "The endpoint has no auth guard.",
+      "",
+    ].join("\n");
+
+    const summary = parseCodeReviewOutput(input);
+    assert.equal(summary.findings.length, 1);
+    assert.equal(summary.findings[0].severity, "critical");
+    assert.equal(summary.findings[0].title, "Missing authentication check");
+  });
+});
+
+// ── Escalate handling tests ─────────────────────────────────────────
+
+describe("escalate judgment in wave-level retry_exhausted", () => {
+  it("escalate at wave retry_exhausted calls requestFailureAction and retry continues", async () => {
+    const io = createMockIO();
+    seedFiles(io);
+
+    // Spec review always fails to force wave retries
+    io.dispatchSubagent = async (config) => {
+      if (config.agent === "spec-reviewer") {
+        return {
+          taskNumber: config.taskNumber,
+          status: "BLOCKED" as const,
+          output: "Spec mismatch",
+          concerns: null, needs: null,
+          blocker: "Spec mismatch",
+          filesChanged: [],
+        };
+      }
+      return {
+        taskNumber: config.taskNumber,
+        status: "DONE" as const,
+        output: "done",
+        concerns: null, needs: null, blocker: null,
+        filesChanged: [],
+      };
+    };
+
+    let judgmentCallCount = 0;
+    let failureActionCalled = false;
+    const callbacks = createMockCallbacks({
+      requestSettings: async () => ({
+        execution: "parallel" as const,
+        tdd: true,
+        finalReview: false,
+        specCheck: true,
+        integrationTest: false,
+        testCommand: null,
+      }),
+      requestJudgment: async (req) => {
+        judgmentCallCount++;
+        if (req.type === "spec_review_failed") {
+          return { action: "retry" as const };
+        }
+        if (req.type === "retry_exhausted") {
+          return { action: "escalate" as const };
+        }
+        return { action: "accept" as const };
+      },
+      requestFailureAction: async (ctx) => {
+        failureActionCalled = true;
+        return "skip";
+      },
+    });
+
+    const engine = new PlanExecutionEngine(io, TEST_CWD, TEST_AGENT_DIR);
+    await engine.execute(PLAN_PATH, callbacks);
+
+    assert.ok(failureActionCalled, "requestFailureAction should be called when wave retry_exhausted escalates");
+  });
+
+  it("escalate at wave retry_exhausted with stop from requestFailureAction persists stopped", async () => {
+    const io = createMockIO();
+    seedFiles(io);
+
+    io.dispatchSubagent = async (config) => {
+      if (config.agent === "spec-reviewer") {
+        return {
+          taskNumber: config.taskNumber,
+          status: "BLOCKED" as const,
+          output: "Spec mismatch",
+          concerns: null, needs: null,
+          blocker: "Spec mismatch",
+          filesChanged: [],
+        };
+      }
+      return {
+        taskNumber: config.taskNumber,
+        status: "DONE" as const,
+        output: "done",
+        concerns: null, needs: null, blocker: null,
+        filesChanged: [],
+      };
+    };
+
+    const stateWrites: RunState[] = [];
+    const origWriteFile = io.writeFile.bind(io);
+    io.writeFile = async (path: string, content: string) => {
+      if (path.includes(".state.json")) {
+        try { stateWrites.push(JSON.parse(content)); } catch { /* ignore */ }
+      }
+      return origWriteFile(path, content);
+    };
+
+    const callbacks = createMockCallbacks({
+      requestSettings: async () => ({
+        execution: "parallel" as const,
+        tdd: true,
+        finalReview: false,
+        specCheck: true,
+        integrationTest: false,
+        testCommand: null,
+      }),
+      requestJudgment: async (req) => {
+        if (req.type === "spec_review_failed") {
+          return { action: "retry" as const };
+        }
+        if (req.type === "retry_exhausted") {
+          return { action: "escalate" as const };
+        }
+        return { action: "accept" as const };
+      },
+      requestFailureAction: async () => "stop",
+    });
+
+    const engine = new PlanExecutionEngine(io, TEST_CWD, TEST_AGENT_DIR);
+    await engine.execute(PLAN_PATH, callbacks);
+
+    const stoppedStates = stateWrites.filter((s) => s.status === "stopped");
+    assert.ok(stoppedStates.length > 0, "Should persist stopped state when escalated and user chooses stop");
+  });
+});
+
+describe("escalate judgment in task-level retry_exhausted", () => {
+  it("escalate at task retry_exhausted calls requestFailureAction", async () => {
+    const io = createMockIO();
+    seedFiles(io);
+
+    // Task 1 is always BLOCKED, forcing retries
+    io.dispatchSubagent = async (config) => {
+      if (config.taskNumber === 1) {
+        return {
+          taskNumber: 1,
+          status: "BLOCKED" as const,
+          output: "blocked",
+          concerns: null, needs: null,
+          blocker: "Fatal error",
+          filesChanged: [],
+        };
+      }
+      return {
+        taskNumber: config.taskNumber,
+        status: "DONE" as const,
+        output: "done",
+        concerns: null, needs: null, blocker: null,
+        filesChanged: [],
+      };
+    };
+
+    let failureActionCalled = false;
+    const callbacks = createMockCallbacks({
+      requestJudgment: async (req) => {
+        if (req.type === "retry_exhausted") {
+          return { action: "escalate" as const };
+        }
+        // For task judgments, always retry to exhaust retries
+        return { action: "retry" as const };
+      },
+      requestFailureAction: async (ctx) => {
+        failureActionCalled = true;
+        return "skip";
+      },
+    });
+
+    const engine = new PlanExecutionEngine(io, TEST_CWD, TEST_AGENT_DIR);
+    await engine.execute(PLAN_PATH, callbacks);
+
+    assert.ok(failureActionCalled, "requestFailureAction should be called when task retry_exhausted escalates");
+  });
+
+  it("escalate at task retry_exhausted with stop persists stopped state", async () => {
+    const io = createMockIO();
+    seedFiles(io);
+
+    io.dispatchSubagent = async (config) => {
+      if (config.taskNumber === 1) {
+        return {
+          taskNumber: 1,
+          status: "BLOCKED" as const,
+          output: "blocked",
+          concerns: null, needs: null,
+          blocker: "Fatal error",
+          filesChanged: [],
+        };
+      }
+      return {
+        taskNumber: config.taskNumber,
+        status: "DONE" as const,
+        output: "done",
+        concerns: null, needs: null, blocker: null,
+        filesChanged: [],
+      };
+    };
+
+    const stateWrites: RunState[] = [];
+    const origWriteFile = io.writeFile.bind(io);
+    io.writeFile = async (path: string, content: string) => {
+      if (path.includes(".state.json")) {
+        try { stateWrites.push(JSON.parse(content)); } catch { /* ignore */ }
+      }
+      return origWriteFile(path, content);
+    };
+
+    const callbacks = createMockCallbacks({
+      requestJudgment: async (req) => {
+        if (req.type === "retry_exhausted") {
+          return { action: "escalate" as const };
+        }
+        return { action: "retry" as const };
+      },
+      requestFailureAction: async () => "stop",
+    });
+
+    const engine = new PlanExecutionEngine(io, TEST_CWD, TEST_AGENT_DIR);
+    await engine.execute(PLAN_PATH, callbacks);
+
+    const stoppedStates = stateWrites.filter((s) => s.status === "stopped");
+    assert.ok(stoppedStates.length > 0, "Should persist stopped state when task escalated and user chooses stop");
+  });
+});
+
+describe("escalate judgment in spec review failure", () => {
+  it("escalate at spec review failure calls requestFailureAction", async () => {
+    const io = createMockIO();
+    seedFiles(io);
+
+    io.dispatchSubagent = async (config) => {
+      if (config.agent === "spec-reviewer") {
+        return {
+          taskNumber: config.taskNumber,
+          status: "BLOCKED" as const,
+          output: "Spec mismatch",
+          concerns: null, needs: null,
+          blocker: "Spec mismatch",
+          filesChanged: [],
+        };
+      }
+      return {
+        taskNumber: config.taskNumber,
+        status: "DONE" as const,
+        output: "done",
+        concerns: null, needs: null, blocker: null,
+        filesChanged: [],
+      };
+    };
+
+    let failureActionCalled = false;
+    const callbacks = createMockCallbacks({
+      requestSettings: async () => ({
+        execution: "parallel" as const,
+        tdd: true,
+        finalReview: false,
+        specCheck: true,
+        integrationTest: false,
+        testCommand: null,
+      }),
+      requestJudgment: async (req) => {
+        if (req.type === "spec_review_failed") {
+          return { action: "escalate" as const };
+        }
+        return { action: "accept" as const };
+      },
+      requestFailureAction: async (ctx) => {
+        failureActionCalled = true;
+        return "skip"; // skip to continue
+      },
+    });
+
+    const engine = new PlanExecutionEngine(io, TEST_CWD, TEST_AGENT_DIR);
+    await engine.execute(PLAN_PATH, callbacks);
+
+    assert.ok(failureActionCalled, "requestFailureAction should be called when spec review escalates");
+  });
+
+  it("escalate at spec review failure with retry returns retry", async () => {
+    const io = createMockIO();
+    seedFiles(io);
+
+    let specDispatchCount = 0;
+    io.dispatchSubagent = async (config) => {
+      if (config.agent === "spec-reviewer") {
+        specDispatchCount++;
+        if (specDispatchCount <= 1) {
+          return {
+            taskNumber: config.taskNumber,
+            status: "BLOCKED" as const,
+            output: "Spec mismatch",
+            concerns: null, needs: null,
+            blocker: "Spec mismatch",
+            filesChanged: [],
+          };
+        }
+        // Pass on subsequent attempts
+        return {
+          taskNumber: config.taskNumber,
+          status: "DONE" as const,
+          output: "done",
+          concerns: null, needs: null, blocker: null,
+          filesChanged: [],
+        };
+      }
+      return {
+        taskNumber: config.taskNumber,
+        status: "DONE" as const,
+        output: "done",
+        concerns: null, needs: null, blocker: null,
+        filesChanged: [],
+      };
+    };
+
+    let failureActionCallCount = 0;
+    const callbacks = createMockCallbacks({
+      requestSettings: async () => ({
+        execution: "parallel" as const,
+        tdd: true,
+        finalReview: false,
+        specCheck: true,
+        integrationTest: false,
+        testCommand: null,
+      }),
+      requestJudgment: async (req) => {
+        if (req.type === "spec_review_failed") {
+          return { action: "escalate" as const };
+        }
+        return { action: "accept" as const };
+      },
+      requestFailureAction: async () => {
+        failureActionCallCount++;
+        return "retry";
+      },
+    });
+
+    const engine = new PlanExecutionEngine(io, TEST_CWD, TEST_AGENT_DIR);
+    await engine.execute(PLAN_PATH, callbacks);
+
+    assert.ok(failureActionCallCount > 0, "requestFailureAction should be called on spec review escalate");
+    // Spec review should have been dispatched more than once due to retry
+    assert.ok(specDispatchCount > 1, "Spec review should retry after escalate-retry");
+  });
+
+  it("escalate at spec review failure with stop returns stop", async () => {
+    const io = createMockIO();
+    seedFiles(io);
+
+    io.dispatchSubagent = async (config) => {
+      if (config.agent === "spec-reviewer") {
+        return {
+          taskNumber: config.taskNumber,
+          status: "BLOCKED" as const,
+          output: "Spec mismatch",
+          concerns: null, needs: null,
+          blocker: "Spec mismatch",
+          filesChanged: [],
+        };
+      }
+      return {
+        taskNumber: config.taskNumber,
+        status: "DONE" as const,
+        output: "done",
+        concerns: null, needs: null, blocker: null,
+        filesChanged: [],
+      };
+    };
+
+    const stateWrites: RunState[] = [];
+    const origWriteFile = io.writeFile.bind(io);
+    io.writeFile = async (path: string, content: string) => {
+      if (path.includes(".state.json")) {
+        try { stateWrites.push(JSON.parse(content)); } catch { /* ignore */ }
+      }
+      return origWriteFile(path, content);
+    };
+
+    const callbacks = createMockCallbacks({
+      requestSettings: async () => ({
+        execution: "parallel" as const,
+        tdd: true,
+        finalReview: false,
+        specCheck: true,
+        integrationTest: false,
+        testCommand: null,
+      }),
+      requestJudgment: async (req) => {
+        if (req.type === "spec_review_failed") {
+          return { action: "escalate" as const };
+        }
+        return { action: "accept" as const };
+      },
+      requestFailureAction: async () => "stop",
+    });
+
+    const engine = new PlanExecutionEngine(io, TEST_CWD, TEST_AGENT_DIR);
+    await engine.execute(PLAN_PATH, callbacks);
+
+    const stoppedStates = stateWrites.filter((s) => s.status === "stopped");
+    assert.ok(stoppedStates.length > 0, "Should persist stopped state when spec review escalated with stop");
+
+    const progressCalls = callbacks.calls["onProgress"] ?? [];
+    const completedEvents = progressCalls.filter(
+      (c: any[]) => c[0].type === "execution_completed",
+    );
+    assert.equal(completedEvents.length, 0, "Should not emit execution_completed when stopped");
   });
 });

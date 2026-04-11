@@ -79,8 +79,7 @@ export async function captureBaseline(
   cwd: string,
   testCommand: string,
 ): Promise<BaselineTest> {
-  const [cmd, ...args] = testCommand.split(/\s+/);
-  const result = await io.exec(cmd, args, cwd);
+  const result = await io.exec("sh", ["-c", testCommand], cwd);
   const output = result.stdout + (result.stderr ? "\n" + result.stderr : "");
   const failingTests =
     result.exitCode !== 0 ? extractFailingTests(output) : [];

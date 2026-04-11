@@ -263,11 +263,15 @@ export async function validateResume(
     );
   }
 
+  // Validate git state in the workspace path, not the caller's cwd.
+  // When workspace type is "worktree", the branch/SHA must be checked there.
+  const gitCheckPath = state.workspace.path;
+
   // Check branch matches
   const branchResult = await io.exec(
     "git",
     ["rev-parse", "--abbrev-ref", "HEAD"],
-    cwd,
+    gitCheckPath,
   );
   const currentBranch = branchResult.stdout.trim();
   if (currentBranch !== state.workspace.branch) {
@@ -278,7 +282,7 @@ export async function validateResume(
 
   // Check preExecutionSha matches HEAD (only if preExecutionSha is set)
   if (state.preExecutionSha !== "") {
-    const shaResult = await io.exec("git", ["rev-parse", "HEAD"], cwd);
+    const shaResult = await io.exec("git", ["rev-parse", "HEAD"], gitCheckPath);
     const currentSha = shaResult.stdout.trim();
     if (currentSha !== state.preExecutionSha) {
       issues.push(
