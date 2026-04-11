@@ -1,0 +1,34 @@
+## Strengths
+- The entry-point stays thin in the right places: the judgment tool is registered in the factory, both `/execute-plan` and `execute_plan` funnel into `handleExecutePlan(...)`, and the engine owns the actual orchestration (`agent/extensions/execute-plan/index.ts:62-106`, `agent/extensions/execute-plan/index.ts:111-182`).
+- The engine/UI callback wiring is mostly aligned with the task shape. In particular, `requestWorktreeSetup(...)` is just a UI bridge in the extension, while the engine decides when it is legal to call it (`agent/extensions/execute-plan/index.ts:258-270`, `agent/lib/execute-plan/engine.ts:292-340`). The final review flow is also explicit: the engine emits `code_review_completed`, the wrapper caches `event.review`, and `ReviewSummaryComponent` is shown after execution (`agent/lib/execute-plan/engine.ts:1206-1219`, `agent/extensions/execute-plan/index.ts:379-381`, `agent/extensions/execute-plan/index.ts:436-446`).
+- The progress/cancellation plumbing is defensive. `onProgress(...)` is wrapped in `try/catch` and logs render failures via `console.error` instead of crashing the engine, while terminal-input cleanup and widget cleanup both happen in `finally` (`agent/extensions/execute-plan/index.ts:316-405`, `agent/extensions/execute-plan/index.ts:408-429`, `agent/extensions/execute-plan/index.ts:458-468`).
+
+## Issues
+### Critical
+- `agentDir` is computed one directory too shallow, so the wrapper passes `.../agent/extensions` into both `createDispatchFunction(...)` and `PlanExecutionEngine(...)` instead of the agent root (`agent/extensions/execute-plan/index.ts:116`, `agent/extensions/execute-plan/index.ts:119-122`, `agent/extensions/execute-plan/index.ts:176-182`). Downstream code expects the real agent root: `loadAgentConfig()` reads `<agentDir>/agents/*.md` (`agent/extensions/execute-plan/subagent-dispatch.ts:160-168`), `loadModelTiers()` reads `<agentDir>/settings.json` (`agent/lib/execute-plan/settings-loader.ts:8-20`), and template resolution joins `<agentDir>/skills/...` (`agent/lib/execute-plan/template-filler.ts:16-22`). Focused verification confirmed the breakage:
+  - computed `agentDir`: `/Users/david/Code/pi-config/.worktrees/execute-plan-extension/agent/extensions`
+  - expected root: `/Users/david/Code/pi-config/.worktrees/execute-plan-extension/agent`
+  - `loadAgentConfig(computedAgentDir, "plan-executor")` returned `null`
+  - the computed code-reviewer template path did not exist, while the expected one did
+
+  Verification command:
+  `cd agent && node --experimental-strip-types --input-type=module <<'EOF' ... EOF`
+
+  This is launch-blocking for the entry point, because the engine cannot reliably load model tiers, agent configs, or prompt templates.
+- The `execute_plan` tool reports success after any normal return from `handleExecutePlan(...)` (`agent/extensions/execute-plan/index.ts:90-97`), but `handleExecutePlan(...)` handles several blocked/cancelled paths by notifying and returning instead of throwing: non-git repo (`agent/extensions/execute-plan/index.ts:125-127`), missing `.pi/plans/` (`agent/extensions/execute-plan/index.ts:153-155`), no plans found (`agent/extensions/execute-plan/index.ts:158-160`), and picker dismissal (`agent/extensions/execute-plan/index.ts:166-171`). In all of those cases the tool still returns `"Plan execution completed."` with `details.success: true`. That violates the task's requirement that precondition failures block execution and makes tool consumers mis-handle failed launches as successful runs.
+
+### Important
+- The completion path never suggests the `finishing-a-development-branch` skill on feature branches. The only success notification is the generic `"Plan execution completed successfully."` (`agent/extensions/execute-plan/index.ts:449-450`). I also verified there is no feature-branch completion guidance in this entry-point path: `rg -n "finishing-a-development-branch|feature branch|skill" agent/extensions/execute-plan/index.ts agent/lib/execute-plan -g'*.ts'` returned no relevant completion-time match.
+- The progress widget's denominator stays `0` for the entire run. `totalWaves` is initialized to `0` (`agent/extensions/execute-plan/index.ts:193`), that value is passed into `WaveProgressWidget` when waves start and tasks update (`agent/extensions/execute-plan/index.ts:331-336`, `agent/extensions/execute-plan/index.ts:350`, `agent/extensions/execute-plan/index.ts:358`, `agent/extensions/execute-plan/index.ts:366`, `agent/extensions/execute-plan/index.ts:374`), and it is only set when `execution_completed` fires (`agent/extensions/execute-plan/index.ts:384-386`)—after execution is already over. `formatWaveProgress(...)` renders that raw value as `Wave N/M` (`agent/extensions/execute-plan/tui-formatters.ts:202-220`), so the live widget will show `Wave 1/0`, `Wave 2/0`, etc. rather than meaningful progress.
+
+### Minor
+- The non-git precondition message does not match the task's specified text. The implementation emits `"Not a git repository. execute-plan requires git."` (`agent/extensions/execute-plan/index.ts:126`) instead of `"execute-plan requires a git repository."`. This is low severity, but it is still a spec mismatch in the user-facing contract.
+
+## Recommendations
+- Fix agent-root resolution first. Use a path derivation that clearly targets the `agent/` root from `index.ts` (for example, via `fileURLToPath(new URL("../../", import.meta.url))`) before constructing the dispatch function or engine.
+- Make `handleExecutePlan(...)` surface outcome explicitly to the tool layer. A small result enum/object (`completed` / `blocked` / `cancelled`) or typed exceptions would let `execute_plan` return truthful `success` metadata instead of treating every early return as a completed run.
+- Add the missing completion-time branch guidance and compute/provide `totalWaves` before the first widget render so the progress widget shows real `N/M` progress during execution.
+- Add focused entry-point tests around these contracts: agent-root resolution, tool failure reporting for non-git repos/missing plans, completion guidance on feature branches, and progress-widget wave counts.
+
+## Assessment
+I would not sign off Task 21 yet. The wrapper is commendably thin, the callback surface largely matches the intended engine/TUI split, and the code-review/cancellation plumbing is close to the requested design. But the incorrect `agentDir` breaks core asset lookup, and the `execute_plan` tool currently reports success for blocked or cancelled launches. Those are correctness issues in the extension entry point itself, not polish items.
