@@ -63,7 +63,7 @@ import { TaskQueue } from "./task-queue.ts";
  * Looks for severity sections (## Critical, ## Important, ## Minor),
  * ### finding titles, strengths, recommendations, and overall assessment.
  */
-function parseCodeReviewOutput(output: string): CodeReviewSummary {
+export function parseCodeReviewOutput(output: string): CodeReviewSummary {
   const findings: CodeReviewFinding[] = [];
   const strengths: string[] = [];
   const recommendations: string[] = [];
@@ -191,6 +191,8 @@ export class PlanExecutionEngine {
     // Track whether state was created so finally knows what to clean up
     let stateCreated = false;
     let lockAcquired = false;
+    let errorOccurred = false;
+    let errorValue: unknown;
 
     try {
       // ── Step 1: Parse and validate plan ──────────────────────────
@@ -225,12 +227,15 @@ export class PlanExecutionEngine {
       let resumeSettings: ExecutionSettings | undefined;
       let resumeWorkspace: WorkspaceInfo | undefined;
 
+      let resumeAction: "continue" | "restart" | null = null;
+
       if (existingState !== null) {
         const action = await callbacks.requestResumeAction(existingState);
         if (action === "cancel") {
           return;
         }
         if (action === "continue") {
+          resumeAction = "continue";
           // Determine which wave to resume from
           const doneWaves = existingState.waves.filter(
             (w) => w.status === "done",
@@ -242,8 +247,11 @@ export class PlanExecutionEngine {
           persistedRetryState = existingState.retryState;
           resumeSettings = existingState.settings;
           resumeWorkspace = existingState.workspace;
+        } else {
+          // "restart" → delete old state, then proceed as fresh run
+          resumeAction = "restart";
+          await deleteState(io, cwd, planFileName);
         }
-        // "restart" → fall through to normal startup, existing state will be overwritten
       }
 
       // ── Step 5: Request settings ─────────────────────────────────
@@ -315,9 +323,7 @@ export class PlanExecutionEngine {
             const currentBranch = await getCurrentBranch(io, cwd);
             const confirmed = await callbacks.confirmMainBranch(currentBranch);
             if (!confirmed) {
-              throw new Error(
-                "Execution cancelled: user declined to run on main branch.",
-              );
+              return; // Clean early exit — no state file or lock created
             }
             workspace = {
               type: "current",
@@ -337,37 +343,48 @@ export class PlanExecutionEngine {
       }
 
       // ── Step 8: Create state file, acquire lock ──────────────────
-      await createState(io, cwd, planFileName, settings, workspace);
-      stateCreated = true;
+      if (resumeAction === "continue") {
+        // Reuse existing state — don't overwrite with createState
+        // Just re-acquire the lock on the existing state
+        await acquireLock(io, cwd, planFileName, io.getPid(), io.getSessionId());
+        stateCreated = true;
+        lockAcquired = true;
+        // Settings and workspace come from the existing state
+        // Skip workspace resolution, baseline capture, SHA capture — already done in original run
+      } else {
+        // Fresh run or restart — create new state
+        await createState(io, cwd, planFileName, settings, workspace);
+        stateCreated = true;
 
-      await acquireLock(
-        io,
-        cwd,
-        planFileName,
-        io.getPid(),
-        io.getSessionId(),
-      );
-      lockAcquired = true;
-
-      // ── Step 9: Capture baseline if integration tests ────────────
-      if (settings.integrationTest && settings.testCommand) {
-        const baseline = await captureBaseline(
+        await acquireLock(
           io,
-          workspace.path,
-          settings.testCommand,
+          cwd,
+          planFileName,
+          io.getPid(),
+          io.getSessionId(),
         );
+        lockAcquired = true;
+
+        // ── Step 9: Capture baseline if integration tests ────────────
+        if (settings.integrationTest && settings.testCommand) {
+          const baseline = await captureBaseline(
+            io,
+            workspace.path,
+            settings.testCommand,
+          );
+          await updateState(io, cwd, planFileName, (s) => ({
+            ...s,
+            baselineTest: baseline,
+          }));
+        }
+
+        // ── Step 10: Record pre-execution SHA ────────────────────────
+        const headSha = await getHeadSha(io, workspace.path);
         await updateState(io, cwd, planFileName, (s) => ({
           ...s,
-          baselineTest: baseline,
+          preExecutionSha: headSha,
         }));
       }
-
-      // ── Step 10: Record pre-execution SHA ────────────────────────
-      const headSha = await getHeadSha(io, workspace.path);
-      await updateState(io, cwd, planFileName, (s) => ({
-        ...s,
-        preExecutionSha: headSha,
-      }));
 
       // ── Step 11: Execute waves (stub) ────────────────────────────
       await this.executeWaves(
@@ -401,8 +418,12 @@ export class PlanExecutionEngine {
         totalWaves: waves.length,
       });
     } catch (err) {
-      // On error: release lock, persist stopped state, emit execution_stopped
-      if (stateCreated) {
+      errorOccurred = true;
+      errorValue = err;
+      throw err;
+    } finally {
+      if (errorOccurred && stateCreated) {
+        // On error: release lock, persist stopped state, emit execution_stopped
         try {
           if (lockAcquired) {
             await releaseLock(io, cwd, planFileName);
@@ -426,11 +447,9 @@ export class PlanExecutionEngine {
         callbacks.onProgress({
           type: "execution_stopped",
           wave: 0,
-          reason: err instanceof Error ? err.message : String(err),
+          reason: errorValue instanceof Error ? errorValue.message : String(errorValue),
         });
       }
-
-      throw err;
     }
   }
 
@@ -855,6 +874,14 @@ export class PlanExecutionEngine {
 
         case "accept":
           // Log concerns and proceed
+          if (result.concerns) {
+            callbacks.onProgress({
+              type: "task_progress",
+              taskNumber: result.taskNumber,
+              wave: wave.number,
+              status: `Accepted with concerns: ${result.concerns}`,
+            });
+          }
           return true;
 
         case "escalate": {
@@ -898,7 +925,16 @@ export class PlanExecutionEngine {
             cwd: workspacePath,
           };
 
-          const newResult = await io.dispatchSubagent(config);
+          const newResult = await io.dispatchSubagent(config, {
+            onProgress: (taskNumber, status) => {
+              callbacks.onProgress({
+                type: "task_progress",
+                taskNumber,
+                wave: wave.number,
+                status,
+              });
+            },
+          });
           if (newResult.status === "DONE") return true;
           // Loop back for another judgment
           Object.assign(result, newResult);
@@ -929,7 +965,16 @@ export class PlanExecutionEngine {
             cwd: workspacePath,
           };
 
-          const newResult = await io.dispatchSubagent(config);
+          const newResult = await io.dispatchSubagent(config, {
+            onProgress: (taskNumber, status) => {
+              callbacks.onProgress({
+                type: "task_progress",
+                taskNumber,
+                wave: wave.number,
+                status,
+              });
+            },
+          });
           if (newResult.status === "DONE") return true;
           Object.assign(result, newResult);
           continue;
@@ -957,7 +1002,16 @@ export class PlanExecutionEngine {
         model,
         cwd: workspacePath,
       };
-      const newResult = await io.dispatchSubagent(config);
+      const newResult = await io.dispatchSubagent(config, {
+        onProgress: (taskNumber, status) => {
+          callbacks.onProgress({
+            type: "task_progress",
+            taskNumber,
+            wave: wave.number,
+            status,
+          });
+        },
+      });
       if (newResult.status === "DONE") return true;
       Object.assign(result, newResult);
     }
