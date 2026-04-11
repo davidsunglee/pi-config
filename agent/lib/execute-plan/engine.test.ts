@@ -1539,7 +1539,7 @@ describe("PlanExecutionEngine", () => {
         requestJudgment: async (req) => {
           judgmentCount++;
           if (req.type === "spec_review_failed") {
-            return { action: "retry" as const };
+            return { action: "retry" as const, context: "fix the spec issues", model: "better-model" };
           }
           if (req.type === "retry_exhausted") {
             return { action: "skip" as const };
@@ -1551,11 +1551,19 @@ describe("PlanExecutionEngine", () => {
       const engine = new PlanExecutionEngine(io, TEST_CWD, TEST_AGENT_DIR);
       await engine.execute(PLAN_PATH, callbacks);
 
-      // Check that retryState.waves was persisted
-      const hasWaveRetry = stateWrites.some(
+      // Check that retryState.waves was persisted with context and model
+      const waveRetryStates = stateWrites.filter(
         (s) => s.retryState && Object.keys(s.retryState.waves).length > 0,
       );
-      assert.ok(hasWaveRetry, "retryState.waves should be persisted during wave retries");
+      assert.ok(waveRetryStates.length > 0, "retryState.waves should be persisted during wave retries");
+
+      // Verify context and model are persisted (not null)
+      const lastWaveRetry = waveRetryStates[waveRetryStates.length - 1]!;
+      const waveKeys = Object.keys(lastWaveRetry.retryState.waves);
+      assert.ok(waveKeys.length > 0, "Should have wave retry entries");
+      const waveEntry = lastWaveRetry.retryState.waves[waveKeys[0]!]!;
+      assert.equal(waveEntry.lastContext, "fix the spec issues", "Wave retry should persist lastContext from judgment");
+      assert.equal(waveEntry.lastModel, "better-model", "Wave retry should persist lastModel from judgment");
     });
 
     // (l) dispatches spec reviews if enabled
@@ -1939,16 +1947,27 @@ Low risk.
       const callbacks = createMockCallbacks();
       const engine = new PlanExecutionEngine(io, TEST_CWD, TEST_AGENT_DIR);
 
-      // Cancel at task level during dispatch
+      // Cancel at task level during dispatch — track dispatched tasks
+      const dispatchedTasks: number[] = [];
       const origDispatch = io.dispatchSubagent;
       io.dispatchSubagent = async (config, options) => {
+        dispatchedTasks.push(config.taskNumber);
         if (config.taskNumber === 1) {
+          // This should trigger taskQueue.abortAfterCurrent() internally
           engine.requestCancellation("task");
         }
         return origDispatch(config, options);
       };
 
       await engine.execute(PLAN_PATH, callbacks);
+
+      // Verify abortAfterCurrent effect: with concurrency=1 (sequential),
+      // cancelling during task 1 should prevent task 2 from being dispatched
+      // (abortAfterCurrent stops the queue from launching new tasks)
+      assert.ok(
+        !dispatchedTasks.includes(2),
+        `abortAfterCurrent should prevent task 2 from being dispatched, but dispatched: [${dispatchedTasks.join(", ")}]`,
+      );
 
       // Should NOT have committed wave (partial wave)
       const progressCalls = callbacks.calls["onProgress"] ?? [];

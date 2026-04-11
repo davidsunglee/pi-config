@@ -626,11 +626,11 @@ export class PlanExecutionEngine {
           plan, wave, settings, modelTiers, planFileName, callbacks, workspacePath,
         );
 
-        if (specResult === "stop") {
+        if (specResult.result === "stop") {
           return false;
         }
-        if (specResult === "retry") {
-          // Persist wave retry state
+        if (specResult.result === "retry") {
+          // Persist wave retry state with context/model from judgment
           waveAttempts = attempt + 1;
           await updateState(io, cwd, planFileName, (s) => ({
             ...s,
@@ -643,8 +643,8 @@ export class PlanExecutionEngine {
                   maxAttempts: MAX_WAVE_RETRIES,
                   lastFailure: "Spec review failed",
                   lastFailureAt: new Date().toISOString(),
-                  lastContext: null,
-                  lastModel: null,
+                  lastContext: specResult.context,
+                  lastModel: specResult.model,
                 },
               },
             },
@@ -1067,7 +1067,7 @@ export class PlanExecutionEngine {
     planFileName: string,
     callbacks: EngineCallbacks,
     workspacePath: string,
-  ): Promise<"pass" | "retry" | "stop"> {
+  ): Promise<{ result: "pass" | "retry" | "stop"; context: string | null; model: string | null }> {
     const io = this.io;
     const templatePath = getTemplatePath(this.agentDir, "spec-reviewer");
     const template = await io.readFile(templatePath);
@@ -1102,13 +1102,13 @@ export class PlanExecutionEngine {
           details: result.output,
         });
 
-        if (response.action === "retry") return "retry";
-        if (response.action === "stop") return "stop";
+        if (response.action === "retry") return { result: "retry" as const, context: response.context ?? null, model: response.model ?? null };
+        if (response.action === "stop") return { result: "stop" as const, context: null, model: null };
         // skip/accept — continue to next task's review
       }
     }
 
-    return "pass";
+    return { result: "pass" as const, context: null, model: null };
   }
 
   /**
