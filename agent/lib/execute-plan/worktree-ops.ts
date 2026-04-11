@@ -1,4 +1,4 @@
-import { join, basename } from "node:path";
+import { join, basename, resolve } from "node:path";
 import type { ExecutionIO, WorkspaceInfo } from "./types.ts";
 
 /**
@@ -61,7 +61,15 @@ export async function createWorktree(
 ): Promise<WorkspaceInfo> {
   // Derive a directory name from the branch slug (strip "plan/" prefix if present)
   const dirName = branch.replace(/^plan\//, "");
+
+  // Validate against path traversal (e.g. branch = "plan/../../etc")
   const worktreePath = join(worktreeDir, dirName);
+  if (!resolve(worktreePath).startsWith(resolve(worktreeDir) + "/") &&
+      resolve(worktreePath) !== resolve(worktreeDir)) {
+    throw new Error(
+      `Invalid branch name "${branch}": resolved worktree path escapes the worktree directory.`,
+    );
+  }
 
   const result = await io.exec(
     "git",

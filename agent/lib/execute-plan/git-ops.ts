@@ -43,13 +43,19 @@ export async function commitWave(
   tasks: Array<{ number: number; title: string }>,
 ): Promise<string> {
   // Stage all changes
-  await io.exec("git", ["add", "-A"], cwd);
+  const addResult = await io.exec("git", ["add", "-A"], cwd);
+  if (addResult.exitCode !== 0) {
+    throw new Error(`git add failed (exit ${addResult.exitCode}): ${addResult.stderr.trim()}`);
+  }
 
   // Build commit message
   const message = buildCommitMessage(waveNumber, goalSummary, tasks);
 
   // Commit with --allow-empty to guarantee success
-  await io.exec("git", ["commit", "--allow-empty", "-m", message], cwd);
+  const commitResult = await io.exec("git", ["commit", "--allow-empty", "-m", message], cwd);
+  if (commitResult.exitCode !== 0) {
+    throw new Error(`git commit failed (exit ${commitResult.exitCode}): ${commitResult.stderr.trim()}`);
+  }
 
   // Return the SHA of the new commit
   const sha = await getHeadSha(io, cwd);
@@ -105,6 +111,9 @@ export async function verifyCommitExists(
 /** Returns the SHA of the current HEAD commit. */
 export async function getHeadSha(io: ExecutionIO, cwd: string): Promise<string> {
   const result = await io.exec("git", ["rev-parse", "HEAD"], cwd);
+  if (result.exitCode !== 0) {
+    throw new Error(`git rev-parse HEAD failed (exit ${result.exitCode}): ${result.stderr.trim()}`);
+  }
   return result.stdout.trim();
 }
 

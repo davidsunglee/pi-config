@@ -95,7 +95,13 @@ export async function readState(
   if (!exists) return null;
 
   const content = await io.readFile(filePath);
-  return JSON.parse(content) as RunState;
+  try {
+    return JSON.parse(content) as RunState;
+  } catch {
+    // Corrupted state file — treat as missing so a fresh run can proceed.
+    console.warn(`[execute-plan] Corrupted state file at ${filePath}, treating as absent.`);
+    return null;
+  }
 }
 
 // ── updateState ──────────────────────────────────────────────────────
