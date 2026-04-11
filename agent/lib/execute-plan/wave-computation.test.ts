@@ -135,6 +135,16 @@ describe("computeWaves", () => {
     });
   });
 
+  // (h) dependency map key referencing non-existent task should error
+  it("throws on dependency map key referencing non-existent task", () => {
+    const tasks = [makeTask(1), makeTask(2)];
+    const deps: PlanDependencies = new Map([[99, [1]]]);
+    assert.throws(
+      () => computeWaves(tasks, deps),
+      /non-existent.*99|99.*non-existent/i,
+    );
+  });
+
   // Split waves also get sequential numbers
   it("assigns sequential wave numbers after splitting", () => {
     const tasks = Array.from({ length: 10 }, (_, i) => makeTask(i + 1));

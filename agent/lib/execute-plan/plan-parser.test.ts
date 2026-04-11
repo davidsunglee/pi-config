@@ -543,6 +543,99 @@ describe("parsePlan", () => {
     const plan = parsePlan(content, "test.md");
     assert.match(plan.header.architectureSummary, /Three layers/);
   });
+
+  it("parses multi-dependency lines correctly", () => {
+    const content = `# Multi-Dep Plan
+
+## Goal
+
+Test multi-dependency parsing.
+
+## Architecture Summary
+
+Simple.
+
+## Tech Stack
+
+- TypeScript
+
+## File Structure
+
+- \`a.ts\` (Create) — Module A
+- \`b.ts\` (Create) — Module B
+- \`c.ts\` (Create) — Module C
+
+---
+
+## Tasks
+
+### Task 1: First
+
+**Files:**
+- Create: \`a.ts\`
+
+**Steps:**
+- [ ] **Step 1: Do A** — Details
+
+**Acceptance criteria:**
+- A works
+
+**Model recommendation:** cheap
+
+---
+
+### Task 2: Second
+
+**Files:**
+- Create: \`b.ts\`
+
+**Steps:**
+- [ ] **Step 1: Do B** — Details
+
+**Acceptance criteria:**
+- B works
+
+**Model recommendation:** cheap
+
+---
+
+### Task 3: Third
+
+**Files:**
+- Create: \`c.ts\`
+
+**Steps:**
+- [ ] **Step 1: Do C** — Details
+
+**Acceptance criteria:**
+- C works
+
+**Model recommendation:** cheap
+
+---
+
+## Dependencies
+
+- Task 3 depends on: Task 1, Task 2
+
+## Risk Assessment
+
+None.
+`;
+    const plan = parsePlan(content, "multi-dep.md");
+    const deps = plan.dependencies.get(3);
+    assert.ok(deps, "Task 3 should have dependencies");
+    assert.deepEqual(deps!.sort((a, b) => a - b), [1, 2], "Task 3 should depend on Task 1 and Task 2");
+  });
+
+  it("parses sourceTodoId without backticks", () => {
+    const content = FIXTURE_PLAN.replace(
+      "**Source:** `TODO-0ecb4b31`",
+      "**Source:** TODO-0ecb4b31",
+    );
+    const plan = parsePlan(content, "test.md");
+    assert.equal(plan.sourceTodoId, "0ecb4b31");
+  });
 });
 
 describe("validatePlan", () => {

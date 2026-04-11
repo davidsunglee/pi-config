@@ -154,6 +154,47 @@ describe("loadModelTiers", () => {
     });
   });
 
+  // crossProvider present but incomplete should error
+  it("returns error when crossProvider is missing 'standard'", async () => {
+    const io = makeIO(async (_path) =>
+      JSON.stringify({
+        modelTiers: {
+          capable: "anthropic/claude-opus-4-6",
+          standard: "anthropic/claude-sonnet-4-6",
+          cheap: "anthropic/claude-haiku-4-5",
+          crossProvider: {
+            capable: "openai/gpt-5",
+          },
+        },
+      }),
+    );
+
+    const result = await loadModelTiers(io, "/agent");
+
+    assert.equal(result.ok, false);
+    if (result.ok) throw new Error("unreachable");
+    assert.match(result.error, /crossProvider.*standard/i);
+  });
+
+  it("returns error when crossProvider is not an object", async () => {
+    const io = makeIO(async (_path) =>
+      JSON.stringify({
+        modelTiers: {
+          capable: "anthropic/claude-opus-4-6",
+          standard: "anthropic/claude-sonnet-4-6",
+          cheap: "anthropic/claude-haiku-4-5",
+          crossProvider: "not-an-object",
+        },
+      }),
+    );
+
+    const result = await loadModelTiers(io, "/agent");
+
+    assert.equal(result.ok, false);
+    if (result.ok) throw new Error("unreachable");
+    assert.match(result.error, /crossProvider.*object/i);
+  });
+
   // Path construction: uses agentDir correctly
   it("constructs path correctly with trailing slash in agentDir", async () => {
     let calledPath: string | null = null;

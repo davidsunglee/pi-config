@@ -86,20 +86,23 @@ export async function loadModelTiers(
     cheap: tiersObj["cheap"],
   };
 
-  // crossProvider is optional
+  // crossProvider is optional, but if present must be complete
   if ("crossProvider" in tiersObj && tiersObj["crossProvider"] !== undefined) {
     const cp = tiersObj["crossProvider"];
-    if (
-      typeof cp === "object" &&
-      cp !== null &&
-      typeof (cp as Record<string, unknown>)["capable"] === "string" &&
-      typeof (cp as Record<string, unknown>)["standard"] === "string"
-    ) {
-      result.crossProvider = {
-        capable: (cp as Record<string, unknown>)["capable"] as string,
-        standard: (cp as Record<string, unknown>)["standard"] as string,
-      };
+    if (typeof cp !== "object" || cp === null) {
+      return { ok: false, error: "settings.json: modelTiers.crossProvider must be an object" };
     }
+    const cpObj = cp as Record<string, unknown>;
+    if (typeof cpObj["capable"] !== "string") {
+      return { ok: false, error: "settings.json: modelTiers.crossProvider.capable is required and must be a string" };
+    }
+    if (typeof cpObj["standard"] !== "string") {
+      return { ok: false, error: "settings.json: modelTiers.crossProvider.standard is required and must be a string" };
+    }
+    result.crossProvider = {
+      capable: cpObj["capable"] as string,
+      standard: cpObj["standard"] as string,
+    };
   }
 
   return { ok: true, tiers: result };
