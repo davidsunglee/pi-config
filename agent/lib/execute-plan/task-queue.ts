@@ -39,6 +39,7 @@ export class TaskQueue {
     configs: SubagentConfig[],
     options?: {
       signal?: AbortSignal;
+      onTaskStart?: (taskNumber: number) => void;
       onTaskComplete?: (result: SubagentResult) => void;
       onTaskProgress?: (taskNumber: number, status: string) => void;
     },
@@ -47,6 +48,7 @@ export class TaskQueue {
     this.stopped = false;
 
     const signal = options?.signal;
+    const onTaskStart = options?.onTaskStart;
     const onTaskComplete = options?.onTaskComplete;
     const onTaskProgress = options?.onTaskProgress;
 
@@ -68,6 +70,7 @@ export class TaskQueue {
         const config = queue.shift()!;
 
         const task = (async () => {
+          onTaskStart?.(config.taskNumber);
           const result = await this.io.dispatchSubagent(config, {
             signal,
             onProgress: onTaskProgress,

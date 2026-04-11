@@ -744,6 +744,8 @@ describe("PlanExecutionEngine", () => {
         ],
       };
       io.files.set(stateFilePath, JSON.stringify(existingState));
+      // Ensure workspace path exists for validateResume check
+      io.files.set(TEST_CWD, "");
 
       const callbacks = createMockCallbacks({
         requestResumeAction: async () => "continue",

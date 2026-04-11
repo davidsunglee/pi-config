@@ -404,7 +404,7 @@ describe("updateWaveStatus", () => {
   it("transitions wave to done with commitSha", async () => {
     const io = createMockIO();
     const state = await setupStateWithWave(io);
-    const updated = await updateWaveStatus(io, TEST_CWD, PLAN_FILE, state, 1, "done", "abc123sha");
+    const updated = await updateWaveStatus(io, TEST_CWD, PLAN_FILE, 1, "done", "abc123sha");
     const wave = updated.waves.find(w => w.wave === 1);
     assert.ok(wave, "Wave 1 should exist");
     assert.equal(wave!.status, "done");
@@ -416,7 +416,7 @@ describe("updateWaveStatus", () => {
     const io = createMockIO();
     const state = await setupStateWithWave(io);
     await assert.rejects(
-      () => updateWaveStatus(io, TEST_CWD, PLAN_FILE, state, 1, "done", null),
+      () => updateWaveStatus(io, TEST_CWD, PLAN_FILE, 1, "done", null),
       /commitSha/i,
       "Should reject null commitSha for done status"
     );
@@ -426,7 +426,7 @@ describe("updateWaveStatus", () => {
     const io = createMockIO();
     const state = await setupStateWithWave(io);
     await assert.rejects(
-      () => updateWaveStatus(io, TEST_CWD, PLAN_FILE, state, 1, "done", ""),
+      () => updateWaveStatus(io, TEST_CWD, PLAN_FILE, 1, "done", ""),
       /commitSha/i,
       "Should reject empty commitSha for done status"
     );
@@ -435,7 +435,7 @@ describe("updateWaveStatus", () => {
   it("allows null commitSha for non-done statuses", async () => {
     const io = createMockIO();
     const state = await setupStateWithWave(io);
-    const updated = await updateWaveStatus(io, TEST_CWD, PLAN_FILE, state, 1, "in-progress", null);
+    const updated = await updateWaveStatus(io, TEST_CWD, PLAN_FILE, 1, "in-progress", null);
     const wave = updated.waves.find(w => w.wave === 1);
     assert.equal(wave!.status, "in-progress");
     assert.equal(wave!.commitSha, null);

@@ -113,7 +113,7 @@ async function handleExecutePlan(
   ctx: ExtensionContext,
 ): Promise<void> {
   const cwd = ctx.cwd;
-  const agentDir = path.dirname(path.dirname(import.meta.url.replace("file://", "")));
+  const agentDir = path.dirname(path.dirname(path.dirname(import.meta.url.replace("file://", ""))));
 
   // Create a temporary IO for precondition checks
   const tempIO = new PiExecutionIO(

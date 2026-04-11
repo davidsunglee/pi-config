@@ -41,6 +41,7 @@ import {
   releaseLock,
   deleteState,
   findActiveRunInRepo,
+  validateResume,
 } from "./state-manager.ts";
 import {
   movePlanToDone,
@@ -235,6 +236,14 @@ export class PlanExecutionEngine {
           return;
         }
         if (action === "continue") {
+          // Validate that the environment matches saved state
+          const resumeValidation = await validateResume(io, existingState, cwd);
+          if (!resumeValidation.valid) {
+            throw new Error(
+              `Cannot resume: environment does not match saved state.\n${resumeValidation.issues.join("\n")}`,
+            );
+          }
+
           resumeAction = "continue";
           // Determine which wave to resume from
           const doneWaves = existingState.waves.filter(
@@ -699,10 +708,7 @@ export class PlanExecutionEngine {
       }
 
       // (i) Update state: wave done
-      const state = await readState(io, cwd, planFileName);
-      if (state) {
-        await updateWaveStatus(io, cwd, planFileName, state, wave.number, "done", commitSha);
-      }
+      await updateWaveStatus(io, cwd, planFileName, wave.number, "done", commitSha);
 
       callbacks.onProgress({
         type: "wave_completed",
@@ -732,10 +738,7 @@ export class PlanExecutionEngine {
       const commitSha = await commitWave(
         io, workspacePath, wave.number, plan.header.goal, waveTasks,
       );
-      const state = await readState(io, cwd, planFileName);
-      if (state) {
-        await updateWaveStatus(io, cwd, planFileName, state, wave.number, "done", commitSha);
-      }
+      await updateWaveStatus(io, cwd, planFileName, wave.number, "done", commitSha);
       callbacks.onProgress({
         type: "wave_completed",
         wave: wave.number,
@@ -802,6 +805,13 @@ export class PlanExecutionEngine {
     this.taskQueue = new TaskQueue(io, settings.execution === "parallel" ? configs.length : 1);
 
     const results = await this.taskQueue.run(configs, {
+      onTaskStart: (taskNumber) => {
+        callbacks.onProgress({
+          type: "task_started",
+          taskNumber,
+          wave: wave.number,
+        });
+      },
       onTaskComplete: (result) => {
         callbacks.onProgress({
           type: "task_completed",
@@ -829,12 +839,6 @@ export class PlanExecutionEngine {
     for (const taskNum of wave.taskNumbers) {
       const result = results.get(taskNum);
       if (!result) continue;
-
-      callbacks.onProgress({
-        type: "task_started",
-        taskNumber: taskNum,
-        wave: wave.number,
-      });
 
       if (result.status === "DONE") {
         continue;
@@ -918,8 +922,10 @@ export class PlanExecutionEngine {
             await this.persistStoppedState(planFileName, wave.number, `Task ${result.taskNumber} escalated and stopped`);
             return false;
           }
-          // retry — fall through to retry logic
-          break;
+          // retry — increment attempts and continue the while loop
+          attempts++;
+          await this.persistTaskRetryState(planFileName, result.taskNumber, attempts, MAX_TASK_RETRIES, result.output);
+          continue;
         }
 
         case "provide_context": {
@@ -1001,40 +1007,6 @@ export class PlanExecutionEngine {
           continue;
         }
       }
-
-      // If we reach here from escalate→retry, continue loop
-      attempts++;
-      await this.persistTaskRetryState(planFileName, result.taskNumber, attempts, MAX_TASK_RETRIES, result.output);
-
-      // Re-dispatch
-      const taskSpec = this.buildTaskSpec(task);
-      const context = buildTaskContext(plan, task, wave, completedWaves, plan.tasks);
-      const prompt = fillImplementerPrompt(template, {
-        taskSpec,
-        context,
-        workingDir: workspacePath,
-        tddEnabled: settings.tdd,
-      });
-      const model = resolveModelForTask(task, modelTiers);
-      const config: SubagentConfig = {
-        agent: "implementer",
-        taskNumber: task.number,
-        task: prompt,
-        model,
-        cwd: workspacePath,
-      };
-      const newResult = await io.dispatchSubagent(config, {
-        onProgress: (taskNumber, status) => {
-          callbacks.onProgress({
-            type: "task_progress",
-            taskNumber,
-            wave: wave.number,
-            status,
-          });
-        },
-      });
-      if (newResult.status === "DONE") return true;
-      Object.assign(result, newResult);
     }
 
     // Exhausted task retries

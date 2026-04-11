@@ -134,7 +134,6 @@ export async function updateWaveStatus(
   io: ExecutionIO,
   cwd: string,
   planFileName: string,
-  state: RunState,
   waveNumber: number,
   status: WaveState["status"],
   commitSha: string | null,

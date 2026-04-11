@@ -34,26 +34,26 @@ export type {
   JudgmentResponse,
   ProgressEvent,
   EngineCallbacks,
-} from "./types.js";
+} from "./types.ts";
 
 // Plan parser
-export { parsePlan, validatePlan } from "./plan-parser.js";
+export { parsePlan, validatePlan } from "./plan-parser.ts";
 
 // Wave computation
-export { computeWaves } from "./wave-computation.js";
+export { computeWaves } from "./wave-computation.ts";
 
 // Model resolver
-export { resolveModelForTask, resolveReviewModel } from "./model-resolver.js";
+export { resolveModelForTask, resolveReviewModel } from "./model-resolver.ts";
 
 // Settings loader
-export { loadModelTiers } from "./settings-loader.js";
+export { loadModelTiers } from "./settings-loader.ts";
 
 // Template filler
 export type {
   ImplementerPromptParams,
   SpecReviewerPromptParams,
   CodeReviewerPromptParams,
-} from "./template-filler.js";
+} from "./template-filler.ts";
 export {
   TEMPLATE_PATHS,
   getTemplatePath,
@@ -62,8 +62,8 @@ export {
   fillCodeReviewerPrompt,
   buildTaskContext,
   validateNoUnfilledPlaceholders,
-} from "./template-filler.js";
-export type { TemplateType } from "./template-filler.js";
+} from "./template-filler.ts";
+export type { TemplateType } from "./template-filler.ts";
 
 // Git operations
 export {
@@ -76,7 +76,7 @@ export {
   verifyCommitExists,
   getHeadSha,
   isInWorktree,
-} from "./git-ops.js";
+} from "./git-ops.ts";
 
 // Worktree operations
 export {
@@ -86,7 +86,7 @@ export {
   verifyWorktreeExists,
   removeWorktree,
   isWorktreeDirectoryIgnored,
-} from "./worktree-ops.js";
+} from "./worktree-ops.ts";
 
 // Test operations
 export {
@@ -94,7 +94,7 @@ export {
   runTests,
   compareResults,
   detectTestCommand,
-} from "./test-ops.js";
+} from "./test-ops.ts";
 
 // State manager
 export {
@@ -111,7 +111,7 @@ export {
   deleteState,
   validateResume,
   findActiveRunInRepo,
-} from "./state-manager.js";
+} from "./state-manager.ts";
 
 // Plan lifecycle
 export {
@@ -119,10 +119,10 @@ export {
   extractSourceTodoId,
   closeTodo,
   buildCompletionSummary,
-} from "./plan-lifecycle.js";
+} from "./plan-lifecycle.ts";
 
 // Task queue
-export { TaskQueue } from "./task-queue.js";
+export { TaskQueue } from "./task-queue.ts";
 
 // Engine
-export { PlanExecutionEngine } from "./engine.js";
+export { PlanExecutionEngine } from "./engine.ts";
