@@ -14,6 +14,9 @@ import type {
   JudgmentResponse,
   ProgressEvent,
   ModelTiers,
+  SubagentConfig,
+  SubagentResult,
+  CodeReviewSummary,
 } from "./types.ts";
 import { PlanExecutionEngine } from "./engine.ts";
 
@@ -230,11 +233,11 @@ function createMockCallbacks(
     },
     requestFailureAction: async (ctx) => {
       record("requestFailureAction", ctx);
-      return "skip";
+      return overrides?.requestFailureAction?.(ctx) ?? "skip";
     },
     requestTestRegressionAction: async (ctx) => {
       record("requestTestRegressionAction", ctx);
-      return "skip";
+      return overrides?.requestTestRegressionAction?.(ctx) ?? "skip";
     },
     requestTestCommand: async () => {
       record("requestTestCommand");
@@ -242,7 +245,7 @@ function createMockCallbacks(
     },
     requestJudgment: async (req) => {
       record("requestJudgment", req);
-      return { action: "accept" as const };
+      return overrides?.requestJudgment?.(req) ?? { action: "accept" as const };
     },
     onProgress: (event) => {
       record("onProgress", event);
@@ -252,10 +255,23 @@ function createMockCallbacks(
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
-/** Seed the mock IO with the plan file and settings. */
+/** Seed the mock IO with the plan file, settings, and templates. */
 function seedFiles(io: ExecutionIO & { files: Map<string, string> }): void {
   io.files.set(PLAN_PATH, PLAN_MD);
   io.files.set(join(TEST_AGENT_DIR, "settings.json"), SETTINGS_JSON);
+  // Seed template files required by executeWaves
+  io.files.set(
+    join(TEST_AGENT_DIR, "skills/execute-plan/implementer-prompt.md"),
+    "You are implementing task.\n\n{TASK_SPEC}\n\n{CONTEXT}\n\n{WORKING_DIR}\n\n{TDD_BLOCK}",
+  );
+  io.files.set(
+    join(TEST_AGENT_DIR, "skills/execute-plan/spec-reviewer.md"),
+    "Review this implementation.\n\n{TASK_SPEC}\n\n{IMPLEMENTER_REPORT}",
+  );
+  io.files.set(
+    join(TEST_AGENT_DIR, "skills/requesting-code-review/code-reviewer.md"),
+    "Review code changes.\n\n{WHAT_WAS_IMPLEMENTED}\n\n{PLAN_OR_REQUIREMENTS}\n\n{BASE_SHA}\n\n{HEAD_SHA}\n\n{DESCRIPTION}",
+  );
 }
 
 /** Create a handler that acts like we're on "main" branch and NOT in a worktree. */
@@ -664,6 +680,19 @@ describe("PlanExecutionEngine", () => {
       // Seed files but do NOT include package.json (so detectTestCommand returns null)
       io.files.set(PLAN_PATH, PLAN_MD);
       io.files.set(join(TEST_AGENT_DIR, "settings.json"), SETTINGS_JSON);
+      // Seed templates needed by executeWaves
+      io.files.set(
+        join(TEST_AGENT_DIR, "skills/execute-plan/implementer-prompt.md"),
+        "You are implementing task.\n\n{TASK_SPEC}\n\n{CONTEXT}\n\n{WORKING_DIR}\n\n{TDD_BLOCK}",
+      );
+      io.files.set(
+        join(TEST_AGENT_DIR, "skills/execute-plan/spec-reviewer.md"),
+        "Review this implementation.\n\n{TASK_SPEC}\n\n{IMPLEMENTER_REPORT}",
+      );
+      io.files.set(
+        join(TEST_AGENT_DIR, "skills/requesting-code-review/code-reviewer.md"),
+        "Review code changes.\n\n{WHAT_WAS_IMPLEMENTED}\n\n{PLAN_OR_REQUIREMENTS}\n\n{BASE_SHA}\n\n{HEAD_SHA}\n\n{DESCRIPTION}",
+      );
       // Intentionally NOT adding package.json, Cargo.toml, etc.
 
       const callbacks = createMockCallbacks({
@@ -878,6 +907,911 @@ describe("PlanExecutionEngine", () => {
         !callbacks.calls["confirmMainBranch"],
         "confirmMainBranch should NOT be called when off main branch",
       );
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // Task 16: Wave execution, dispatch, and judgment handling
+  // ═══════════════════════════════════════════════════════════════════════
+
+  describe("wave execution and dispatch", () => {
+    // (a) engine dispatches workers via TaskQueue calling io.dispatchSubagent for each task
+    it("dispatches workers via TaskQueue for each task in a wave", async () => {
+      const io = createMockIO();
+      seedFiles(io);
+
+      const dispatched: SubagentConfig[] = [];
+      io.dispatchSubagent = async (config) => {
+        dispatched.push(config);
+        return {
+          taskNumber: config.taskNumber,
+          status: "DONE" as const,
+          output: "Implementation complete",
+          concerns: null,
+          needs: null,
+          blocker: null,
+          filesChanged: ["file.ts"],
+        };
+      };
+
+      const callbacks = createMockCallbacks();
+      const engine = new PlanExecutionEngine(io, TEST_CWD, TEST_AGENT_DIR);
+      await engine.execute(PLAN_PATH, callbacks);
+
+      // Plan has 2 tasks across 2 waves — both should be dispatched
+      assert.ok(dispatched.length >= 2, `Expected at least 2 dispatches, got ${dispatched.length}`);
+      const taskNumbers = dispatched.map((d) => d.taskNumber);
+      assert.ok(taskNumbers.includes(1), "Task 1 should be dispatched");
+      assert.ok(taskNumbers.includes(2), "Task 2 should be dispatched");
+    });
+
+    // (b) engine commits after each successful wave (always produces SHA)
+    it("commits after each successful wave", async () => {
+      const io = createMockIO();
+      seedFiles(io);
+
+
+      const commitCalls: string[][] = [];
+      const origExec = io.exec.bind(io);
+      io.exec = async (cmd: string, args: string[], cwd: string) => {
+        if (cmd === "git" && args[0] === "commit") {
+          commitCalls.push(args);
+        }
+        return origExec(cmd, args, cwd);
+      };
+
+      io.dispatchSubagent = async (config) => ({
+        taskNumber: config.taskNumber,
+        status: "DONE" as const,
+        output: "done",
+        concerns: null, needs: null, blocker: null,
+        filesChanged: [],
+      });
+
+      const callbacks = createMockCallbacks();
+      const engine = new PlanExecutionEngine(io, TEST_CWD, TEST_AGENT_DIR);
+      await engine.execute(PLAN_PATH, callbacks);
+
+      // Should have committed for each wave
+      assert.ok(commitCalls.length >= 2, `Expected at least 2 commits, got ${commitCalls.length}`);
+
+      // Check wave_completed events carry SHA
+      const progressCalls = callbacks.calls["onProgress"] ?? [];
+      const waveCompleted = progressCalls.filter(
+        (c: any[]) => c[0].type === "wave_completed",
+      );
+      assert.ok(waveCompleted.length >= 2, "Should emit wave_completed for each wave");
+      for (const [evt] of waveCompleted) {
+        assert.ok(evt.commitSha && evt.commitSha !== "stub", `commitSha should be real, got "${evt.commitSha}"`);
+      }
+    });
+
+    // (c) engine runs tests after each wave if integration tests enabled
+    it("runs tests after each wave when integration tests are enabled", async () => {
+      const io = createMockIO();
+      seedFiles(io);
+
+
+      const testRuns: Array<{ cmd: string; args: string[] }> = [];
+      const origExec = io.exec.bind(io);
+      io.exec = async (cmd: string, args: string[], cwd: string) => {
+        if (cmd === "npm" && args[0] === "test") {
+          testRuns.push({ cmd, args: [...args] });
+        }
+        return origExec(cmd, args, cwd);
+      };
+
+      io.dispatchSubagent = async (config) => ({
+        taskNumber: config.taskNumber,
+        status: "DONE" as const,
+        output: "done",
+        concerns: null, needs: null, blocker: null,
+        filesChanged: [],
+      });
+
+      const callbacks = createMockCallbacks({
+        requestSettings: async () => ({
+          execution: "parallel" as const,
+          tdd: true,
+          finalReview: false,
+          specCheck: false,
+          integrationTest: true,
+          testCommand: "npm test",
+        }),
+      });
+
+      const engine = new PlanExecutionEngine(io, TEST_CWD, TEST_AGENT_DIR);
+      await engine.execute(PLAN_PATH, callbacks);
+
+      // Baseline capture + at least one test run per wave
+      // baseline=1, wave1=1, wave2=1 = at least 3
+      assert.ok(testRuns.length >= 3, `Expected at least 3 test runs (1 baseline + 2 waves), got ${testRuns.length}`);
+    });
+
+    // (d) engine calls callbacks.requestTestRegressionAction on regression
+    it("calls requestTestRegressionAction on test regression", async () => {
+      let testRunCount = 0;
+      const io = createMockIO(undefined, async (cmd, args, _cwd) => {
+        if (cmd === "git" && args[0] === "rev-parse" && args.includes("--git-dir")) {
+          return { stdout: ".git\n", stderr: "", exitCode: 0 };
+        }
+        if (cmd === "git" && args[0] === "rev-parse" && args.includes("--abbrev-ref")) {
+          return { stdout: "feature/test\n", stderr: "", exitCode: 0 };
+        }
+        if (cmd === "git" && args[0] === "rev-parse" && args.includes("HEAD")) {
+          return { stdout: "abc123def456\n", stderr: "", exitCode: 0 };
+        }
+        if (cmd === "kill" && args[0] === "-0") {
+          return { stdout: "", stderr: "No such process", exitCode: 1 };
+        }
+        if (cmd === "npm" && args[0] === "test") {
+          testRunCount++;
+          // First call = baseline (passes), subsequent = regression
+          if (testRunCount === 1) {
+            return { stdout: "All tests passed", stderr: "", exitCode: 0 };
+          }
+          return {
+            stdout: "not ok 1 - widget test\nFAILED",
+            stderr: "",
+            exitCode: 1,
+          };
+        }
+        return { stdout: "", stderr: "", exitCode: 0 };
+      });
+      seedFiles(io);
+
+
+      io.dispatchSubagent = async (config) => ({
+        taskNumber: config.taskNumber,
+        status: "DONE" as const,
+        output: "done",
+        concerns: null, needs: null, blocker: null,
+        filesChanged: [],
+      });
+
+      const callbacks = createMockCallbacks({
+        requestSettings: async () => ({
+          execution: "parallel" as const,
+          tdd: true,
+          finalReview: false,
+          specCheck: false,
+          integrationTest: true,
+          testCommand: "npm test",
+        }),
+      });
+
+      const engine = new PlanExecutionEngine(io, TEST_CWD, TEST_AGENT_DIR);
+      await engine.execute(PLAN_PATH, callbacks);
+
+      assert.ok(
+        callbacks.calls["requestTestRegressionAction"],
+        "requestTestRegressionAction should be called on regression",
+      );
+    });
+
+    // (e) engine persists retryState.tasks before task-level retries
+    it("persists retryState.tasks before task-level retries", async () => {
+      const io = createMockIO();
+      seedFiles(io);
+
+
+      let dispatchCount = 0;
+      io.dispatchSubagent = async (config) => {
+        dispatchCount++;
+        if (config.taskNumber === 1 && dispatchCount === 1) {
+          return {
+            taskNumber: config.taskNumber,
+            status: "BLOCKED" as const,
+            output: "blocked output",
+            concerns: null,
+            needs: null,
+            blocker: "Missing dependency",
+            filesChanged: [],
+          };
+        }
+        return {
+          taskNumber: config.taskNumber,
+          status: "DONE" as const,
+          output: "done",
+          concerns: null, needs: null, blocker: null,
+          filesChanged: [],
+        };
+      };
+
+      const stateWrites: RunState[] = [];
+      const origWriteFile = io.writeFile.bind(io);
+      io.writeFile = async (path: string, content: string) => {
+        if (path.includes(".state.json")) {
+          try { stateWrites.push(JSON.parse(content)); } catch { /* ignore */ }
+        }
+        return origWriteFile(path, content);
+      };
+
+      const callbacks = createMockCallbacks({
+        requestJudgment: async (req) => ({ action: "retry" as const }),
+      });
+
+      const engine = new PlanExecutionEngine(io, TEST_CWD, TEST_AGENT_DIR);
+      await engine.execute(PLAN_PATH, callbacks);
+
+      // Check that retryState.tasks was persisted
+      const hasTaskRetry = stateWrites.some(
+        (s) => s.retryState && Object.keys(s.retryState.tasks).length > 0,
+      );
+      assert.ok(hasTaskRetry, "retryState.tasks should be persisted before task retry");
+    });
+  });
+
+  describe("judgment response handling", () => {
+
+    // (f) JudgmentResponse "skip": proceeds to next task
+    it("skip judgment proceeds to next task", async () => {
+      const io = createMockIO();
+      seedFiles(io);
+
+
+      io.dispatchSubagent = async (config) => {
+        if (config.taskNumber === 1) {
+          return {
+            taskNumber: 1,
+            status: "BLOCKED" as const,
+            output: "blocked",
+            concerns: null, needs: null,
+            blocker: "Cannot proceed",
+            filesChanged: [],
+          };
+        }
+        return {
+          taskNumber: config.taskNumber,
+          status: "DONE" as const,
+          output: "done",
+          concerns: null, needs: null, blocker: null,
+          filesChanged: [],
+        };
+      };
+
+      const callbacks = createMockCallbacks({
+        requestJudgment: async () => ({ action: "skip" as const }),
+      });
+
+      const engine = new PlanExecutionEngine(io, TEST_CWD, TEST_AGENT_DIR);
+      await engine.execute(PLAN_PATH, callbacks);
+
+      // Execution should complete even though task 1 was blocked
+      const progressCalls = callbacks.calls["onProgress"] ?? [];
+      const completed = progressCalls.filter(
+        (c: any[]) => c[0].type === "execution_completed",
+      );
+      assert.ok(completed.length > 0, "Execution should complete after skip");
+    });
+
+    // (g) JudgmentResponse "stop": halts, persists stopped state
+    it("stop judgment halts and persists stopped state", async () => {
+      const io = createMockIO();
+      seedFiles(io);
+
+
+      io.dispatchSubagent = async (config) => ({
+        taskNumber: config.taskNumber,
+        status: "BLOCKED" as const,
+        output: "blocked",
+        concerns: null, needs: null,
+        blocker: "Cannot proceed",
+        filesChanged: [],
+      });
+
+      const stateWrites: RunState[] = [];
+      const origWriteFile = io.writeFile.bind(io);
+      io.writeFile = async (path: string, content: string) => {
+        if (path.includes(".state.json")) {
+          try { stateWrites.push(JSON.parse(content)); } catch { /* ignore */ }
+        }
+        return origWriteFile(path, content);
+      };
+
+      const callbacks = createMockCallbacks({
+        requestJudgment: async () => ({ action: "stop" as const }),
+      });
+
+      const engine = new PlanExecutionEngine(io, TEST_CWD, TEST_AGENT_DIR);
+      try {
+        await engine.execute(PLAN_PATH, callbacks);
+      } catch {
+        // Expected — stop causes the engine to throw/halt
+      }
+
+      // Should persist stopped state
+      const stoppedStates = stateWrites.filter((s) => s.status === "stopped");
+      assert.ok(stoppedStates.length > 0, "Stopped state should be persisted");
+    });
+
+    // (h) JudgmentResponse "provide_context": re-dispatches with context appended
+    it("provide_context re-dispatches with context appended", async () => {
+      const io = createMockIO();
+      seedFiles(io);
+
+
+      let task1Dispatches = 0;
+      const dispatchedTasks: SubagentConfig[] = [];
+      io.dispatchSubagent = async (config) => {
+        dispatchedTasks.push(config);
+        if (config.taskNumber === 1) {
+          task1Dispatches++;
+          if (task1Dispatches === 1) {
+            return {
+              taskNumber: 1,
+              status: "NEEDS_CONTEXT" as const,
+              output: "need more info",
+              concerns: null,
+              needs: "What is the API format?",
+              blocker: null,
+              filesChanged: [],
+            };
+          }
+        }
+        return {
+          taskNumber: config.taskNumber,
+          status: "DONE" as const,
+          output: "done",
+          concerns: null, needs: null, blocker: null,
+          filesChanged: [],
+        };
+      };
+
+      const callbacks = createMockCallbacks({
+        requestJudgment: async () => ({
+          action: "provide_context" as const,
+          context: "The API uses JSON format.",
+        }),
+      });
+
+      const engine = new PlanExecutionEngine(io, TEST_CWD, TEST_AGENT_DIR);
+      await engine.execute(PLAN_PATH, callbacks);
+
+      // Task 1 should have been dispatched twice
+      const task1Configs = dispatchedTasks.filter((d) => d.taskNumber === 1);
+      assert.ok(task1Configs.length >= 2, `Task 1 should be dispatched at least twice, got ${task1Configs.length}`);
+
+      // Second dispatch should contain the provided context
+      const secondDispatch = task1Configs[1];
+      assert.ok(
+        secondDispatch.task.includes("The API uses JSON format."),
+        "Second dispatch should include provided context",
+      );
+    });
+
+    // (i) JudgmentResponse "accept": logs concerns and proceeds
+    it("accept judgment logs concerns and proceeds", async () => {
+      const io = createMockIO();
+      seedFiles(io);
+
+
+      io.dispatchSubagent = async (config) => {
+        if (config.taskNumber === 1) {
+          return {
+            taskNumber: 1,
+            status: "DONE_WITH_CONCERNS" as const,
+            output: "done but concerns",
+            concerns: "Code could be cleaner",
+            needs: null,
+            blocker: null,
+            filesChanged: ["file.ts"],
+          };
+        }
+        return {
+          taskNumber: config.taskNumber,
+          status: "DONE" as const,
+          output: "done",
+          concerns: null, needs: null, blocker: null,
+          filesChanged: [],
+        };
+      };
+
+      const callbacks = createMockCallbacks({
+        requestJudgment: async () => ({ action: "accept" as const }),
+      });
+
+      const engine = new PlanExecutionEngine(io, TEST_CWD, TEST_AGENT_DIR);
+      await engine.execute(PLAN_PATH, callbacks);
+
+      // Execution should complete
+      const progressCalls = callbacks.calls["onProgress"] ?? [];
+      const completed = progressCalls.filter(
+        (c: any[]) => c[0].type === "execution_completed",
+      );
+      assert.ok(completed.length > 0, "Execution should complete after accept");
+    });
+
+    // (j) JudgmentResponse "escalate": calls callbacks.requestFailureAction
+    it("escalate judgment calls requestFailureAction", async () => {
+      const io = createMockIO();
+      seedFiles(io);
+
+
+      io.dispatchSubagent = async (config) => ({
+        taskNumber: config.taskNumber,
+        status: "BLOCKED" as const,
+        output: "blocked",
+        concerns: null, needs: null,
+        blocker: "Fatal error",
+        filesChanged: [],
+      });
+
+      const callbacks = createMockCallbacks({
+        requestJudgment: async () => ({ action: "escalate" as const }),
+      });
+      // Override requestFailureAction to return skip (so execution can proceed)
+      callbacks.requestFailureAction = async (ctx) => {
+        if (!callbacks.calls["requestFailureAction"]) callbacks.calls["requestFailureAction"] = [];
+        callbacks.calls["requestFailureAction"].push([ctx]);
+        return "skip";
+      };
+
+      const engine = new PlanExecutionEngine(io, TEST_CWD, TEST_AGENT_DIR);
+      await engine.execute(PLAN_PATH, callbacks);
+
+      assert.ok(
+        callbacks.calls["requestFailureAction"],
+        "requestFailureAction should be called on escalate",
+      );
+    });
+  });
+
+  describe("retry and state persistence", () => {
+
+    // (k) retries waves up to 3 times, persisting retryState.waves
+    it("retries waves up to 3 times and persists retryState.waves", async () => {
+      const io = createMockIO();
+      seedFiles(io);
+
+
+      io.dispatchSubagent = async (config) => ({
+        taskNumber: config.taskNumber,
+        status: "DONE" as const,
+        output: "done",
+        concerns: null, needs: null, blocker: null,
+        filesChanged: [],
+      });
+
+      // Spec review always fails
+      let specDispatchCount = 0;
+      const origDispatch = io.dispatchSubagent.bind(io);
+      io.dispatchSubagent = async (config, options) => {
+        if (config.agent === "spec-reviewer") {
+          specDispatchCount++;
+          return {
+            taskNumber: config.taskNumber,
+            status: "BLOCKED" as const,
+            output: "Spec review failed: implementation does not match spec",
+            concerns: null, needs: null,
+            blocker: "Spec mismatch",
+            filesChanged: [],
+          };
+        }
+        return {
+          taskNumber: config.taskNumber,
+          status: "DONE" as const,
+          output: "done",
+          concerns: null, needs: null, blocker: null,
+          filesChanged: [],
+        };
+      };
+
+      const stateWrites: RunState[] = [];
+      const origWriteFile = io.writeFile.bind(io);
+      io.writeFile = async (path: string, content: string) => {
+        if (path.includes(".state.json")) {
+          try { stateWrites.push(JSON.parse(content)); } catch { /* ignore */ }
+        }
+        return origWriteFile(path, content);
+      };
+
+      let judgmentCount = 0;
+      const callbacks = createMockCallbacks({
+        requestSettings: async () => ({
+          execution: "parallel" as const,
+          tdd: true,
+          finalReview: false,
+          specCheck: true,
+          integrationTest: false,
+          testCommand: null,
+        }),
+        requestJudgment: async (req) => {
+          judgmentCount++;
+          if (req.type === "spec_review_failed") {
+            return { action: "retry" as const };
+          }
+          if (req.type === "retry_exhausted") {
+            return { action: "skip" as const };
+          }
+          return { action: "accept" as const };
+        },
+      });
+
+      const engine = new PlanExecutionEngine(io, TEST_CWD, TEST_AGENT_DIR);
+      await engine.execute(PLAN_PATH, callbacks);
+
+      // Check that retryState.waves was persisted
+      const hasWaveRetry = stateWrites.some(
+        (s) => s.retryState && Object.keys(s.retryState.waves).length > 0,
+      );
+      assert.ok(hasWaveRetry, "retryState.waves should be persisted during wave retries");
+    });
+
+    // (l) dispatches spec reviews if enabled
+    it("dispatches spec reviews if specCheck is enabled", async () => {
+      const io = createMockIO();
+      seedFiles(io);
+
+
+      const dispatchedAgents: string[] = [];
+      io.dispatchSubagent = async (config) => {
+        dispatchedAgents.push(config.agent);
+        return {
+          taskNumber: config.taskNumber,
+          status: "DONE" as const,
+          output: "done",
+          concerns: null, needs: null, blocker: null,
+          filesChanged: [],
+        };
+      };
+
+      const callbacks = createMockCallbacks({
+        requestSettings: async () => ({
+          execution: "parallel" as const,
+          tdd: true,
+          finalReview: false,
+          specCheck: true,
+          integrationTest: false,
+          testCommand: null,
+        }),
+      });
+
+      const engine = new PlanExecutionEngine(io, TEST_CWD, TEST_AGENT_DIR);
+      await engine.execute(PLAN_PATH, callbacks);
+
+      assert.ok(
+        dispatchedAgents.includes("spec-reviewer"),
+        "Should dispatch spec-reviewer when specCheck is enabled",
+      );
+    });
+
+    // (m) dispatches final code review if enabled, emits code_review_completed
+    it("dispatches final code review if enabled and emits code_review_completed", async () => {
+      const io = createMockIO();
+      seedFiles(io);
+
+
+      const dispatchedAgents: string[] = [];
+      io.dispatchSubagent = async (config) => {
+        dispatchedAgents.push(config.agent);
+        if (config.agent === "code-reviewer") {
+          return {
+            taskNumber: 0,
+            status: "DONE" as const,
+            output: "## Critical\n### Security Issue\nSQL injection vulnerability\n\n## Strengths\n- Good test coverage\n\n## Recommendations\n- Add input validation\n\n## Overall\nGenerally good code.",
+            concerns: null, needs: null, blocker: null,
+            filesChanged: [],
+          };
+        }
+        return {
+          taskNumber: config.taskNumber,
+          status: "DONE" as const,
+          output: "done",
+          concerns: null, needs: null, blocker: null,
+          filesChanged: [],
+        };
+      };
+
+      const callbacks = createMockCallbacks({
+        requestSettings: async () => ({
+          execution: "parallel" as const,
+          tdd: true,
+          finalReview: true,
+          specCheck: false,
+          integrationTest: false,
+          testCommand: null,
+        }),
+        requestJudgment: async (req) => {
+          if (req.type === "code_review") {
+            return { action: "accept" as const };
+          }
+          return { action: "accept" as const };
+        },
+      });
+
+      const engine = new PlanExecutionEngine(io, TEST_CWD, TEST_AGENT_DIR);
+      await engine.execute(PLAN_PATH, callbacks);
+
+      assert.ok(
+        dispatchedAgents.includes("code-reviewer"),
+        "Should dispatch code-reviewer when finalReview is enabled",
+      );
+
+      // Check for code_review_completed event
+      const progressCalls = callbacks.calls["onProgress"] ?? [];
+      const codeReviewEvents = progressCalls.filter(
+        (c: any[]) => c[0].type === "code_review_completed",
+      );
+      assert.ok(codeReviewEvents.length > 0, "Should emit code_review_completed event");
+      assert.ok(codeReviewEvents[0][0].review, "Event should include review summary");
+    });
+
+    // (n) persists retryState.finalReview for final-review retries
+    it("persists retryState.finalReview for final-review retries", async () => {
+      const io = createMockIO();
+      seedFiles(io);
+
+
+      let reviewCount = 0;
+      io.dispatchSubagent = async (config) => {
+        if (config.agent === "code-reviewer") {
+          reviewCount++;
+          return {
+            taskNumber: 0,
+            status: "DONE" as const,
+            output: "## Critical\n### Issue\nBug found\n\n## Overall\nNeeds fixes.",
+            concerns: null, needs: null, blocker: null,
+            filesChanged: [],
+          };
+        }
+        return {
+          taskNumber: config.taskNumber,
+          status: "DONE" as const,
+          output: "done",
+          concerns: null, needs: null, blocker: null,
+          filesChanged: [],
+        };
+      };
+
+      const stateWrites: RunState[] = [];
+      const origWriteFile = io.writeFile.bind(io);
+      io.writeFile = async (path: string, content: string) => {
+        if (path.includes(".state.json")) {
+          try { stateWrites.push(JSON.parse(content)); } catch { /* ignore */ }
+        }
+        return origWriteFile(path, content);
+      };
+
+      let judgmentCount = 0;
+      const callbacks = createMockCallbacks({
+        requestSettings: async () => ({
+          execution: "parallel" as const,
+          tdd: true,
+          finalReview: true,
+          specCheck: false,
+          integrationTest: false,
+          testCommand: null,
+        }),
+        requestJudgment: async (req) => {
+          if (req.type === "code_review") {
+            judgmentCount++;
+            if (judgmentCount <= 2) {
+              return { action: "retry" as const };
+            }
+            return { action: "accept" as const };
+          }
+          return { action: "accept" as const };
+        },
+      });
+
+      const engine = new PlanExecutionEngine(io, TEST_CWD, TEST_AGENT_DIR);
+      await engine.execute(PLAN_PATH, callbacks);
+
+      // Check that retryState.finalReview was persisted
+      const hasFinalReviewRetry = stateWrites.some(
+        (s) => s.retryState && s.retryState.finalReview !== null,
+      );
+      assert.ok(hasFinalReviewRetry, "retryState.finalReview should be persisted during final review retries");
+    });
+
+    // (o) persists state after each wave
+    it("persists state after each wave", async () => {
+      const io = createMockIO();
+      seedFiles(io);
+
+
+      io.dispatchSubagent = async (config) => ({
+        taskNumber: config.taskNumber,
+        status: "DONE" as const,
+        output: "done",
+        concerns: null, needs: null, blocker: null,
+        filesChanged: [],
+      });
+
+      const stateWrites: RunState[] = [];
+      const origWriteFile = io.writeFile.bind(io);
+      io.writeFile = async (path: string, content: string) => {
+        if (path.includes(".state.json")) {
+          try { stateWrites.push(JSON.parse(content)); } catch { /* ignore */ }
+        }
+        return origWriteFile(path, content);
+      };
+
+      const callbacks = createMockCallbacks();
+      const engine = new PlanExecutionEngine(io, TEST_CWD, TEST_AGENT_DIR);
+      await engine.execute(PLAN_PATH, callbacks);
+
+      // Check that waves state was persisted with done status
+      const doneWaves = stateWrites.filter(
+        (s) => s.waves && s.waves.some((w) => w.status === "done"),
+      );
+      assert.ok(doneWaves.length > 0, "State should be persisted with done wave status");
+    });
+  });
+
+  describe("cancellation", () => {
+
+    // (p) "stop after wave" cancellation: completes wave, commits, stops
+    it("stop after wave: completes wave, commits, then stops", async () => {
+      const io = createMockIO();
+      seedFiles(io);
+
+
+      let dispatchCount = 0;
+      io.dispatchSubagent = async (config) => {
+        dispatchCount++;
+        return {
+          taskNumber: config.taskNumber,
+          status: "DONE" as const,
+          output: "done",
+          concerns: null, needs: null, blocker: null,
+          filesChanged: [],
+        };
+      };
+
+      const callbacks = createMockCallbacks();
+      const engine = new PlanExecutionEngine(io, TEST_CWD, TEST_AGENT_DIR);
+
+      // Request cancellation after first dispatch
+      const origDispatch = io.dispatchSubagent;
+      io.dispatchSubagent = async (config, options) => {
+        const result = await origDispatch(config, options);
+        // Cancel after first wave's task dispatches
+        if (config.taskNumber === 1) {
+          engine.requestCancellation("wave");
+        }
+        return result;
+      };
+
+      try {
+        await engine.execute(PLAN_PATH, callbacks);
+      } catch {
+        // May throw on stop
+      }
+
+      // Wave 1 should have committed
+      const progressCalls = callbacks.calls["onProgress"] ?? [];
+      const waveCompleted = progressCalls.filter(
+        (c: any[]) => c[0].type === "wave_completed",
+      );
+      assert.ok(waveCompleted.length >= 1, "First wave should commit before stopping");
+
+      // Should have stopped (not completed)
+      const executionCompleted = progressCalls.filter(
+        (c: any[]) => c[0].type === "execution_completed",
+      );
+      // If cancellation halts during wave 2 iteration, execution_completed should not fire
+      // or only wave 1 completed
+      const executionStopped = progressCalls.filter(
+        (c: any[]) => c[0].type === "execution_stopped",
+      );
+      // At least one of: stopped or did not start wave 2
+      const wave2Started = progressCalls.filter(
+        (c: any[]) => c[0].type === "wave_started" && c[0].wave === 2,
+      );
+      // Either wave 2 didn't start, or we got a stop
+      assert.ok(
+        wave2Started.length === 0 || executionStopped.length > 0,
+        "Should stop after first wave or emit execution_stopped",
+      );
+    });
+
+    // (q) "stop after task" cancellation: doesn't commit partial wave
+    it("stop after task: does not commit partial wave", async () => {
+      const io = createMockIO();
+      seedFiles(io);
+
+
+      // Need a plan with multiple tasks in a single wave for this test
+      // Use tasks without dependencies - they'll be in the same wave
+      const multiTaskPlan = `
+## Goal
+
+Build a widget library.
+
+## Architecture Summary
+
+Modular component architecture with barrel exports.
+
+## Tech Stack
+
+TypeScript, Node.js
+
+## File Structure
+
+- \`src/a.ts\` (Create) — Module A
+- \`src/b.ts\` (Create) — Module B
+
+## Tasks
+
+### Task 1: Create module A
+
+**Files:**
+- Create: \`src/a.ts\`
+
+**Steps:**
+- [ ] **Step 1: Create A** — Implement module A
+
+**Acceptance criteria:**
+- Module A is exported
+
+**Model recommendation:** cheap
+
+### Task 2: Create module B
+
+**Files:**
+- Create: \`src/b.ts\`
+
+**Steps:**
+- [ ] **Step 1: Create B** — Implement module B
+
+**Acceptance criteria:**
+- Module B is exported
+
+**Model recommendation:** cheap
+
+## Dependencies
+
+(none)
+
+## Risk Assessment
+
+Low risk.
+`;
+      io.files.set(PLAN_PATH, multiTaskPlan);
+
+      const commitCalls: string[][] = [];
+      const origExec = io.exec.bind(io);
+      io.exec = async (cmd: string, args: string[], cwd: string) => {
+        if (cmd === "git" && args[0] === "commit") {
+          commitCalls.push(args);
+        }
+        return origExec(cmd, args, cwd);
+      };
+
+      io.dispatchSubagent = async (config) => ({
+        taskNumber: config.taskNumber,
+        status: "DONE" as const,
+        output: "done",
+        concerns: null, needs: null, blocker: null,
+        filesChanged: [],
+      });
+
+      const callbacks = createMockCallbacks();
+      const engine = new PlanExecutionEngine(io, TEST_CWD, TEST_AGENT_DIR);
+
+      // Cancel at task level during dispatch
+      const origDispatch = io.dispatchSubagent;
+      io.dispatchSubagent = async (config, options) => {
+        if (config.taskNumber === 1) {
+          engine.requestCancellation("task");
+        }
+        return origDispatch(config, options);
+      };
+
+      try {
+        await engine.execute(PLAN_PATH, callbacks);
+      } catch {
+        // May throw on stop
+      }
+
+      // Should NOT have committed wave (partial wave)
+      const progressCalls = callbacks.calls["onProgress"] ?? [];
+      const waveCompleted = progressCalls.filter(
+        (c: any[]) => c[0].type === "wave_completed",
+      );
+      assert.equal(waveCompleted.length, 0, "Should NOT commit partial wave on task cancellation");
     });
   });
 });
