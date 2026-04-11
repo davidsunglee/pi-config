@@ -1,6 +1,7 @@
 import { basename } from "node:path";
 import type {
   ExecutionIO,
+  ExecutionOutcome,
   EngineCallbacks,
   Plan,
   PlanTask,
@@ -184,7 +185,7 @@ export class PlanExecutionEngine {
     this.taskQueue = null;
   }
 
-  async execute(planPath: string, callbacks: EngineCallbacks): Promise<void> {
+  async execute(planPath: string, callbacks: EngineCallbacks): Promise<ExecutionOutcome> {
     const io = this.io;
     const cwd = this.cwd;
     const planFileName = basename(planPath);
@@ -233,7 +234,7 @@ export class PlanExecutionEngine {
       if (existingState !== null) {
         const action = await callbacks.requestResumeAction(existingState);
         if (action === "cancel") {
-          return;
+          return "cancelled";
         }
         if (action === "continue") {
           // Validate that the environment matches saved state
@@ -332,7 +333,7 @@ export class PlanExecutionEngine {
             const currentBranch = await getCurrentBranch(io, cwd);
             const confirmed = await callbacks.confirmMainBranch(currentBranch);
             if (!confirmed) {
-              return; // Clean early exit — no state file or lock created
+              return "cancelled"; // Clean early exit — no state file or lock created
             }
             workspace = {
               type: "current",
@@ -427,6 +428,8 @@ export class PlanExecutionEngine {
           type: "execution_completed",
           totalWaves: waves.length,
         });
+
+        return "completed";
       } else {
         // Stopped path: release lock, persist stopped state, emit execution_stopped
         await releaseLock(io, cwd, planFileName);
@@ -444,6 +447,8 @@ export class PlanExecutionEngine {
           wave: 0,
           reason: "Execution stopped by user or judgment",
         });
+
+        return "stopped";
       }
     } catch (err) {
       errorOccurred = true;

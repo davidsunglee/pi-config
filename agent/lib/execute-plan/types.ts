@@ -104,6 +104,11 @@ export interface Plan {
   fileName: string;
 }
 
+// ── Execution outcome ───────────────────────────────────────────────
+
+/** Outcome returned by `PlanExecutionEngine.execute()`. */
+export type ExecutionOutcome = "completed" | "cancelled" | "stopped";
+
 // ── Execution & state types ─────────────────────────────────────────
 
 export interface Wave {

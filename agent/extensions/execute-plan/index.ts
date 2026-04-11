@@ -21,6 +21,7 @@ import {
   isDirty,
   isMainBranch,
   type EngineCallbacks,
+  type ExecutionOutcome,
   type CodeReviewSummary,
   type ProgressEvent,
 } from "../../lib/execute-plan/index.ts";
@@ -433,32 +434,41 @@ async function handleExecutePlan(
 
   try {
     // Run the engine
-    await engine.execute(resolvedPlanPath, callbacks);
+    const outcome: ExecutionOutcome = await engine.execute(resolvedPlanPath, callbacks);
 
-    // Show code review summary if available
-    if (latestCodeReview && ctx.hasUI) {
-      await ctx.ui.custom<void>((tui, theme, keybindings, done) => {
-        return new ReviewSummaryComponent(
-          tui,
-          theme,
-          keybindings,
-          latestCodeReview!,
-          done,
-        );
-      });
-    }
-
-    if (ctx.hasUI) {
-      let successMsg = "Plan execution completed successfully.";
-      const onMain = await isMainBranch(io, cwd);
-      if (!onMain) {
-        successMsg +=
-          " Consider using /finishing-a-development-branch to complete your work.";
+    if (outcome === "completed") {
+      // Show code review summary if available
+      if (latestCodeReview && ctx.hasUI) {
+        await ctx.ui.custom<void>((tui, theme, keybindings, done) => {
+          return new ReviewSummaryComponent(
+            tui,
+            theme,
+            keybindings,
+            latestCodeReview!,
+            done,
+          );
+        });
       }
-      ctx.ui.notify(successMsg, "info");
+
+      if (ctx.hasUI) {
+        let successMsg = "Plan execution completed successfully.";
+        const onMain = await isMainBranch(io, cwd);
+        if (!onMain) {
+          successMsg +=
+            " Consider using /finishing-a-development-branch to complete your work.";
+        }
+        ctx.ui.notify(successMsg, "info");
+      }
+
+      return { completed: true, message: "Plan execution completed." };
     }
 
-    return { completed: true, message: "Plan execution completed." };
+    if (outcome === "cancelled") {
+      return { completed: false, message: "Plan execution cancelled." };
+    }
+
+    // outcome === "stopped"
+    return { completed: false, message: "Plan execution stopped." };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error("[execute-plan] Engine error:", message);
