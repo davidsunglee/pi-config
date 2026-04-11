@@ -213,18 +213,21 @@ function parseDependencies(content: string): PlanDependencies {
   const section = extractSectionAny(content, "Dependencies");
   if (!section) return deps;
 
-  const lineRe =
-    /^-?\s*Task\s+(\d+)\s+depends\s+on:\s+Task\s+([\d,\s]+)/gim;
+  const lineRe = /^-?\s*Task\s+(\d+)\s+depends\s+on:\s*(.+)$/gim;
   let match: RegExpExecArray | null;
   while ((match = lineRe.exec(section)) !== null) {
     const taskNum = parseInt(match[1]!, 10);
-    const depNums = match[2]!
-      .split(/[,\s]+/)
-      .filter(Boolean)
-      .map(n => parseInt(n, 10))
-      .filter(n => !isNaN(n));
-    const existing = deps.get(taskNum) ?? [];
-    deps.set(taskNum, [...existing, ...depNums]);
+    const depsPart = match[2]!;
+    const depNums: number[] = [];
+    const taskRefRe = /Task\s+(\d+)/gi;
+    let taskMatch: RegExpExecArray | null;
+    while ((taskMatch = taskRefRe.exec(depsPart)) !== null) {
+      depNums.push(parseInt(taskMatch[1]!, 10));
+    }
+    if (depNums.length > 0) {
+      const existing = deps.get(taskNum) ?? [];
+      deps.set(taskNum, [...existing, ...depNums]);
+    }
   }
   return deps;
 }
@@ -257,8 +260,10 @@ function parseTestCommand(content: string): string | null {
  * Extract TODO id from `**Source:** \`TODO-<id>\`` anywhere in the document.
  */
 function parseSourceTodoId(content: string): string | null {
-  const re = /\*\*Source:\*\*\s+`TODO-([a-f0-9]+)`/i;
-  const match = re.exec(content);
+  // Try backticked form first, then plain form
+  const backticked = /\*\*Source:\*\*\s+`TODO-([a-f0-9]+)`/i;
+  const plain = /\*\*Source:\*\*\s+TODO-([a-f0-9]+)/i;
+  const match = backticked.exec(content) ?? plain.exec(content);
   return match ? match[1]! : null;
 }
 

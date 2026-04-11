@@ -24,12 +24,18 @@ export function getTemplatePath(agentDir: string, type: TemplateType): string {
 
 // ── TDD block ─────────────────────────────────────────────────────────
 
-const TDD_INSTRUCTIONS = `## TDD Required
-Follow Test-Driven Development:
-1. Write failing tests first
-2. Implement minimum code to pass
-3. Refactor if needed
-4. Repeat`;
+const TDD_INSTRUCTIONS = `## Test-Driven Development
+
+Follow the red-green-refactor cycle strictly:
+
+1. **Write a failing test first** — No production code without a failing test
+2. **Run the test to verify it fails** — Confirm the test fails for the right reason
+3. **Write the minimum code to pass** — Only what's needed to make the test green
+4. **Run tests to verify they pass** — All tests, not just the new one
+5. **Refactor if needed** — Clean up while tests are green
+
+Do not skip the failure verification step. A test that has never been seen failing
+has never been shown to be capable of detecting the bug it was written for.`;
 
 // ── Implementer prompt filler ─────────────────────────────────────────
 

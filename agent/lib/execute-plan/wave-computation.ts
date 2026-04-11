@@ -19,7 +19,16 @@ export function computeWaves(
 ): Wave[] {
   const taskNumbers = new Set(tasks.map((t) => t.number));
 
-  // Step 1: Validate all dependency references
+  // Step 1a: Validate dependency-map keys reference existing tasks
+  for (const sourceTask of dependencies.keys()) {
+    if (!taskNumbers.has(sourceTask)) {
+      throw new Error(
+        `Dependency map references non-existent source task ${sourceTask}`,
+      );
+    }
+  }
+
+  // Step 1b: Validate all dependency targets reference existing tasks
   for (const [taskNum, deps] of dependencies) {
     for (const dep of deps) {
       if (!taskNumbers.has(dep)) {
