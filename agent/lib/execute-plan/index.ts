@@ -123,3 +123,6 @@ export {
 
 // Task queue
 export { TaskQueue } from "./task-queue.js";
+
+// Engine
+export { PlanExecutionEngine } from "./engine.js";
