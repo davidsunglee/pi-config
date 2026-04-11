@@ -5,6 +5,7 @@
 export type {
   ExecResult,
   ExecutionIO,
+  ExecutionOutcome,
   WorkspaceChoice,
   WorkspaceInfo,
   PlanHeader,
