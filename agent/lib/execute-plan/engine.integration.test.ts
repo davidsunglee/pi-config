@@ -559,11 +559,327 @@ describe("Scenario 4: Resume from stopped state", () => {
 // ── Scenario 5: Test regression — post-wave test failure ───────────
 
 describe("Scenario 5: Test regression — post-wave test failure", () => {
-  // Tests added in Task 5
+  // The exec handler tracks how many times the test command (sh -c npm test)
+  // has been invoked. Call 1 = baseline (pass), call 2 = post-wave-1 (fail),
+  // call 3+ = pass. All other commands fall through to default mock behavior.
+  function makeTestRegressionExecHandler(): { handler: MockExecHandler; getTestCallCount: () => number } {
+    let testCallCount = 0;
+    const handler: MockExecHandler = async (cmd, args, _cwd) => {
+      // git rev-parse --git-dir → simulate git repo
+      if (cmd === "git" && args[0] === "rev-parse" && args.includes("--git-dir")) {
+        return { stdout: ".git\n", stderr: "", exitCode: 0 };
+      }
+      // git rev-parse --abbrev-ref HEAD → branch name (feature branch, not main)
+      if (cmd === "git" && args[0] === "rev-parse" && args.includes("--abbrev-ref")) {
+        return { stdout: "feature/test\n", stderr: "", exitCode: 0 };
+      }
+      // git rev-parse HEAD → HEAD sha
+      if (cmd === "git" && args[0] === "rev-parse" && args.includes("HEAD")) {
+        return { stdout: "abc123def456\n", stderr: "", exitCode: 0 };
+      }
+      // git check-ignore -q → directory is ignored
+      if (cmd === "git" && args[0] === "check-ignore") {
+        return { stdout: "", stderr: "", exitCode: 0 };
+      }
+      // kill -0 → process not alive (stale lock)
+      if (cmd === "kill" && args[0] === "-0") {
+        return { stdout: "", stderr: "No such process", exitCode: 1 };
+      }
+      // Test command: sh -c "npm test"
+      if (cmd === "sh" && args[0] === "-c" && args[1]?.startsWith("npm test")) {
+        testCallCount++;
+        if (testCallCount === 1) {
+          // Baseline run — all tests pass
+          return { stdout: "All tests passed\n", stderr: "", exitCode: 0 };
+        }
+        if (testCallCount === 2) {
+          // Post-wave-1 run — a new test failure (regression)
+          return {
+            stdout: "not ok 1 - notifier dispatches events\nnpm test failed\n",
+            stderr: "",
+            exitCode: 1,
+          };
+        }
+        // Call 3+ — tests pass again (after retry/wave reset)
+        return { stdout: "All tests passed\n", stderr: "", exitCode: 0 };
+      }
+      return { stdout: "", stderr: "", exitCode: 0 };
+    };
+    return { handler, getTestCallCount: () => testCallCount };
+  }
+
+  it("5a — regression action retry: re-dispatches wave 1 tasks and completes", async () => {
+    const { handler, getTestCallCount } = makeTestRegressionExecHandler();
+    const io = createMockIO(undefined, handler);
+    seedIntegrationFiles(io, INTEGRATION_PLAN_MD);
+
+    const dispatched: number[] = [];
+    io.dispatchSubagent = async (config) => {
+      dispatched.push(config.taskNumber);
+      return doneResult(config.taskNumber);
+    };
+
+    const regressionContexts: import("./types.ts").TestRegressionContext[] = [];
+
+    const callbacks = createMockCallbacks({
+      requestSettings: async (_plan, _detected) => ({
+        execution: "parallel" as const,
+        tdd: false,
+        finalReview: false,
+        specCheck: false,
+        integrationTest: true,
+        testCommand: "npm test",
+      }),
+      requestTestRegressionAction: async (ctx) => {
+        regressionContexts.push(ctx);
+        return "retry";
+      },
+    });
+
+    const engine = new PlanExecutionEngine(io, TEST_CWD, TEST_AGENT_DIR);
+    const outcome = await engine.execute(INT_PLAN_PATH, callbacks);
+
+    // Outcome
+    assert.equal(outcome, "completed");
+
+    // requestTestRegressionAction was called with the right context
+    assert.ok(regressionContexts.length > 0, "requestTestRegressionAction should be called");
+    const ctx = regressionContexts[0];
+    assert.equal(ctx.wave, 1, "Regression context should report wave 1");
+    assert.ok(ctx.newFailures.length > 0, "Regression context should have new failures");
+    assert.ok(ctx.testOutput.length > 0, "Regression context should have test output");
+
+    // Task 1 was dispatched at least twice (original + after regression retry)
+    const task1Dispatches = dispatched.filter((n) => n === 1);
+    assert.ok(task1Dispatches.length >= 2, `Task 1 should be dispatched at least twice, got ${task1Dispatches.length}`);
+
+    // Execution completed
+    const execCompleted = progressEvents(callbacks, "execution_completed");
+    assert.equal(execCompleted.length, 1, "execution_completed should be emitted");
+  });
+
+  it("5b — regression action skip: wave 1 not retried, wave 2 proceeds, completes", async () => {
+    const { handler } = makeTestRegressionExecHandler();
+    const io = createMockIO(undefined, handler);
+    seedIntegrationFiles(io, INTEGRATION_PLAN_MD);
+
+    const dispatched: number[] = [];
+    io.dispatchSubagent = async (config) => {
+      dispatched.push(config.taskNumber);
+      return doneResult(config.taskNumber);
+    };
+
+    const regressionContexts: import("./types.ts").TestRegressionContext[] = [];
+
+    const callbacks = createMockCallbacks({
+      requestSettings: async (_plan, _detected) => ({
+        execution: "parallel" as const,
+        tdd: false,
+        finalReview: false,
+        specCheck: false,
+        integrationTest: true,
+        testCommand: "npm test",
+      }),
+      requestTestRegressionAction: async (ctx) => {
+        regressionContexts.push(ctx);
+        return "skip";
+      },
+    });
+
+    const engine = new PlanExecutionEngine(io, TEST_CWD, TEST_AGENT_DIR);
+    const outcome = await engine.execute(INT_PLAN_PATH, callbacks);
+
+    // Outcome
+    assert.equal(outcome, "completed");
+
+    // requestTestRegressionAction was called
+    assert.ok(regressionContexts.length > 0, "requestTestRegressionAction should be called");
+
+    // Task 1 dispatched only once (no retry after skip)
+    const task1Dispatches = dispatched.filter((n) => n === 1);
+    assert.equal(task1Dispatches.length, 1, "Task 1 should be dispatched only once (no retry on skip)");
+
+    // Wave 2 started (execution continued past regression)
+    const waveStarted = progressEvents(callbacks, "wave_started");
+    const wave2Started = waveStarted.filter((e) => e.wave === 2);
+    assert.equal(wave2Started.length, 1, "Wave 2 should have started after skip");
+
+    // Execution completed
+    const execCompleted = progressEvents(callbacks, "execution_completed");
+    assert.equal(execCompleted.length, 1, "execution_completed should be emitted");
+  });
 });
 
 // ── Scenario 6: Precondition failures propagate correctly ──────────
 
 describe("Scenario 6: Precondition failures propagate correctly", () => {
-  // Tests added in Task 5
+  it("6a — resume cancel: returns 'cancelled', does not acquire a new lock", async () => {
+    const io = createMockIO();
+    seedIntegrationFiles(io, INTEGRATION_PLAN_MD);
+
+    // Pre-seed a stopped state for the integration plan
+    const stoppedState: RunState = {
+      plan: INT_PLAN_FILE_NAME,
+      status: "stopped",
+      lock: null,
+      startedAt: new Date(Date.now() - 60000).toISOString(),
+      stoppedAt: new Date().toISOString(),
+      stopGranularity: "wave",
+      settings: DEFAULT_SETTINGS,
+      workspace: {
+        type: "current",
+        path: TEST_CWD,
+        branch: "feature/test",
+      },
+      preExecutionSha: "abc123def456",
+      baselineTest: null,
+      retryState: {
+        tasks: {},
+        waves: {},
+        finalReview: null,
+      },
+      waves: [
+        {
+          wave: 1,
+          tasks: [1],
+          status: "done",
+          commitSha: "wave1sha123",
+        },
+      ],
+    };
+    io.files.set(INT_STATE_PATH, JSON.stringify(stoppedState, null, 2));
+
+    const callbacks = createMockCallbacks({
+      requestResumeAction: async (_state) => "cancel",
+    });
+
+    const engine = new PlanExecutionEngine(io, TEST_CWD, TEST_AGENT_DIR);
+    const outcome = await engine.execute(INT_PLAN_PATH, callbacks);
+
+    // Outcome must be "cancelled"
+    assert.equal(outcome, "cancelled");
+
+    // Lock should not have been acquired — state still has lock: null
+    const stateContent = io.files.get(INT_STATE_PATH);
+    assert.ok(stateContent !== undefined, "State file should still exist");
+    const state: RunState = JSON.parse(stateContent!);
+    assert.equal(state.lock, null, "Lock should not have been acquired");
+  });
+
+  it("6b — main-branch decline: returns 'cancelled', no new state file created", async () => {
+    // Use the onMainBranchHandler from helpers, but override confirmMainBranch to return false
+    const io = createMockIO(undefined, async (cmd, args, _cwd) => {
+      // git rev-parse --git-dir → simulate git repo
+      if (cmd === "git" && args[0] === "rev-parse" && args.includes("--git-dir")) {
+        return { stdout: ".git\n", stderr: "", exitCode: 0 };
+      }
+      // git rev-parse --abbrev-ref HEAD → on main branch
+      if (cmd === "git" && args[0] === "rev-parse" && args.includes("--abbrev-ref")) {
+        return { stdout: "main\n", stderr: "", exitCode: 0 };
+      }
+      // git rev-parse HEAD → HEAD sha
+      if (cmd === "git" && args[0] === "rev-parse" && args.includes("HEAD")) {
+        return { stdout: "abc123def456\n", stderr: "", exitCode: 0 };
+      }
+      // git check-ignore -q → directory is NOT ignored (worktree dir not gitignored)
+      if (cmd === "git" && args[0] === "check-ignore") {
+        return { stdout: "", stderr: "", exitCode: 1 };
+      }
+      // kill -0 → process not alive
+      if (cmd === "kill" && args[0] === "-0") {
+        return { stdout: "", stderr: "No such process", exitCode: 1 };
+      }
+      return { stdout: "", stderr: "", exitCode: 0 };
+    });
+    seedIntegrationFiles(io, INTEGRATION_PLAN_MD);
+
+    const callbacks = createMockCallbacks({
+      // User chooses "current" workspace (stays on main, no worktree)
+      requestWorktreeSetup: async (_branch, _cwd) => ({ type: "current" as const }),
+      confirmMainBranch: async (_branch) => false,
+    });
+
+    const engine = new PlanExecutionEngine(io, TEST_CWD, TEST_AGENT_DIR);
+    const outcome = await engine.execute(INT_PLAN_PATH, callbacks);
+
+    // Outcome must be "cancelled"
+    assert.equal(outcome, "cancelled");
+
+    // No state file should have been created
+    assert.ok(!io.files.has(INT_STATE_PATH), "No state file should be created when main branch is declined");
+  });
+
+  it("6c — active lock held by another session: engine.execute throws with descriptive error", async () => {
+    const DIFFERENT_PLAN = "other-plan.md";
+    const DIFFERENT_PLAN_STATE_PATH = join(
+      TEST_CWD,
+      ".pi/plan-runs",
+      DIFFERENT_PLAN + ".state.json",
+    );
+
+    const io = createMockIO(undefined, async (cmd, args, _cwd) => {
+      // git rev-parse --git-dir → simulate git repo
+      if (cmd === "git" && args[0] === "rev-parse" && args.includes("--git-dir")) {
+        return { stdout: ".git\n", stderr: "", exitCode: 0 };
+      }
+      // git rev-parse --abbrev-ref HEAD → feature branch
+      if (cmd === "git" && args[0] === "rev-parse" && args.includes("--abbrev-ref")) {
+        return { stdout: "feature/test\n", stderr: "", exitCode: 0 };
+      }
+      // git rev-parse HEAD
+      if (cmd === "git" && args[0] === "rev-parse" && args.includes("HEAD")) {
+        return { stdout: "abc123def456\n", stderr: "", exitCode: 0 };
+      }
+      // git check-ignore
+      if (cmd === "git" && args[0] === "check-ignore") {
+        return { stdout: "", stderr: "", exitCode: 0 };
+      }
+      // kill -0: return exitCode 0 to simulate a LIVE process (active lock)
+      if (cmd === "kill" && args[0] === "-0") {
+        return { stdout: "", stderr: "", exitCode: 0 };
+      }
+      return { stdout: "", stderr: "", exitCode: 0 };
+    });
+    seedIntegrationFiles(io, INTEGRATION_PLAN_MD);
+
+    // Pre-seed a state file for a DIFFERENT plan with an active lock
+    const activeLockState: RunState = {
+      plan: DIFFERENT_PLAN,
+      status: "running",
+      lock: {
+        pid: 99999,
+        session: "other-session",
+        acquiredAt: new Date(Date.now() - 30000).toISOString(),
+      },
+      startedAt: new Date(Date.now() - 60000).toISOString(),
+      stoppedAt: null,
+      stopGranularity: null,
+      settings: DEFAULT_SETTINGS,
+      workspace: {
+        type: "current",
+        path: TEST_CWD,
+        branch: "feature/test",
+      },
+      preExecutionSha: "abc123def456",
+      baselineTest: null,
+      retryState: {
+        tasks: {},
+        waves: {},
+        finalReview: null,
+      },
+      waves: [],
+    };
+    io.files.set(DIFFERENT_PLAN_STATE_PATH, JSON.stringify(activeLockState, null, 2));
+
+    const callbacks = createMockCallbacks();
+
+    const engine = new PlanExecutionEngine(io, TEST_CWD, TEST_AGENT_DIR);
+
+    // Engine should throw because there's an active lock on a different plan
+    await assert.rejects(
+      () => engine.execute(INT_PLAN_PATH, callbacks),
+      (err: Error) => /already.*running|active.*run|locked/i.test(err.message),
+      "Should throw with a descriptive error about active lock",
+    );
+  });
 });
