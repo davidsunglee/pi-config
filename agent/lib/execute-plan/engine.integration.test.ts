@@ -25,7 +25,6 @@ import {
   doneResult,
   blockedResult,
   doneWithConcernsResult,
-  type MockExecHandler,
 } from "./engine.test-helpers.ts";
 
 // ── Integration test constants ──────────────────────────────────────
@@ -709,33 +708,13 @@ describe("Scenario 4: Resume from stopped state", () => {
 // ── Scenario 5: Test regression — post-wave test failure ───────────
 
 describe("Scenario 5: Test regression — post-wave test failure", () => {
-  // The exec handler tracks how many times the test command (sh -c npm test)
-  // has been invoked. Call 1 = baseline (pass), call 2 = post-wave-1 (fail),
-  // call 3+ = pass. All other commands fall through to default mock behavior.
-  function makeTestRegressionExecHandler(): { handler: MockExecHandler; getTestCallCount: () => number } {
+  // Wraps io.exec to intercept the test command (sh -c npm test) with
+  // call-counting logic. Call 1 = baseline (pass), call 2 = post-wave-1 (fail),
+  // call 3+ = pass. All other commands delegate to the default exec handler.
+  function makeTestRegressionExecHandler(io: ReturnType<typeof createMockIO>): { getTestCallCount: () => number } {
     let testCallCount = 0;
-    const handler: MockExecHandler = async (cmd, args, _cwd) => {
-      // git rev-parse --git-dir → simulate git repo
-      if (cmd === "git" && args[0] === "rev-parse" && args.includes("--git-dir")) {
-        return { stdout: ".git\n", stderr: "", exitCode: 0 };
-      }
-      // git rev-parse --abbrev-ref HEAD → branch name (feature branch, not main)
-      if (cmd === "git" && args[0] === "rev-parse" && args.includes("--abbrev-ref")) {
-        return { stdout: "feature/test\n", stderr: "", exitCode: 0 };
-      }
-      // git rev-parse HEAD → HEAD sha
-      if (cmd === "git" && args[0] === "rev-parse" && args.includes("HEAD")) {
-        return { stdout: "abc123def456\n", stderr: "", exitCode: 0 };
-      }
-      // git check-ignore -q → directory is ignored
-      if (cmd === "git" && args[0] === "check-ignore") {
-        return { stdout: "", stderr: "", exitCode: 0 };
-      }
-      // kill -0 → process not alive (stale lock)
-      if (cmd === "kill" && args[0] === "-0") {
-        return { stdout: "", stderr: "No such process", exitCode: 1 };
-      }
-      // Test command: sh -c "npm test"
+    const defaultExec = io.exec;
+    io.exec = async (cmd, args, cwd) => {
       if (cmd === "sh" && args[0] === "-c" && args[1]?.startsWith("npm test")) {
         testCallCount++;
         if (testCallCount === 1) {
@@ -753,14 +732,14 @@ describe("Scenario 5: Test regression — post-wave test failure", () => {
         // Call 3+ — tests pass again (after retry/wave reset)
         return { stdout: "All tests passed\n", stderr: "", exitCode: 0 };
       }
-      return { stdout: "", stderr: "", exitCode: 0 };
+      return defaultExec(cmd, args, cwd);
     };
-    return { handler, getTestCallCount: () => testCallCount };
+    return { getTestCallCount: () => testCallCount };
   }
 
   it("5a — regression action retry: re-dispatches wave 1 tasks and completes", async () => {
-    const { handler, getTestCallCount } = makeTestRegressionExecHandler();
-    const io = createMockIO(undefined, handler);
+    const io = createMockIO();
+    const { getTestCallCount } = makeTestRegressionExecHandler(io);
     seedIntegrationFiles(io, INTEGRATION_PLAN_MD);
 
     const dispatched: number[] = [];
@@ -809,8 +788,8 @@ describe("Scenario 5: Test regression — post-wave test failure", () => {
   });
 
   it("5b — regression action skip: wave 1 not retried, wave 2 proceeds, completes", async () => {
-    const { handler } = makeTestRegressionExecHandler();
-    const io = createMockIO(undefined, handler);
+    const io = createMockIO();
+    makeTestRegressionExecHandler(io);
     seedIntegrationFiles(io, INTEGRATION_PLAN_MD);
 
     const dispatched: number[] = [];
