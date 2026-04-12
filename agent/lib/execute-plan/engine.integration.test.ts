@@ -1333,11 +1333,11 @@ describe("Scenario 5: Test regression — post-wave test failure", () => {
     const task1Dispatches = dispatched.filter((n) => n === 1);
     assert.ok(task1Dispatches.length >= 2, `Task 1 should be dispatched at least twice, got ${task1Dispatches.length}`);
 
-    // Test call count: baseline(1) + post-wave-1 fail(2) + post-wave-1 retry pass(3) + post-wave-2(4)
-    assert.ok(
-      getTestCallCount() >= 3,
-      `Test command should run at least 3 times (baseline + fail + pass after retry), got ${getTestCallCount()}`,
-    );
+    // Call 1: baseline capture (pass)
+    // Call 2: post-wave-1 test (fail — regression detected)
+    // Call 3: post-wave-1-retry test (pass — regression resolved)
+    // Call 4: post-wave-2 test (pass)
+    assert.equal(getTestCallCount(), 4, "Exact test invocation count for retry path");
 
     // Verify git reset --hard HEAD~1 was called (resetWaveCommit rollback)
     const resetCalls = getExecCalls().filter(
