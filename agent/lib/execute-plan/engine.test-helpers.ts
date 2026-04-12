@@ -5,6 +5,12 @@ import type {
   ExecutionSettings,
   WorkspaceChoice,
   SubagentResult,
+  Plan,
+  RunState,
+  FailureContext,
+  TestRegressionContext,
+  JudgmentRequest,
+  ProgressEvent,
 } from "./types.ts";
 
 // ── Constants ───────────────────────────────────────────────────────
@@ -181,13 +187,32 @@ export function createMockIO(
 
 // ── Mock Callbacks ──────────────────────────────────────────────────
 
+/**
+ * Typed record of callback invocations captured by `createMockCallbacks`.
+ * Each key maps to an array of argument-tuples for that callback.
+ * The index signature preserves backwards-compatibility with ad-hoc
+ * string keys while giving typed access for known callback names.
+ */
+export interface CallRecord {
+  requestSettings: [Plan, Partial<ExecutionSettings>][];
+  requestResumeAction: [RunState][];
+  confirmMainBranch: [string][];
+  requestWorktreeSetup: [string, string][];
+  requestFailureAction: [FailureContext][];
+  requestTestRegressionAction: [TestRegressionContext][];
+  requestTestCommand: [][];
+  requestJudgment: [JudgmentRequest][];
+  onProgress: [ProgressEvent][];
+  [key: string]: unknown[][];
+}
+
 export function createMockCallbacks(
   overrides?: Partial<EngineCallbacks>,
-): EngineCallbacks & { calls: Record<string, any[]> } {
-  const calls: Record<string, any[]> = {};
-  const record = (name: string, ...args: any[]) => {
+): EngineCallbacks & { calls: CallRecord } {
+  const calls: CallRecord = {} as CallRecord;
+  const record = (name: string, ...args: unknown[]) => {
     if (!calls[name]) calls[name] = [];
-    calls[name].push(args);
+    (calls[name] as unknown[][]).push(args);
   };
   return {
     calls,
@@ -326,6 +351,18 @@ export function doneWithConcernsResult(taskNumber: number, concerns: string, out
     output,
     concerns,
     needs: null,
+    blocker: null,
+    filesChanged: [],
+  };
+}
+
+export function needsContextResult(taskNumber: number, needs: string, output: string = "needs context"): SubagentResult {
+  return {
+    taskNumber,
+    status: "NEEDS_CONTEXT",
+    output,
+    concerns: null,
+    needs,
     blocker: null,
     filesChanged: [],
   };

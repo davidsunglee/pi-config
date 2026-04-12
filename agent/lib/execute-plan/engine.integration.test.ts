@@ -146,13 +146,22 @@ function seedIntegrationFiles(
   seedFiles(io, INT_PLAN_PATH, planContent);
 }
 
-/** Seed a linked todo file that the engine can close. */
+/**
+ * Seed a linked todo file that the engine can close.
+ *
+ * Format must match the canonical todo file layout parsed by
+ * `closeTodo` in plan-lifecycle.ts (via `splitFrontMatter`):
+ *
+ *   <JSON front-matter object>\n\n<markdown body>
+ *
+ * `closeTodo` reads the front-matter JSON, sets `status` to "done",
+ * and preserves the body. If this format changes, update this fixture
+ * to match (see also: agent/extensions/todos.ts parseFrontMatter).
+ */
 function seedTodo(io: ExecutionIO & { files: Map<string, string> }): void {
-  io.files.set(
-    TODO_PATH,
-    JSON.stringify({ status: "in-progress", title: "Build notification service" }) +
-      "\n\nImplement the notification service.",
-  );
+  const frontMatter = JSON.stringify({ status: "in-progress", title: "Build notification service" });
+  const body = "Implement the notification service.";
+  io.files.set(TODO_PATH, `${frontMatter}\n\n${body}`);
 }
 
 /**
@@ -216,14 +225,13 @@ The dispatcher does not handle null inputs.
 Solid implementation with minor gaps in error handling.
 `.trim();
 
-    io.dispatchSubagent = perTaskDispatcher({
+    // Single dispatch handler: code-reviewer returns review output,
+    // all other tasks go through perTaskDispatcher.
+    const taskDispatch = perTaskDispatcher({
       1: [doneResult(1)],
       2: [doneResult(2)],
       3: [doneResult(3)],
     });
-
-    // Override code-reviewer dispatch to return review output
-    const baseDispatch = io.dispatchSubagent;
     io.dispatchSubagent = async (config, options) => {
       if (config.agent === "code-reviewer") {
         return {
@@ -236,7 +244,7 @@ Solid implementation with minor gaps in error handling.
           filesChanged: [],
         };
       }
-      return baseDispatch(config, options);
+      return taskDispatch(config, options);
     };
 
     const callbacks = createMockCallbacks({
