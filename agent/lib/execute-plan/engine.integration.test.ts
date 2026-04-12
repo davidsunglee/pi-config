@@ -707,6 +707,324 @@ describe("Scenario 2c: specCheck — spec reviewer dispatched when enabled", () 
   });
 });
 
+// ── Scenario 2d: specCheck failure → wave retry ─────────────────────
+
+describe("Scenario 2d: specCheck failure — spec review fails, judgment retries wave, second review passes", () => {
+  it("retries the wave when spec-reviewer returns failure and judgment says retry", async () => {
+    const io = createMockIO();
+    seedIntegrationFiles(io);
+
+    // Track all dispatches by agent type and task number
+    const dispatchLog: { agent: string; taskNumber: number }[] = [];
+
+    // Track how many times spec-reviewer has been called per task
+    const specReviewCalls: Record<number, number> = {};
+
+    const baseDispatch = perTaskDispatcher({
+      // Supply enough results for 2 dispatches per task (original + retry)
+      1: [doneResult(1), doneResult(1)],
+      2: [doneResult(2), doneResult(2)],
+      3: [doneResult(3), doneResult(3)],
+    });
+
+    io.dispatchSubagent = async (config, options) => {
+      dispatchLog.push({ agent: config.agent, taskNumber: config.taskNumber });
+
+      if (config.agent === "spec-reviewer") {
+        const taskNum = config.taskNumber;
+        specReviewCalls[taskNum] = (specReviewCalls[taskNum] ?? 0) + 1;
+
+        if (taskNum === 1 && specReviewCalls[taskNum] === 1) {
+          // First spec review of task 1 FAILS (non-DONE status)
+          return {
+            taskNumber: taskNum,
+            status: "BLOCKED" as const,
+            output: "Implementation does not match spec: missing error handling in dispatcher",
+            concerns: null,
+            needs: null,
+            blocker: "Spec mismatch",
+            filesChanged: [],
+          };
+        }
+
+        // All other spec reviews pass (DONE)
+        return doneResult(taskNum);
+      }
+      return baseDispatch(config, options);
+    };
+
+    const judgmentRequests: JudgmentRequest[] = [];
+
+    const callbacks = createMockCallbacks({
+      requestSettings: async (_plan, _detected) => ({
+        execution: "parallel" as const,
+        tdd: false,
+        finalReview: false,
+        specCheck: true,
+        integrationTest: false,
+        testCommand: null,
+      }),
+      requestJudgment: async (req) => {
+        judgmentRequests.push(req);
+        if (req.type === "spec_review_failed") {
+          return { action: "retry" as const };
+        }
+        return { action: "accept" as const };
+      },
+    });
+
+    const engine = new PlanExecutionEngine(io, TEST_CWD, TEST_AGENT_DIR);
+    const outcome = await engine.execute(INT_PLAN_PATH, callbacks);
+
+    // Outcome — execution completes after the wave retry
+    assert.equal(outcome, "completed");
+
+    // Judgment was called with spec_review_failed for task 1
+    const specJudgments = judgmentRequests.filter((r) => r.type === "spec_review_failed");
+    assert.equal(specJudgments.length, 1, "Should have exactly one spec_review_failed judgment request");
+
+    const specReq = specJudgments[0] as Extract<JudgmentRequest, { type: "spec_review_failed" }>;
+    assert.equal(specReq.taskNumber, 1);
+    assert.equal(specReq.wave, 1);
+    assert.ok(specReq.details.length > 0, "Judgment request should have details from spec reviewer output");
+
+    // Task 1 was dispatched at least twice by the implementer (original + retry after spec failure)
+    const task1ImplDispatches = dispatchLog.filter(
+      (d) => d.agent === "implementer" && d.taskNumber === 1,
+    );
+    assert.ok(
+      task1ImplDispatches.length >= 2,
+      `Task 1 implementer should be dispatched at least twice, got ${task1ImplDispatches.length}`,
+    );
+
+    // Spec reviewer was called at least twice for task 1 (fail then pass on retry)
+    assert.ok(
+      (specReviewCalls[1] ?? 0) >= 2,
+      `Spec reviewer should be called at least twice for task 1, got ${specReviewCalls[1] ?? 0}`,
+    );
+
+    // Both waves completed
+    const waveCompleted = progressEvents(callbacks, "wave_completed");
+    assert.equal(waveCompleted.length, 2);
+    assert.ok(waveCompleted[0].commitSha, "Wave 1 should have a commitSha");
+    assert.ok(waveCompleted[1].commitSha, "Wave 2 should have a commitSha");
+
+    // Final execution_completed emitted
+    const execCompleted = progressEvents(callbacks, "execution_completed");
+    assert.equal(execCompleted.length, 1);
+
+    // Wave retry happens inside executeWaveWithRetry, so wave_started fires
+    // once per wave (not per attempt). Verify the retry occurred by checking
+    // that task_started events for task 1 fired twice (original + retry).
+    const taskStarted = progressEvents(callbacks, "task_started");
+    const task1Started = taskStarted.filter(
+      (e) => (e as Extract<ProgressEvent, { type: "task_started" }>).taskNumber === 1,
+    );
+    assert.equal(task1Started.length, 2, "Task 1 should have started twice (original + retry after spec failure)");
+  });
+});
+
+// ── Scenario 2e: finalReview retry — code review fails, fix-up dispatched, re-review passes
+
+describe("Scenario 2e: finalReview retry — code review finds issues, fix-up subagent dispatched, re-review accepted", () => {
+  it("retries final review with a fix-up subagent when judgment says retry, then accepts on re-review", async () => {
+    const io = createMockIO();
+    seedIntegrationFiles(io);
+
+    const REVIEW_WITH_FINDINGS = `
+## Critical
+
+### Missing error handling
+The dispatcher does not handle null inputs.
+
+## Strengths
+
+- Clean adapter pattern
+
+## Recommendations
+
+- Add input validation
+
+## Overall
+
+Needs error handling fixes before approval.
+`.trim();
+
+    const CLEAN_REVIEW = `
+## Strengths
+
+- Clean adapter pattern
+- Good error handling
+
+## Recommendations
+
+- Consider adding retry logic
+
+## Overall
+
+Solid implementation — all issues addressed.
+`.trim();
+
+    // Track all dispatches by agent type
+    const dispatchLog: { agent: string; taskNumber: number; task?: string }[] = [];
+    let codeReviewCallCount = 0;
+
+    const baseDispatch = perTaskDispatcher({
+      1: [doneResult(1)],
+      2: [doneResult(2)],
+      3: [doneResult(3)],
+    });
+
+    io.dispatchSubagent = async (config, options) => {
+      dispatchLog.push({ agent: config.agent, taskNumber: config.taskNumber, task: config.task });
+
+      if (config.agent === "code-reviewer") {
+        codeReviewCallCount++;
+        if (codeReviewCallCount === 1) {
+          // First review: returns findings
+          return {
+            taskNumber: 0,
+            status: "DONE" as const,
+            output: REVIEW_WITH_FINDINGS,
+            concerns: null,
+            needs: null,
+            blocker: null,
+            filesChanged: [],
+          };
+        }
+        // Second review: clean
+        return {
+          taskNumber: 0,
+          status: "DONE" as const,
+          output: CLEAN_REVIEW,
+          concerns: null,
+          needs: null,
+          blocker: null,
+          filesChanged: [],
+        };
+      }
+
+      if (config.agent === "implementer" && config.taskNumber === 0) {
+        // Fix-up subagent — return DONE
+        return doneResult(0, "Fixed all critical and important issues");
+      }
+
+      return baseDispatch(config, options);
+    };
+
+    const judgmentRequests: JudgmentRequest[] = [];
+
+    const callbacks = createMockCallbacks({
+      requestSettings: async (_plan, _detected) => ({
+        execution: "parallel" as const,
+        tdd: false,
+        finalReview: true,
+        specCheck: false,
+        integrationTest: false,
+        testCommand: null,
+      }),
+      requestJudgment: async (req) => {
+        judgmentRequests.push(req);
+        if (req.type === "code_review") {
+          // First code review: retry (findings present)
+          // Second code review: accept (clean)
+          const codeReviewJudgments = judgmentRequests.filter((r) => r.type === "code_review");
+          if (codeReviewJudgments.length === 1) {
+            return { action: "retry" as const, context: "Focus on the error handling in the dispatcher" };
+          }
+          return { action: "accept" as const };
+        }
+        return { action: "accept" as const };
+      },
+    });
+
+    const engine = new PlanExecutionEngine(io, TEST_CWD, TEST_AGENT_DIR);
+    const outcome = await engine.execute(INT_PLAN_PATH, callbacks);
+
+    // Outcome — execution completes after fix-up and re-review
+    assert.equal(outcome, "completed");
+
+    // Code reviewer was dispatched at least twice
+    const codeReviewDispatches = dispatchLog.filter((d) => d.agent === "code-reviewer");
+    assert.ok(
+      codeReviewDispatches.length >= 2,
+      `Code reviewer should be dispatched at least twice, got ${codeReviewDispatches.length}`,
+    );
+
+    // Fix-up subagent was dispatched (implementer with taskNumber 0)
+    const fixupDispatches = dispatchLog.filter(
+      (d) => d.agent === "implementer" && d.taskNumber === 0,
+    );
+    assert.equal(fixupDispatches.length, 1, "Fix-up subagent should be dispatched exactly once");
+
+    // Fix-up prompt should include the review findings
+    assert.ok(
+      fixupDispatches[0].task?.includes("Fix the following code review findings"),
+      "Fix-up prompt should include code review findings",
+    );
+    assert.ok(
+      fixupDispatches[0].task?.includes("Missing error handling"),
+      "Fix-up prompt should include the specific findings text",
+    );
+
+    // Fix-up prompt should include the context from the judgment response
+    assert.ok(
+      fixupDispatches[0].task?.includes("Focus on the error handling in the dispatcher"),
+      "Fix-up prompt should include the judgment context as additional guidance",
+    );
+
+    // Judgment was called with code_review type twice
+    const codeReviewJudgments = judgmentRequests.filter((r) => r.type === "code_review");
+    assert.equal(codeReviewJudgments.length, 2, "Should have exactly two code_review judgment requests");
+
+    // First judgment: review has critical findings
+    const firstReview = codeReviewJudgments[0] as Extract<JudgmentRequest, { type: "code_review" }>;
+    assert.ok(firstReview.review.findings.length > 0, "First review should have findings");
+    assert.equal(firstReview.review.findings[0].severity, "critical", "First review should have critical findings");
+
+    // Second judgment: clean review (no critical findings)
+    const secondReview = codeReviewJudgments[1] as Extract<JudgmentRequest, { type: "code_review" }>;
+    assert.equal(
+      secondReview.review.findings.filter((f) => f.severity === "critical").length,
+      0,
+      "Second review should have no critical findings",
+    );
+
+    // code_review_completed progress events emitted twice
+    const reviewCompleted = progressEvents(callbacks, "code_review_completed");
+    assert.equal(reviewCompleted.length, 2, "Should emit code_review_completed twice (initial + re-review)");
+
+    // Ordering: fix-up dispatched AFTER first code review, BEFORE second code review
+    const firstCodeReviewIdx = dispatchLog.findIndex((d) => d.agent === "code-reviewer");
+    const fixupIdx = dispatchLog.findIndex(
+      (d) => d.agent === "implementer" && d.taskNumber === 0,
+    );
+    const secondCodeReviewIdx = dispatchLog.findIndex(
+      (d, i) => d.agent === "code-reviewer" && i > firstCodeReviewIdx,
+    );
+    assert.ok(
+      firstCodeReviewIdx < fixupIdx,
+      "Fix-up should be dispatched after first code review",
+    );
+    assert.ok(
+      fixupIdx < secondCodeReviewIdx,
+      "Second code review should be dispatched after fix-up",
+    );
+
+    // Both waves completed
+    const waveCompleted = progressEvents(callbacks, "wave_completed");
+    assert.equal(waveCompleted.length, 2);
+
+    // Final execution_completed emitted
+    const execCompleted = progressEvents(callbacks, "execution_completed");
+    assert.equal(execCompleted.length, 1);
+
+    // Plan moved to done/
+    assert.ok(io.files.has(INT_DONE_PATH), "Plan should be moved to done/");
+    assert.ok(!io.files.has(INT_PLAN_PATH), "Original plan path should be gone");
+  });
+});
+
 // ── Scenario 3: Stop mid-run ───────────────────────────────────────
 
 describe("Scenario 3: Stop mid-run — cancellation after wave 1", () => {
