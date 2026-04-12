@@ -295,7 +295,7 @@ export function onMainBranchHandler(): MockExecHandler {
 
 // ── SubagentResult builder functions ───────────────────────────────
 
-export function doneResult(taskNumber: number, output: string = "done"): SubagentResult {
+export function doneResult(taskNumber: number, output = "Implementation complete"): SubagentResult {
   return {
     taskNumber,
     status: "DONE",
