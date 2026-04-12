@@ -188,13 +188,208 @@ function progressEvents<T extends ProgressEvent["type"]>(
 // ── Scenario 1: Happy path ─────────────────────────────────────────
 
 describe("Scenario 1: Happy path — multi-wave completion", () => {
-  // Tests added in Task 3
+  it("completes all waves, runs final code review, closes todo, and deletes state", async () => {
+    const io = createMockIO();
+    seedIntegrationFiles(io);
+    seedTodo(io);
+
+    // All 3 tasks return DONE via perTaskDispatcher; code-reviewer returns review output
+    const REVIEW_OUTPUT = `
+## Critical
+
+### Missing error handling
+The dispatcher does not handle null inputs.
+
+## Strengths
+
+- Clean adapter pattern
+- Well-structured module layout
+
+## Recommendations
+
+- Add input validation
+- Consider adding retry logic
+
+## Overall
+
+Solid implementation with minor gaps in error handling.
+`.trim();
+
+    io.dispatchSubagent = perTaskDispatcher({
+      1: [doneResult(1)],
+      2: [doneResult(2)],
+      3: [doneResult(3)],
+    });
+
+    // Override code-reviewer dispatch to return review output
+    const baseDispatch = io.dispatchSubagent;
+    io.dispatchSubagent = async (config, options) => {
+      if (config.agent === "code-reviewer") {
+        return {
+          taskNumber: 0,
+          status: "DONE" as const,
+          output: REVIEW_OUTPUT,
+          concerns: null,
+          needs: null,
+          blocker: null,
+          filesChanged: [],
+        };
+      }
+      return baseDispatch(config, options);
+    };
+
+    const callbacks = createMockCallbacks({
+      requestSettings: async (plan, detected) => ({
+        execution: "parallel" as const,
+        tdd: false,
+        finalReview: true,
+        specCheck: false,
+        integrationTest: false,
+        testCommand: null,
+      }),
+      requestJudgment: async (req) => {
+        if (req.type === "code_review") {
+          return { action: "accept" as const };
+        }
+        return { action: "accept" as const };
+      },
+    });
+
+    const engine = new PlanExecutionEngine(io, TEST_CWD, TEST_AGENT_DIR);
+    const outcome = await engine.execute(INT_PLAN_PATH, callbacks);
+
+    // Outcome
+    assert.equal(outcome, "completed");
+
+    // requestSettings called exactly once
+    assert.equal((callbacks.calls["requestSettings"] ?? []).length, 1);
+
+    // Major lifecycle event ordering
+    const waveStarted = progressEvents(callbacks, "wave_started");
+    const waveCompleted = progressEvents(callbacks, "wave_completed");
+    const reviewCompleted = progressEvents(callbacks, "code_review_completed");
+    const execCompleted = progressEvents(callbacks, "execution_completed");
+
+    assert.equal(waveStarted.length, 2);
+    assert.equal(waveCompleted.length, 2);
+    assert.equal(reviewCompleted.length, 1);
+    assert.equal(execCompleted.length, 1);
+
+    // Verify wave numbers
+    assert.equal(waveStarted[0].wave, 1);
+    assert.equal(waveStarted[1].wave, 2);
+    assert.equal(waveCompleted[0].wave, 1);
+    assert.equal(waveCompleted[1].wave, 2);
+
+    // Verify ordering: wave_started(1) before wave_completed(1) before wave_started(2) etc.
+    const allProgress = (callbacks.calls["onProgress"] ?? []).map((c: any[]) => c[0] as ProgressEvent);
+    const majorTypes = ["wave_started", "wave_completed", "code_review_completed", "execution_completed"];
+    const majorEvents = allProgress.filter((e) => majorTypes.includes(e.type));
+
+    assert.equal(majorEvents[0].type, "wave_started");
+    assert.equal((majorEvents[0] as Extract<ProgressEvent, { type: "wave_started" }>).wave, 1);
+    assert.equal(majorEvents[1].type, "wave_completed");
+    assert.equal((majorEvents[1] as Extract<ProgressEvent, { type: "wave_completed" }>).wave, 1);
+    assert.equal(majorEvents[2].type, "wave_started");
+    assert.equal((majorEvents[2] as Extract<ProgressEvent, { type: "wave_started" }>).wave, 2);
+    assert.equal(majorEvents[3].type, "wave_completed");
+    assert.equal((majorEvents[3] as Extract<ProgressEvent, { type: "wave_completed" }>).wave, 2);
+    assert.equal(majorEvents[4].type, "code_review_completed");
+    assert.equal(majorEvents[5].type, "execution_completed");
+
+    // Task-wave assignments: task 1 in wave 1, tasks 2 and 3 in wave 2
+    assert.deepEqual(waveStarted[0].taskNumbers, [1]);
+    assert.ok(
+      waveStarted[1].taskNumbers.includes(2) && waveStarted[1].taskNumbers.includes(3),
+      "Wave 2 should contain tasks 2 and 3",
+    );
+
+    // Code review findings
+    const review = reviewCompleted[0].review;
+    assert.ok(review.findings.length > 0, "Should have findings");
+    assert.equal(review.findings[0].severity, "critical");
+    assert.ok(review.findings[0].title.length > 0, "Finding should have a title");
+    assert.ok(review.strengths.length > 0, "Should have strengths");
+    assert.ok(review.recommendations.length > 0, "Should have recommendations");
+    assert.ok(review.overallAssessment.length > 0, "Should have overall assessment");
+
+    // Plan moved to done/
+    assert.ok(io.files.has(INT_DONE_PATH), "Plan should be moved to done/");
+    assert.ok(!io.files.has(INT_PLAN_PATH), "Original plan path should be gone");
+
+    // Linked todo closed
+    const todoContent = io.files.get(TODO_PATH);
+    assert.ok(todoContent !== undefined, "Todo file should exist");
+    assert.ok(todoContent!.includes('"status":"done"') || todoContent!.includes('"status": "done"'), "Todo should be marked done");
+
+    // State file deleted
+    assert.ok(!io.files.has(INT_STATE_PATH), "State file should be deleted after completion");
+
+    // Wave completed events have commitSha
+    assert.ok(waveCompleted[0].commitSha, "Wave 1 should have a commitSha");
+    assert.ok(waveCompleted[1].commitSha, "Wave 2 should have a commitSha");
+  });
 });
 
 // ── Scenario 2: Mixed outcomes — BLOCKED triggers judgment + retry ─
 
 describe("Scenario 2: Mixed outcomes — BLOCKED task triggers judgment and retry", () => {
-  // Tests added in Task 3
+  it("retries a BLOCKED task after judgment and completes successfully", async () => {
+    const io = createMockIO();
+    seedIntegrationFiles(io);
+
+    const BLOCKER_TEXT = "Cannot connect to email provider";
+
+    // Task 1: DONE, Task 2: BLOCKED then DONE on retry, Task 3: DONE
+    io.dispatchSubagent = perTaskDispatcher({
+      1: [doneResult(1)],
+      2: [blockedResult(2, BLOCKER_TEXT), doneResult(2)],
+      3: [doneResult(3)],
+    });
+
+    const judgmentRequests: JudgmentRequest[] = [];
+
+    const callbacks = createMockCallbacks({
+      requestJudgment: async (req) => {
+        judgmentRequests.push(req);
+        if (req.type === "blocked") {
+          return { action: "retry" as const };
+        }
+        return { action: "accept" as const };
+      },
+    });
+
+    const engine = new PlanExecutionEngine(io, TEST_CWD, TEST_AGENT_DIR);
+    const outcome = await engine.execute(INT_PLAN_PATH, callbacks);
+
+    // Outcome
+    assert.equal(outcome, "completed");
+
+    // Judgment was requested for the blocked task
+    const blockedJudgments = judgmentRequests.filter((r) => r.type === "blocked");
+    assert.ok(blockedJudgments.length > 0, "Should have at least one blocked judgment request");
+
+    const blockedReq = blockedJudgments[0] as Extract<JudgmentRequest, { type: "blocked" }>;
+    assert.equal(blockedReq.type, "blocked");
+    assert.equal(blockedReq.taskNumber, 2);
+    assert.equal(blockedReq.wave, 2);
+    assert.equal(blockedReq.blocker, BLOCKER_TEXT);
+
+    // Both waves completed
+    const waveCompleted = progressEvents(callbacks, "wave_completed");
+    assert.equal(waveCompleted.length, 2);
+    assert.ok(waveCompleted[0].commitSha, "Wave 1 should have a commitSha");
+    assert.ok(waveCompleted[1].commitSha, "Wave 2 should have a commitSha");
+
+    // Task 2 has at least one task_completed event after retry (should be 2: initial BLOCKED + retry DONE)
+    const taskCompleted = progressEvents(callbacks, "task_completed");
+    const task2Events = taskCompleted.filter((e) => e.taskNumber === 2);
+    assert.ok(task2Events.length >= 1, "Task 2 should have at least one task_completed event");
+
+    // Final execution_completed emitted
+    const execCompleted = progressEvents(callbacks, "execution_completed");
+    assert.equal(execCompleted.length, 1);
+  });
 });
 
 // ── Scenario 3: Stop mid-run ───────────────────────────────────────
