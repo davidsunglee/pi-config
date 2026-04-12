@@ -2,13 +2,8 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import type {
-  ExecutionIO,
-  Plan,
-  ExecutionSettings,
   RunState,
   SubagentConfig,
-  SubagentResult,
-  CodeReviewSummary,
 } from "./types.ts";
 import { PlanExecutionEngine, parseCodeReviewOutput } from "./engine.ts";
 import {
