@@ -25,6 +25,7 @@ import {
   doneResult,
   blockedResult,
   doneWithConcernsResult,
+  needsContextResult,
 } from "./engine.test-helpers.ts";
 
 // ── Integration test constants ──────────────────────────────────────
@@ -469,6 +470,222 @@ describe("Scenario 2: Mixed outcomes — BLOCKED task triggers judgment and retr
     assert.equal(dwcReq.type, "done_with_concerns");
     assert.equal(dwcReq.taskNumber, 2);
     assert.ok(dwcReq.concerns.includes(CONCERNS_TEXT), "Judgment request should contain the concerns text");
+
+    // Both waves completed
+    const waveCompleted = progressEvents(callbacks, "wave_completed");
+    assert.equal(waveCompleted.length, 2);
+    assert.ok(waveCompleted[0].commitSha, "Wave 1 should have a commitSha");
+    assert.ok(waveCompleted[1].commitSha, "Wave 2 should have a commitSha");
+
+    // Final execution_completed emitted
+    const execCompleted = progressEvents(callbacks, "execution_completed");
+    assert.equal(execCompleted.length, 1);
+  });
+
+  it("retries a NEEDS_CONTEXT task after judgment and completes successfully", async () => {
+    const io = createMockIO();
+    seedIntegrationFiles(io);
+
+    const NEEDS_TEXT = "Need database schema for the email adapter";
+
+    // Task 1: DONE, Task 2: NEEDS_CONTEXT then DONE on retry, Task 3: DONE
+    const dispatched: number[] = [];
+    const baseDispatch = perTaskDispatcher({
+      1: [doneResult(1)],
+      2: [needsContextResult(2, NEEDS_TEXT), doneResult(2)],
+      3: [doneResult(3)],
+    });
+    io.dispatchSubagent = async (config, options) => {
+      dispatched.push(config.taskNumber);
+      return baseDispatch(config, options);
+    };
+
+    const judgmentRequests: JudgmentRequest[] = [];
+
+    const callbacks = createMockCallbacks({
+      requestJudgment: async (req) => {
+        judgmentRequests.push(req);
+        if (req.type === "needs_context") {
+          return { action: "retry" as const };
+        }
+        return { action: "accept" as const };
+      },
+    });
+
+    const engine = new PlanExecutionEngine(io, TEST_CWD, TEST_AGENT_DIR);
+    const outcome = await engine.execute(INT_PLAN_PATH, callbacks);
+
+    // Outcome
+    assert.equal(outcome, "completed");
+
+    // Judgment was requested for the needs_context task
+    const ncJudgments = judgmentRequests.filter((r) => r.type === "needs_context");
+    assert.ok(ncJudgments.length > 0, "Should have at least one needs_context judgment request");
+
+    const ncReq = ncJudgments[0] as Extract<JudgmentRequest, { type: "needs_context" }>;
+    assert.equal(ncReq.type, "needs_context");
+    assert.equal(ncReq.taskNumber, 2);
+    assert.equal(ncReq.wave, 2);
+    assert.equal(ncReq.needs, NEEDS_TEXT);
+    assert.ok(ncReq.details.length > 0, "Judgment request should have details");
+
+    // Task 2 dispatched exactly twice (original NEEDS_CONTEXT + retry DONE)
+    const task2Dispatches = dispatched.filter((n) => n === 2);
+    assert.equal(task2Dispatches.length, 2, "Task 2 should be dispatched exactly twice (original + retry)");
+
+    // Both waves completed
+    const waveCompleted = progressEvents(callbacks, "wave_completed");
+    assert.equal(waveCompleted.length, 2);
+    assert.ok(waveCompleted[0].commitSha, "Wave 1 should have a commitSha");
+    assert.ok(waveCompleted[1].commitSha, "Wave 2 should have a commitSha");
+
+    // Final execution_completed emitted
+    const execCompleted = progressEvents(callbacks, "execution_completed");
+    assert.equal(execCompleted.length, 1);
+  });
+});
+
+// ── Scenario 2b: Retry exhaustion — task fails all retries ─────────
+
+describe("Scenario 2b: Retry exhaustion — task fails until retries are exhausted", () => {
+  it("exhausts MAX_TASK_RETRIES, fires retry_exhausted judgment, then skips and completes", async () => {
+    const io = createMockIO();
+    seedIntegrationFiles(io);
+
+    const BLOCKER_TEXT = "Persistent connection failure";
+
+    // Task 1: DONE
+    // Task 2: BLOCKED every time (never succeeds)
+    // Task 3: DONE
+    const dispatched: number[] = [];
+    const baseDispatch = perTaskDispatcher({
+      1: [doneResult(1)],
+      // Supply enough BLOCKED results: 1 initial + 3 retries = 4 dispatches
+      2: [
+        blockedResult(2, BLOCKER_TEXT),
+        blockedResult(2, BLOCKER_TEXT),
+        blockedResult(2, BLOCKER_TEXT),
+        blockedResult(2, BLOCKER_TEXT),
+      ],
+      3: [doneResult(3)],
+    });
+    io.dispatchSubagent = async (config, options) => {
+      dispatched.push(config.taskNumber);
+      return baseDispatch(config, options);
+    };
+
+    const judgmentRequests: JudgmentRequest[] = [];
+
+    const callbacks = createMockCallbacks({
+      requestJudgment: async (req) => {
+        judgmentRequests.push(req);
+        if (req.type === "blocked") {
+          // Keep retrying until exhaustion
+          return { action: "retry" as const };
+        }
+        if (req.type === "retry_exhausted") {
+          // Skip to allow execution to complete
+          return { action: "skip" as const };
+        }
+        return { action: "accept" as const };
+      },
+    });
+
+    const engine = new PlanExecutionEngine(io, TEST_CWD, TEST_AGENT_DIR);
+    const outcome = await engine.execute(INT_PLAN_PATH, callbacks);
+
+    // Outcome — execution completes because retry_exhausted returned "skip"
+    assert.equal(outcome, "completed");
+
+    // Blocked judgments: should have exactly MAX_TASK_RETRIES (3) blocked judgments
+    const blockedJudgments = judgmentRequests.filter((r) => r.type === "blocked");
+    assert.equal(blockedJudgments.length, 3, "Should have exactly 3 blocked judgment requests (one per retry attempt)");
+
+    // Retry exhausted judgment fired
+    const exhaustedJudgments = judgmentRequests.filter((r) => r.type === "retry_exhausted");
+    assert.equal(exhaustedJudgments.length, 1, "Should have exactly one retry_exhausted judgment request");
+
+    const exhaustedReq = exhaustedJudgments[0] as Extract<JudgmentRequest, { type: "retry_exhausted" }>;
+    assert.equal(exhaustedReq.taskNumber, 2);
+    assert.equal(exhaustedReq.wave, 2);
+    assert.equal(exhaustedReq.attempts, 3, "retry_exhausted should report MAX_TASK_RETRIES attempts");
+    assert.ok(exhaustedReq.lastFailure.length > 0, "retry_exhausted should have lastFailure text");
+    assert.ok(exhaustedReq.details.includes("3"), "Details should mention the retry count");
+
+    // Task 2 dispatched MAX_TASK_RETRIES + 1 times (1 initial + 3 retries)
+    const task2Dispatches = dispatched.filter((n) => n === 2);
+    assert.equal(task2Dispatches.length, 4, "Task 2 should be dispatched 4 times (1 initial + 3 retries)");
+
+    // Both waves completed
+    const waveCompleted = progressEvents(callbacks, "wave_completed");
+    assert.equal(waveCompleted.length, 2);
+
+    // Final execution_completed emitted
+    const execCompleted = progressEvents(callbacks, "execution_completed");
+    assert.equal(execCompleted.length, 1);
+  });
+});
+
+// ── Scenario 2c: specCheck — spec reviewer dispatched when enabled ──
+
+describe("Scenario 2c: specCheck — spec reviewer dispatched when enabled", () => {
+  it("dispatches spec-reviewer for each task when specCheck is enabled and completes", async () => {
+    const io = createMockIO();
+    seedIntegrationFiles(io);
+
+    // Track all dispatches by agent type
+    const dispatchLog: { agent: string; taskNumber: number }[] = [];
+
+    const baseDispatch = perTaskDispatcher({
+      1: [doneResult(1)],
+      2: [doneResult(2)],
+      3: [doneResult(3)],
+    });
+    io.dispatchSubagent = async (config, options) => {
+      dispatchLog.push({ agent: config.agent, taskNumber: config.taskNumber });
+      if (config.agent === "spec-reviewer") {
+        // Spec reviewer passes — return DONE
+        return doneResult(config.taskNumber);
+      }
+      return baseDispatch(config, options);
+    };
+
+    const callbacks = createMockCallbacks({
+      requestSettings: async (_plan, _detected) => ({
+        execution: "parallel" as const,
+        tdd: false,
+        finalReview: false,
+        specCheck: true,
+        integrationTest: false,
+        testCommand: null,
+      }),
+    });
+
+    const engine = new PlanExecutionEngine(io, TEST_CWD, TEST_AGENT_DIR);
+    const outcome = await engine.execute(INT_PLAN_PATH, callbacks);
+
+    // Outcome
+    assert.equal(outcome, "completed");
+
+    // Spec reviewer was dispatched for each task (1 in wave 1, 2 and 3 in wave 2)
+    const specDispatches = dispatchLog.filter((d) => d.agent === "spec-reviewer");
+    assert.ok(specDispatches.length >= 3, `Spec reviewer should be dispatched for all 3 tasks, got ${specDispatches.length}`);
+
+    // Verify spec reviewer was dispatched for each task number
+    const specTaskNumbers = new Set(specDispatches.map((d) => d.taskNumber));
+    assert.ok(specTaskNumbers.has(1), "Spec reviewer should be dispatched for task 1");
+    assert.ok(specTaskNumbers.has(2), "Spec reviewer should be dispatched for task 2");
+    assert.ok(specTaskNumbers.has(3), "Spec reviewer should be dispatched for task 3");
+
+    // Implementer dispatches still happened
+    const implementerDispatches = dispatchLog.filter((d) => d.agent === "implementer");
+    assert.equal(implementerDispatches.length, 3, "Implementer should be dispatched for all 3 tasks");
+
+    // Spec reviewer happens AFTER implementer for each wave
+    // Check wave 1: implementer for task 1 before spec-reviewer for task 1
+    const wave1Impl = dispatchLog.findIndex((d) => d.agent === "implementer" && d.taskNumber === 1);
+    const wave1Spec = dispatchLog.findIndex((d) => d.agent === "spec-reviewer" && d.taskNumber === 1);
+    assert.ok(wave1Impl < wave1Spec, "Implementer for task 1 should be dispatched before spec-reviewer for task 1");
 
     // Both waves completed
     const waveCompleted = progressEvents(callbacks, "wave_completed");
