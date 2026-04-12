@@ -24,6 +24,7 @@ import {
   seedFiles,
   doneResult,
   blockedResult,
+  doneWithConcernsResult,
   type MockExecHandler,
 } from "./engine.test-helpers.ts";
 
@@ -397,6 +398,57 @@ describe("Scenario 2: Mixed outcomes — BLOCKED task triggers judgment and retr
     const execCompleted = progressEvents(callbacks, "execution_completed");
     assert.equal(execCompleted.length, 1);
   });
+
+  it("accepts a DONE_WITH_CONCERNS task after judgment and completes successfully", async () => {
+    const io = createMockIO();
+    seedIntegrationFiles(io);
+
+    const CONCERNS_TEXT = "Email retry logic may drop messages under load";
+
+    // Task 1: DONE, Task 2: DONE_WITH_CONCERNS, Task 3: DONE
+    io.dispatchSubagent = perTaskDispatcher({
+      1: [doneResult(1)],
+      2: [doneWithConcernsResult(2, CONCERNS_TEXT)],
+      3: [doneResult(3)],
+    });
+
+    const judgmentRequests: JudgmentRequest[] = [];
+
+    const callbacks = createMockCallbacks({
+      requestJudgment: async (req) => {
+        judgmentRequests.push(req);
+        if (req.type === "done_with_concerns") {
+          return { action: "accept" as const };
+        }
+        return { action: "accept" as const };
+      },
+    });
+
+    const engine = new PlanExecutionEngine(io, TEST_CWD, TEST_AGENT_DIR);
+    const outcome = await engine.execute(INT_PLAN_PATH, callbacks);
+
+    // Outcome
+    assert.equal(outcome, "completed");
+
+    // Judgment was requested for the done_with_concerns task
+    const dwcJudgments = judgmentRequests.filter((r) => r.type === "done_with_concerns");
+    assert.ok(dwcJudgments.length > 0, "Should have at least one done_with_concerns judgment request");
+
+    const dwcReq = dwcJudgments[0] as Extract<JudgmentRequest, { type: "done_with_concerns" }>;
+    assert.equal(dwcReq.type, "done_with_concerns");
+    assert.equal(dwcReq.taskNumber, 2);
+    assert.ok(dwcReq.concerns.includes(CONCERNS_TEXT), "Judgment request should contain the concerns text");
+
+    // Both waves completed
+    const waveCompleted = progressEvents(callbacks, "wave_completed");
+    assert.equal(waveCompleted.length, 2);
+    assert.ok(waveCompleted[0].commitSha, "Wave 1 should have a commitSha");
+    assert.ok(waveCompleted[1].commitSha, "Wave 2 should have a commitSha");
+
+    // Final execution_completed emitted
+    const execCompleted = progressEvents(callbacks, "execution_completed");
+    assert.equal(execCompleted.length, 1);
+  });
 });
 
 // ── Scenario 3: Stop mid-run ───────────────────────────────────────
@@ -458,6 +510,63 @@ describe("Scenario 3: Stop mid-run — cancellation after wave 1", () => {
     // Plan NOT moved to done/
     assert.ok(!io.files.has(INT_DONE_PATH), "Plan should NOT be moved to done/");
     assert.ok(io.files.has(INT_PLAN_PATH), "Original plan path should still exist");
+  });
+
+  it("task-level cancellation: stops after current task, wave 2 not committed", async () => {
+    const io = createMockIO();
+    seedIntegrationFiles(io, INTEGRATION_PLAN_MD);
+
+    io.dispatchSubagent = perTaskDispatcher({
+      1: [doneResult(1)],
+      2: [doneResult(2)],
+      3: [doneResult(3)],
+    });
+
+    let engine: PlanExecutionEngine;
+    const callbacks = createMockCallbacks();
+    const origOnProgress = callbacks.onProgress;
+    let wave2TaskStartedSeen = false;
+    callbacks.onProgress = (event) => {
+      origOnProgress(event); // preserve recording
+      // Trigger task-level cancellation on the first task_started event in wave 2
+      if (
+        event.type === "task_started" &&
+        (event as Extract<ProgressEvent, { type: "task_started" }>).wave === 2 &&
+        !wave2TaskStartedSeen
+      ) {
+        wave2TaskStartedSeen = true;
+        engine!.requestCancellation("task");
+      }
+    };
+    engine = new PlanExecutionEngine(io, TEST_CWD, TEST_AGENT_DIR);
+    const outcome = await engine.execute(INT_PLAN_PATH, callbacks);
+
+    // Outcome must be "stopped"
+    assert.equal(outcome, "stopped");
+
+    // State file persists with stopGranularity "task"
+    assert.ok(io.files.has(INT_STATE_PATH), "State file should persist after task-level stop");
+    const stateContent = io.files.get(INT_STATE_PATH)!;
+    const state: RunState = JSON.parse(stateContent);
+    assert.equal(state.status, "stopped");
+    assert.equal(state.stopGranularity, "task");
+
+    // Lock released
+    assert.equal(state.lock, null, "Lock should be released after stop");
+
+    // Wave 1 committed — wave_completed event for wave 1
+    const waveCompleted = progressEvents(callbacks, "wave_completed");
+    assert.equal(waveCompleted.length, 1, "Only wave 1 should have committed");
+    assert.equal(waveCompleted[0].wave, 1);
+    assert.ok(waveCompleted[0].commitSha, "Wave 1 should have a commitSha");
+
+    // Wave 2 NOT committed — no wave_completed event for wave 2
+    const wave2Completed = waveCompleted.filter((e) => e.wave === 2);
+    assert.equal(wave2Completed.length, 0, "Wave 2 should NOT have been committed (partial waves must not commit)");
+
+    // execution_completed NOT emitted
+    const execCompleted = progressEvents(callbacks, "execution_completed");
+    assert.equal(execCompleted.length, 0, "execution_completed should not be emitted");
   });
 });
 
@@ -881,5 +990,86 @@ describe("Scenario 6: Precondition failures propagate correctly", () => {
       (err: Error) => /already.*running|active.*run|locked/i.test(err.message),
       "Should throw with a descriptive error about active lock",
     );
+  });
+
+  it("6d — restart resume: deletes old state, calls requestSettings, dispatches all tasks, completes", async () => {
+    const io = createMockIO();
+    seedIntegrationFiles(io, INTEGRATION_PLAN_MD);
+
+    // Seed the workspace path so validateResume's fileExists check passes (not needed for restart, but safe)
+    io.files.set(TEST_CWD, "");
+
+    // Track which task numbers are dispatched
+    const dispatched: number[] = [];
+    io.dispatchSubagent = async (config, options) => {
+      dispatched.push(config.taskNumber);
+      return doneResult(config.taskNumber);
+    };
+
+    // Pre-seed a stopped RunState where wave 1 is done
+    const stoppedState: RunState = {
+      plan: INT_PLAN_FILE_NAME,
+      status: "stopped",
+      lock: null,
+      startedAt: new Date(Date.now() - 60000).toISOString(),
+      stoppedAt: new Date().toISOString(),
+      stopGranularity: "wave",
+      settings: DEFAULT_SETTINGS,
+      workspace: {
+        type: "current",
+        path: TEST_CWD,
+        branch: "feature/test",
+      },
+      preExecutionSha: "abc123def456",
+      baselineTest: null,
+      retryState: {
+        tasks: {},
+        waves: {},
+        finalReview: null,
+      },
+      waves: [
+        {
+          wave: 1,
+          tasks: [1],
+          status: "done",
+          commitSha: "wave1sha123",
+        },
+      ],
+    };
+    io.files.set(INT_STATE_PATH, JSON.stringify(stoppedState, null, 2));
+
+    const callbacks = createMockCallbacks({
+      requestResumeAction: async (_state) => "restart",
+    });
+
+    const engine = new PlanExecutionEngine(io, TEST_CWD, TEST_AGENT_DIR);
+    const outcome = await engine.execute(INT_PLAN_PATH, callbacks);
+
+    // Outcome must be "completed"
+    assert.equal(outcome, "completed");
+
+    // requestResumeAction WAS called
+    assert.ok(
+      (callbacks.calls["requestResumeAction"] ?? []).length > 0,
+      "requestResumeAction should have been called",
+    );
+
+    // requestSettings IS called (fresh start — restart discards persisted settings)
+    assert.ok(
+      (callbacks.calls["requestSettings"] ?? []).length > 0,
+      "requestSettings should be called when restarting",
+    );
+
+    // All 3 tasks dispatched (restart means start over from wave 1)
+    assert.ok(dispatched.includes(1), "Task 1 should be dispatched on restart");
+    assert.ok(dispatched.includes(2), "Task 2 should be dispatched on restart");
+    assert.ok(dispatched.includes(3), "Task 3 should be dispatched on restart");
+
+    // execution_completed emitted
+    const execCompleted = progressEvents(callbacks, "execution_completed");
+    assert.equal(execCompleted.length, 1, "execution_completed should be emitted on successful restart");
+
+    // State file deleted after completion
+    assert.ok(!io.files.has(INT_STATE_PATH), "State file should be deleted after completion");
   });
 });
