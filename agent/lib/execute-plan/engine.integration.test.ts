@@ -1253,11 +1253,16 @@ describe("Scenario 4: Resume from stopped state", () => {
 describe("Scenario 5: Test regression — post-wave test failure", () => {
   // Wraps io.exec to intercept the test command (sh -c npm test) with
   // call-counting logic. Call 1 = baseline (pass), call 2 = post-wave-1 (fail),
-  // call 3+ = pass. All other commands delegate to the default exec handler.
-  function makeTestRegressionExecHandler(io: ReturnType<typeof createMockIO>): { getTestCallCount: () => number } {
+  // call 3+ = pass. Also records all exec calls for assertion.
+  function makeTestRegressionExecHandler(io: ReturnType<typeof createMockIO>): {
+    getTestCallCount: () => number;
+    getExecCalls: () => Array<{ cmd: string; args: string[] }>;
+  } {
     let testCallCount = 0;
+    const execCalls: Array<{ cmd: string; args: string[] }> = [];
     const defaultExec = io.exec;
     io.exec = async (cmd, args, cwd) => {
+      execCalls.push({ cmd, args: [...args] });
       if (cmd === "sh" && args[0] === "-c" && args[1]?.startsWith("npm test")) {
         testCallCount++;
         if (testCallCount === 1) {
@@ -1277,12 +1282,15 @@ describe("Scenario 5: Test regression — post-wave test failure", () => {
       }
       return defaultExec(cmd, args, cwd);
     };
-    return { getTestCallCount: () => testCallCount };
+    return {
+      getTestCallCount: () => testCallCount,
+      getExecCalls: () => execCalls,
+    };
   }
 
   it("5a — regression action retry: re-dispatches wave 1 tasks and completes", async () => {
     const io = createMockIO();
-    const { getTestCallCount } = makeTestRegressionExecHandler(io);
+    const { getTestCallCount, getExecCalls } = makeTestRegressionExecHandler(io);
     seedIntegrationFiles(io, INTEGRATION_PLAN_MD);
 
     const dispatched: number[] = [];
@@ -1325,6 +1333,18 @@ describe("Scenario 5: Test regression — post-wave test failure", () => {
     const task1Dispatches = dispatched.filter((n) => n === 1);
     assert.ok(task1Dispatches.length >= 2, `Task 1 should be dispatched at least twice, got ${task1Dispatches.length}`);
 
+    // Test call count: baseline(1) + post-wave-1 fail(2) + post-wave-1 retry pass(3) + post-wave-2(4)
+    assert.ok(
+      getTestCallCount() >= 3,
+      `Test command should run at least 3 times (baseline + fail + pass after retry), got ${getTestCallCount()}`,
+    );
+
+    // Verify git reset --hard HEAD~1 was called (resetWaveCommit rollback)
+    const resetCalls = getExecCalls().filter(
+      (c) => c.cmd === "git" && c.args[0] === "reset" && c.args.includes("--hard") && c.args.includes("HEAD~1"),
+    );
+    assert.ok(resetCalls.length > 0, "resetWaveCommit should call git reset --hard HEAD~1 on regression-retry");
+
     // Execution completed
     const execCompleted = progressEvents(callbacks, "execution_completed");
     assert.equal(execCompleted.length, 1, "execution_completed should be emitted");
@@ -1332,7 +1352,7 @@ describe("Scenario 5: Test regression — post-wave test failure", () => {
 
   it("5b — regression action skip: wave 1 not retried, wave 2 proceeds, completes", async () => {
     const io = createMockIO();
-    makeTestRegressionExecHandler(io);
+    const { getTestCallCount, getExecCalls } = makeTestRegressionExecHandler(io);
     seedIntegrationFiles(io, INTEGRATION_PLAN_MD);
 
     const dispatched: number[] = [];
@@ -1370,6 +1390,19 @@ describe("Scenario 5: Test regression — post-wave test failure", () => {
     // Task 1 dispatched only once (no retry after skip)
     const task1Dispatches = dispatched.filter((n) => n === 1);
     assert.equal(task1Dispatches.length, 1, "Task 1 should be dispatched only once (no retry on skip)");
+
+    // Test call count: baseline(1) + post-wave-1 fail(2) + post-wave-2(3)
+    // No extra re-run for wave 1 because skip means no rollback/retry
+    assert.equal(
+      getTestCallCount(), 3,
+      `Test command should run exactly 3 times on skip path (baseline + wave-1 fail + wave-2 pass), got ${getTestCallCount()}`,
+    );
+
+    // Verify NO git reset call was made (skip means no rollback)
+    const resetCalls = getExecCalls().filter(
+      (c) => c.cmd === "git" && c.args[0] === "reset" && c.args.includes("--hard") && c.args.includes("HEAD~1"),
+    );
+    assert.equal(resetCalls.length, 0, "git reset should NOT be called on skip path (no rollback)");
 
     // Wave 2 started (execution continued past regression)
     const waveStarted = progressEvents(callbacks, "wave_started");
@@ -1634,5 +1667,131 @@ describe("Scenario 6: Precondition failures propagate correctly", () => {
 
     // State file deleted after completion
     assert.ok(!io.files.has(INT_STATE_PATH), "State file should be deleted after completion");
+  });
+
+  // ── 6e–6g: Resume-validation mismatch scenarios ──────────────────
+
+  /** Build a stopped RunState for resume-validation tests. */
+  function makeStoppedState(overrides?: {
+    branch?: string;
+    preExecutionSha?: string;
+    workspacePath?: string;
+  }): RunState {
+    return {
+      plan: INT_PLAN_FILE_NAME,
+      status: "stopped",
+      lock: null,
+      startedAt: new Date(Date.now() - 60000).toISOString(),
+      stoppedAt: new Date().toISOString(),
+      stopGranularity: "wave",
+      settings: DEFAULT_SETTINGS,
+      workspace: {
+        type: "current",
+        path: overrides?.workspacePath ?? TEST_CWD,
+        branch: overrides?.branch ?? "feature/test",
+      },
+      preExecutionSha: overrides?.preExecutionSha ?? "abc123def456",
+      baselineTest: null,
+      retryState: {
+        tasks: {},
+        waves: {},
+        finalReview: null,
+      },
+      waves: [
+        { wave: 1, tasks: [1], status: "done", commitSha: "wave1sha123" },
+      ],
+    };
+  }
+
+  it("6e — resume validation: workspace path missing throws descriptive error", async () => {
+    const io = createMockIO();
+    seedIntegrationFiles(io, INTEGRATION_PLAN_MD);
+    // Do NOT seed TEST_CWD in io.files → fileExists(TEST_CWD) returns false
+
+    io.files.set(INT_STATE_PATH, JSON.stringify(makeStoppedState(), null, 2));
+
+    const callbacks = createMockCallbacks({
+      requestResumeAction: async (_state) => "continue",
+    });
+
+    const engine = new PlanExecutionEngine(io, TEST_CWD, TEST_AGENT_DIR);
+
+    await assert.rejects(
+      () => engine.execute(INT_PLAN_PATH, callbacks),
+      (err: Error) => {
+        return /cannot resume/i.test(err.message) && /workspace|path/i.test(err.message);
+      },
+      "Should throw with a descriptive error about workspace path",
+    );
+
+    // State should not have a lock acquired
+    const stateContent = io.files.get(INT_STATE_PATH);
+    assert.ok(stateContent !== undefined, "State file should still exist");
+    const state: RunState = JSON.parse(stateContent!);
+    assert.equal(state.lock, null, "Lock should not have been acquired");
+  });
+
+  it("6f — resume validation: branch mismatch throws descriptive error", async () => {
+    const io = createMockIO();
+    seedIntegrationFiles(io, INTEGRATION_PLAN_MD);
+    io.files.set(TEST_CWD, ""); // workspace path exists
+
+    // State has branch "some-other-branch" but default exec returns "feature/test"
+    io.files.set(
+      INT_STATE_PATH,
+      JSON.stringify(makeStoppedState({ branch: "some-other-branch" }), null, 2),
+    );
+
+    const callbacks = createMockCallbacks({
+      requestResumeAction: async (_state) => "continue",
+    });
+
+    const engine = new PlanExecutionEngine(io, TEST_CWD, TEST_AGENT_DIR);
+
+    await assert.rejects(
+      () => engine.execute(INT_PLAN_PATH, callbacks),
+      (err: Error) => {
+        return /cannot resume/i.test(err.message) && /branch/i.test(err.message);
+      },
+      "Should throw with a descriptive error about branch mismatch",
+    );
+
+    // State should not have a lock acquired
+    const stateContent = io.files.get(INT_STATE_PATH);
+    assert.ok(stateContent !== undefined, "State file should still exist");
+    const state: RunState = JSON.parse(stateContent!);
+    assert.equal(state.lock, null, "Lock should not have been acquired");
+  });
+
+  it("6g — resume validation: SHA mismatch throws descriptive error", async () => {
+    const io = createMockIO();
+    seedIntegrationFiles(io, INTEGRATION_PLAN_MD);
+    io.files.set(TEST_CWD, ""); // workspace path exists
+
+    // State has SHA "deadbeef00000000" but default exec returns "abc123def456"
+    io.files.set(
+      INT_STATE_PATH,
+      JSON.stringify(makeStoppedState({ preExecutionSha: "deadbeef00000000" }), null, 2),
+    );
+
+    const callbacks = createMockCallbacks({
+      requestResumeAction: async (_state) => "continue",
+    });
+
+    const engine = new PlanExecutionEngine(io, TEST_CWD, TEST_AGENT_DIR);
+
+    await assert.rejects(
+      () => engine.execute(INT_PLAN_PATH, callbacks),
+      (err: Error) => {
+        return /cannot resume/i.test(err.message) && /sha|commit/i.test(err.message);
+      },
+      "Should throw with a descriptive error about SHA mismatch",
+    );
+
+    // State should not have a lock acquired
+    const stateContent = io.files.get(INT_STATE_PATH);
+    assert.ok(stateContent !== undefined, "State file should still exist");
+    const state: RunState = JSON.parse(stateContent!);
+    assert.equal(state.lock, null, "Lock should not have been acquired");
   });
 });
