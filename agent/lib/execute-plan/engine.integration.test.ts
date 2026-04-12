@@ -358,6 +358,11 @@ describe("Scenario 2: Mixed outcomes — BLOCKED task triggers judgment and retr
 
     const judgmentRequests: JudgmentRequest[] = [];
 
+    // Capture state file content when wave 2 completes — at that point
+    // persistTaskRetryState has already been called (it runs during handleTaskResult,
+    // which completes before wave_completed fires).
+    let wave2StateSnapshot: string | undefined;
+
     const callbacks = createMockCallbacks({
       requestJudgment: async (req) => {
         judgmentRequests.push(req);
@@ -367,6 +372,14 @@ describe("Scenario 2: Mixed outcomes — BLOCKED task triggers judgment and retr
         return { action: "accept" as const };
       },
     });
+
+    const origOnProgress = callbacks.onProgress;
+    callbacks.onProgress = (event) => {
+      origOnProgress(event);
+      if (event.type === "wave_completed" && event.wave === 2) {
+        wave2StateSnapshot = io.files.get(INT_STATE_PATH);
+      }
+    };
 
     const engine = new PlanExecutionEngine(io, TEST_CWD, TEST_AGENT_DIR);
     const outcome = await engine.execute(INT_PLAN_PATH, callbacks);
@@ -397,6 +410,25 @@ describe("Scenario 2: Mixed outcomes — BLOCKED task triggers judgment and retr
     // Final execution_completed emitted
     const execCompleted = progressEvents(callbacks, "execution_completed");
     assert.equal(execCompleted.length, 1);
+
+    // Retry state was persisted: the state snapshot captured at wave_completed(2)
+    // should contain an entry for task 2 in retryState.tasks.
+    assert.ok(wave2StateSnapshot !== undefined, "State snapshot at wave_completed(2) should exist");
+    const wave2State: RunState = JSON.parse(wave2StateSnapshot!);
+    assert.ok(
+      wave2State.retryState.tasks["2"] !== undefined,
+      "retryState.tasks should have an entry for task 2 after a BLOCKED->retry sequence",
+    );
+    const task2RetryRecord = wave2State.retryState.tasks["2"];
+    assert.equal(task2RetryRecord.attempts, 1, "Task 2 should have 1 recorded retry attempt");
+    assert.ok(
+      task2RetryRecord.lastFailure.length > 0,
+      "Task 2 retry record should capture the last failure text",
+    );
+    assert.ok(
+      task2RetryRecord.lastFailureAt.length > 0,
+      "Task 2 retry record should have a lastFailureAt timestamp",
+    );
   });
 
   it("accepts a DONE_WITH_CONCERNS task after judgment and completes successfully", async () => {
@@ -648,6 +680,15 @@ describe("Scenario 4: Resume from stopped state", () => {
       (callbacks.calls["requestResumeAction"] ?? []).length > 0,
       "requestResumeAction should have been called",
     );
+
+    // requestResumeAction received the persisted stopped state as its argument
+    const resumeArg = callbacks.calls["requestResumeAction"]![0][0] as RunState;
+    assert.equal(resumeArg.status, "stopped", "Resume arg should have status 'stopped'");
+    assert.equal(resumeArg.plan, INT_PLAN_FILE_NAME, "Resume arg should reference the correct plan file");
+    assert.ok(Array.isArray(resumeArg.waves), "Resume arg should have a waves array");
+    assert.equal(resumeArg.waves.length, 1, "Resume arg should have exactly one wave (wave 1 done)");
+    assert.equal(resumeArg.waves[0].wave, 1, "Resume arg wave entry should be wave 1");
+    assert.equal(resumeArg.waves[0].status, "done", "Resume arg wave 1 should be marked done");
 
     // Only wave 2 started (not wave 1 again)
     const waveStarted = progressEvents(callbacks, "wave_started");
