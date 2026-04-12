@@ -402,13 +402,158 @@ describe("Scenario 2: Mixed outcomes — BLOCKED task triggers judgment and retr
 // ── Scenario 3: Stop mid-run ───────────────────────────────────────
 
 describe("Scenario 3: Stop mid-run — cancellation after wave 1", () => {
-  // Tests added in Task 4
+  it("stops after wave 1 completes, persists stopped state, and does not start wave 2", async () => {
+    const io = createMockIO();
+    // Use INTEGRATION_PLAN_MD (no todo link) per task description
+    seedIntegrationFiles(io, INTEGRATION_PLAN_MD);
+
+    io.dispatchSubagent = perTaskDispatcher({
+      1: [doneResult(1)],
+      2: [doneResult(2)],
+      3: [doneResult(3)],
+    });
+
+    let engine: PlanExecutionEngine;
+    const callbacks = createMockCallbacks();
+    const origOnProgress = callbacks.onProgress;
+    callbacks.onProgress = (event) => {
+      origOnProgress(event); // preserve recording
+      if (event.type === "wave_completed" && event.wave === 1) {
+        engine!.requestCancellation("wave");
+      }
+    };
+    engine = new PlanExecutionEngine(io, TEST_CWD, TEST_AGENT_DIR);
+    const outcome = await engine.execute(INT_PLAN_PATH, callbacks);
+
+    // Outcome must be "stopped"
+    assert.equal(outcome, "stopped");
+
+    // State file persists (not deleted)
+    assert.ok(io.files.has(INT_STATE_PATH), "State file should persist after stop");
+
+    // State has status "stopped" and stopGranularity "wave"
+    const stateContent = io.files.get(INT_STATE_PATH)!;
+    const state: RunState = JSON.parse(stateContent);
+    assert.equal(state.status, "stopped");
+    assert.equal(state.stopGranularity, "wave");
+
+    // Lock released
+    assert.equal(state.lock, null, "Lock should be released after stop");
+
+    // Wave 1 committed — wave_completed event for wave 1
+    const waveCompleted = progressEvents(callbacks, "wave_completed");
+    assert.equal(waveCompleted.length, 1, "Only wave 1 should have completed");
+    assert.equal(waveCompleted[0].wave, 1);
+    assert.ok(waveCompleted[0].commitSha, "Wave 1 should have a commitSha");
+
+    // Wave 2 never started — no wave_started event for wave 2
+    const waveStarted = progressEvents(callbacks, "wave_started");
+    const wave2Started = waveStarted.filter((e) => e.wave === 2);
+    assert.equal(wave2Started.length, 0, "Wave 2 should never have started");
+
+    // execution_completed NOT emitted
+    const execCompleted = progressEvents(callbacks, "execution_completed");
+    assert.equal(execCompleted.length, 0, "execution_completed should not be emitted");
+
+    // Plan NOT moved to done/
+    assert.ok(!io.files.has(INT_DONE_PATH), "Plan should NOT be moved to done/");
+    assert.ok(io.files.has(INT_PLAN_PATH), "Original plan path should still exist");
+  });
 });
 
 // ── Scenario 4: Resume from stopped state ──────────────────────────
 
 describe("Scenario 4: Resume from stopped state", () => {
-  // Tests added in Task 4
+  it("resumes from stopped state, skips wave 1 tasks, dispatches wave 2 tasks, and completes", async () => {
+    const io = createMockIO();
+    seedIntegrationFiles(io, INTEGRATION_PLAN_MD);
+
+    // Seed the workspace path so validateResume's fileExists check passes
+    io.files.set(TEST_CWD, "");
+
+    // Track which task numbers are dispatched
+    const dispatched: number[] = [];
+    io.dispatchSubagent = async (config, options) => {
+      dispatched.push(config.taskNumber);
+      return doneResult(config.taskNumber);
+    };
+
+    // Pre-seed a stopped RunState where wave 1 is done
+    const stoppedState: RunState = {
+      plan: INT_PLAN_FILE_NAME,
+      status: "stopped",
+      lock: null,
+      startedAt: new Date(Date.now() - 60000).toISOString(),
+      stoppedAt: new Date().toISOString(),
+      stopGranularity: "wave",
+      settings: DEFAULT_SETTINGS,
+      workspace: {
+        type: "current",
+        path: TEST_CWD,
+        branch: "feature/test",
+      },
+      preExecutionSha: "abc123def456",
+      baselineTest: null,
+      retryState: {
+        tasks: {},
+        waves: {},
+        finalReview: null,
+      },
+      waves: [
+        {
+          wave: 1,
+          tasks: [1],
+          status: "done",
+          commitSha: "wave1sha123",
+        },
+      ],
+    };
+    io.files.set(INT_STATE_PATH, JSON.stringify(stoppedState, null, 2));
+
+    const callbacks = createMockCallbacks({
+      requestResumeAction: async (_state) => "continue",
+    });
+
+    const engine = new PlanExecutionEngine(io, TEST_CWD, TEST_AGENT_DIR);
+    const outcome = await engine.execute(INT_PLAN_PATH, callbacks);
+
+    // Outcome must be "completed"
+    assert.equal(outcome, "completed");
+
+    // Wave 1 tasks (task 1) NOT re-dispatched
+    assert.ok(!dispatched.includes(1), "Task 1 should NOT be re-dispatched on resume");
+
+    // Wave 2 tasks (2 and 3) dispatched
+    assert.ok(dispatched.includes(2), "Task 2 should be dispatched");
+    assert.ok(dispatched.includes(3), "Task 3 should be dispatched");
+
+    // requestSettings NOT called (uses persisted settings from stopped state)
+    assert.equal(
+      (callbacks.calls["requestSettings"] ?? []).length,
+      0,
+      "requestSettings should not be called when resuming",
+    );
+
+    // requestResumeAction WAS called
+    assert.ok(
+      (callbacks.calls["requestResumeAction"] ?? []).length > 0,
+      "requestResumeAction should have been called",
+    );
+
+    // Only wave 2 started (not wave 1 again)
+    const waveStarted = progressEvents(callbacks, "wave_started");
+    const wave1Started = waveStarted.filter((e) => e.wave === 1);
+    assert.equal(wave1Started.length, 0, "Wave 1 should not be re-started on resume");
+    const wave2Started = waveStarted.filter((e) => e.wave === 2);
+    assert.equal(wave2Started.length, 1, "Wave 2 should start exactly once");
+
+    // execution_completed emitted (means resume validation passed and run finished)
+    const execCompleted = progressEvents(callbacks, "execution_completed");
+    assert.equal(execCompleted.length, 1, "execution_completed should be emitted on successful resume");
+
+    // State file deleted after completion
+    assert.ok(!io.files.has(INT_STATE_PATH), "State file should be deleted after completion");
+  });
 });
 
 // ── Scenario 5: Test regression — post-wave test failure ───────────
