@@ -325,6 +325,9 @@ Solid implementation with minor gaps in error handling.
     // State file deleted
     assert.ok(!io.files.has(INT_STATE_PATH), "State file should be deleted after completion");
 
+    // Lock released: verified implicitly — state file deletion means releaseLock ran,
+    // since the engine releases the lock before deleting state.
+
     // Wave completed events have commitSha
     assert.ok(waveCompleted[0].commitSha, "Wave 1 should have a commitSha");
     assert.ok(waveCompleted[1].commitSha, "Wave 2 should have a commitSha");
@@ -341,11 +344,16 @@ describe("Scenario 2: Mixed outcomes — BLOCKED task triggers judgment and retr
     const BLOCKER_TEXT = "Cannot connect to email provider";
 
     // Task 1: DONE, Task 2: BLOCKED then DONE on retry, Task 3: DONE
-    io.dispatchSubagent = perTaskDispatcher({
+    const dispatched: number[] = [];
+    const baseDispatch = perTaskDispatcher({
       1: [doneResult(1)],
       2: [blockedResult(2, BLOCKER_TEXT), doneResult(2)],
       3: [doneResult(3)],
     });
+    io.dispatchSubagent = async (config, options) => {
+      dispatched.push(config.taskNumber);
+      return baseDispatch(config, options);
+    };
 
     const judgmentRequests: JudgmentRequest[] = [];
 
@@ -381,10 +389,9 @@ describe("Scenario 2: Mixed outcomes — BLOCKED task triggers judgment and retr
     assert.ok(waveCompleted[0].commitSha, "Wave 1 should have a commitSha");
     assert.ok(waveCompleted[1].commitSha, "Wave 2 should have a commitSha");
 
-    // Task 2 has at least one task_completed event after retry (should be 2: initial BLOCKED + retry DONE)
-    const taskCompleted = progressEvents(callbacks, "task_completed");
-    const task2Events = taskCompleted.filter((e) => e.taskNumber === 2);
-    assert.ok(task2Events.length >= 1, "Task 2 should have at least one task_completed event");
+    // dispatchSubagent called twice for task 2 (original BLOCKED + retry DONE)
+    const task2Dispatches = dispatched.filter((n) => n === 2);
+    assert.equal(task2Dispatches.length, 2, "Task 2 should be dispatched exactly twice (original + retry)");
 
     // Final execution_completed emitted
     const execCompleted = progressEvents(callbacks, "execution_completed");
