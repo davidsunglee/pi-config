@@ -1,7 +1,7 @@
 {
   "id": "efc9f70b",
-  "title": "Add review-remediate loop to final code review in execute-plan",
-  "tags": ["execute-plan", "code-review", "workflow"],
+  "title": "Add review-loop skill to replace fire-and-forget code review in execute-plan",
+  "tags": ["execute-plan", "code-review", "review-loop", "workflow"],
   "status": "open",
   "created_at": "2026-04-13T20:00:00.000Z"
 }
