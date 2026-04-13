@@ -202,6 +202,49 @@ _Added by plan reviewer — informational, not blocking._
   });
 
   // ---------------------------------------------------------------------------
+  // (h) multiline fullText is rendered with proper indentation
+  // ---------------------------------------------------------------------------
+  test("renders multiline fullText with proper indentation under the task label", () => {
+    const multilineText = [
+      "- **What:** Task 2 says it creates `output.json` but Task 4 reads `result.json`.",
+      "- **Why it matters:** Task 4 will fail because the expected file does not exist.",
+      "- **Recommendation:** Rename the output in Task 2 to `result.json`.",
+    ].join("\n");
+
+    const issues: ReviewIssue[] = [
+      makeIssue("warning", 2, multilineText),
+    ];
+
+    const result = appendReviewNotes(basePlan, issues);
+
+    // The first line should follow the task label
+    assert.ok(
+      result.includes("- **Task 2**: - **What:** Task 2 says it creates `output.json`"),
+      "First line of fullText should follow the task label"
+    );
+    // Continuation lines should be indented with 2 spaces
+    assert.ok(
+      result.includes("\n  - **Why it matters:** Task 4 will fail"),
+      "Second line should be indented with 2 spaces"
+    );
+    assert.ok(
+      result.includes("\n  - **Recommendation:** Rename the output"),
+      "Third line should be indented with 2 spaces"
+    );
+
+    // Verify the complete formatted block
+    const expectedBlock = [
+      "- **Task 2**: - **What:** Task 2 says it creates `output.json` but Task 4 reads `result.json`.",
+      "  - **Why it matters:** Task 4 will fail because the expected file does not exist.",
+      "  - **Recommendation:** Rename the output in Task 2 to `result.json`.",
+    ].join("\n");
+    assert.ok(
+      result.includes(expectedBlock),
+      `Expected formatted block:\n${expectedBlock}\n\nActual result:\n${result}`
+    );
+  });
+
+  // ---------------------------------------------------------------------------
   // Additional: errors mixed with warnings/suggestions are excluded
   // ---------------------------------------------------------------------------
   test("errors are never included in review notes even when mixed with other severities", () => {

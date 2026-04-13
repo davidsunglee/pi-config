@@ -38,6 +38,22 @@ export function parseReviewOutput(reviewText: string): ReviewResult {
 
   const issues = parseIssues(reviewText);
 
+  // If the status says issues were found but we couldn't parse any, the issue
+  // blocks are malformed.  Synthesize a single error-severity parse-error issue
+  // so the result is never silently treated as non-blocking.
+  if (status === "issues_found" && issues.length === 0) {
+    const issuesSectionMatch = reviewText.match(/###\s*Issues\s*\n([\s\S]*?)(?=\n###\s|\n?$)/);
+    const rawIssuesContent = issuesSectionMatch ? issuesSectionMatch[1].trim() : "";
+    if (rawIssuesContent.length > 0) {
+      issues.push({
+        severity: "error",
+        taskNumber: null,
+        shortDescription: "Failed to parse review issues",
+        fullText: rawIssuesContent,
+      });
+    }
+  }
+
   return {
     status,
     issues,

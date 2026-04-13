@@ -140,6 +140,46 @@ describe("fillReviewTemplate", () => {
     );
   });
 
+  test("throws when a mixed-case placeholder like {Mixed_Case} remains in the template", () => {
+    const templateWithMixed =
+      "## Spec\n\n{ORIGINAL_SPEC}\n\n{PLAN_CONTENTS}\n\n{Mixed_Case}";
+
+    assert.throws(
+      () =>
+        fillReviewTemplate(templateWithMixed, {
+          planContents: "plan",
+          originalSpec: "spec",
+        }),
+      (err: Error) => {
+        assert.ok(
+          err.message.includes("{Mixed_Case}"),
+          `Expected error message to mention {Mixed_Case}, got: ${err.message}`
+        );
+        return true;
+      }
+    );
+  });
+
+  test("throws when a lower_case placeholder like {plan_contents} remains in the template", () => {
+    const templateWithLower =
+      "## Spec\n\n{ORIGINAL_SPEC}\n\n{PLAN_CONTENTS}\n\n{plan_contents}";
+
+    assert.throws(
+      () =>
+        fillReviewTemplate(templateWithLower, {
+          planContents: "plan",
+          originalSpec: "spec",
+        }),
+      (err: Error) => {
+        assert.ok(
+          err.message.includes("{plan_contents}"),
+          `Expected error message to mention {plan_contents}, got: ${err.message}`
+        );
+        return true;
+      }
+    );
+  });
+
   test("does not throw when parameter values happen to contain brace patterns", () => {
     // Values that look like placeholders should NOT trigger the unfilled check
     const result = fillReviewTemplate(template, {

@@ -128,10 +128,11 @@ export function advanceCycle(
         consecutiveEditFailures: prev.consecutiveEditFailures + 1,
       };
     } else {
-      // New issue — start fresh
+      // New issue — start at 1 because the issue persisting through an edit
+      // cycle means one failed edit already happened.
       newTracker[key] = {
         firstSeenCycle: nextCycle,
-        consecutiveEditFailures: 0,
+        consecutiveEditFailures: 1,
       };
     }
   }

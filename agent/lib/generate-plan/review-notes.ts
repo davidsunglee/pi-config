@@ -62,7 +62,18 @@ function formatLabel(taskNumber: number | null): string {
 }
 
 function formatItem(issue: ReviewIssue): string {
-  return `- **${formatLabel(issue.taskNumber)}**: ${issue.fullText}`;
+  const label = `- **${formatLabel(issue.taskNumber)}**: `;
+  const lines = issue.fullText.split("\n");
+  const firstLine = lines[0];
+  const rest = lines.slice(1);
+
+  if (rest.length === 0) {
+    return `${label}${firstLine}`;
+  }
+
+  // Indent continuation lines with 2 spaces (standard markdown list continuation)
+  const continued = rest.map((line) => `  ${line}`).join("\n");
+  return `${label}${firstLine}\n${continued}`;
 }
 
 function buildReviewNotesSection(
