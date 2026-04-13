@@ -83,6 +83,7 @@ export class PlanGenerationEngine {
     let validationErrors = validation.errors;
 
     let reviewResult: ReviewResult | null = null;
+    let reviewFileWritten = false;
 
     if (!validation.valid) {
       // Validation failed → skip review, go to repair
@@ -95,6 +96,7 @@ export class PlanGenerationEngine {
         reviewPath,
         callbacks,
       );
+      reviewFileWritten = true;
     }
 
     // ── Phase 5 — Repair loop (if needed) ─────────────────────────────
@@ -139,6 +141,7 @@ export class PlanGenerationEngine {
           reviewPath,
           callbacks,
         );
+        reviewFileWritten = true;
       } else {
         // Validation still fails — clear stale review findings so only
         // validation errors drive this repair cycle. Old review issues
@@ -203,7 +206,7 @@ export class PlanGenerationEngine {
 
     const result: GenerationResult = {
       planPath,
-      reviewPath: reviewResult !== null ? reviewPath : null,
+      reviewPath: reviewFileWritten ? reviewPath : null,
       reviewStatus,
       noteCount,
       remainingFindings,

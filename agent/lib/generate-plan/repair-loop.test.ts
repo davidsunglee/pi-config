@@ -144,13 +144,17 @@ describe("advanceCycle", () => {
     const state: RepairCycleState = {
       ...createRepairState(),
       cycle: 1,
+      findings: [
+        makeIssue({ severity: "error", taskNumber: 1, shortDescription: "Missing dependency" }),
+        makeIssue({ severity: "warning", taskNumber: 2, shortDescription: "Old warning" }),
+      ],
       issueTracker: {
         "error:1:Missing dependency": { firstSeenCycle: 0, consecutiveEditFailures: 1 },
         "warning:2:Old warning": { firstSeenCycle: 0, consecutiveEditFailures: 0 },
       },
     };
 
-    // "Missing dependency" persists, "Old warning" is resolved, "New issue" is new
+    // "Missing dependency" persists, "Old warning" is resolved, "New issue" is genuinely new
     const issues = [
       makeIssue({ severity: "error", taskNumber: 1, shortDescription: "Missing dependency" }),
       makeIssue({ severity: "error", taskNumber: 3, shortDescription: "New issue" }),
@@ -167,8 +171,8 @@ describe("advanceCycle", () => {
     // Resolved issue is removed
     assert.equal(next.issueTracker["warning:2:Old warning"], undefined);
 
-    // New issue is added with 1 (the edit cycle it appeared in already failed)
-    assert.equal(next.issueTracker["error:3:New issue"].consecutiveEditFailures, 1);
+    // Genuinely new issue starts at 0 (not in previous cycle's findings)
+    assert.equal(next.issueTracker["error:3:New issue"].consecutiveEditFailures, 0);
     assert.equal(next.issueTracker["error:3:New issue"].firstSeenCycle, 2);
   });
 
@@ -177,12 +181,15 @@ describe("advanceCycle", () => {
       ...createRepairState(),
       cycle: 3,
       strategy: "partial_regen",
+      findings: [
+        makeIssue({ severity: "error", taskNumber: 1, shortDescription: "Stubborn bug" }),
+      ],
       issueTracker: {
         "error:1:Stubborn bug": { firstSeenCycle: 0, consecutiveEditFailures: 3 },
       },
     };
 
-    // The stubborn bug is gone, a new issue appeared
+    // The stubborn bug is gone, a genuinely new issue appeared
     const issues = [
       makeIssue({ severity: "error", taskNumber: 2, shortDescription: "Fresh issue" }),
     ];
@@ -192,9 +199,40 @@ describe("advanceCycle", () => {
     // Old escalated issue is removed (resolved)
     assert.equal(next.issueTracker["error:1:Stubborn bug"], undefined);
 
-    // New issue starts at 1 (the edit cycle it appeared in already failed)
-    assert.equal(next.issueTracker["error:2:Fresh issue"].consecutiveEditFailures, 1);
+    // Genuinely new issue starts at 0 (not in previous cycle's findings)
+    assert.equal(next.issueTracker["error:2:Fresh issue"].consecutiveEditFailures, 0);
     assert.equal(next.issueTracker["error:2:Fresh issue"].firstSeenCycle, 4);
+  });
+
+  test("distinguishes persisting issues (init at 1) from genuinely new issues (init at 0)", () => {
+    // Previous cycle had issues A and B in findings. After edit, A persists (in tracker),
+    // B persists (not in tracker yet, first cycle), and C is genuinely new.
+    const issueA = makeIssue({ severity: "error", taskNumber: 1, shortDescription: "Issue A" });
+    const issueB = makeIssue({ severity: "error", taskNumber: 2, shortDescription: "Issue B" });
+    const issueC = makeIssue({ severity: "error", taskNumber: 3, shortDescription: "Issue C" });
+
+    const state: RepairCycleState = {
+      ...createRepairState(),
+      cycle: 1,
+      findings: [issueA, issueB], // previous cycle's findings
+      validationErrors: [],
+      issueTracker: {
+        // Only A is in the tracker (was tracked from an earlier cycle)
+        "error:1:Issue A": { firstSeenCycle: 0, consecutiveEditFailures: 1 },
+      },
+    };
+
+    // After edit: A persists (in tracker), B persists (in previous findings but not tracker), C is new
+    const next = advanceCycle(state, [], [issueA, issueB, issueC]);
+
+    // A: was in tracker → incremented
+    assert.equal(next.issueTracker["error:1:Issue A"].consecutiveEditFailures, 2);
+
+    // B: not in tracker but WAS in previous findings → persisting → starts at 1
+    assert.equal(next.issueTracker["error:2:Issue B"].consecutiveEditFailures, 1);
+
+    // C: not in tracker AND not in previous findings → genuinely new → starts at 0
+    assert.equal(next.issueTracker["error:3:Issue C"].consecutiveEditFailures, 0);
   });
 });
 
@@ -268,34 +306,46 @@ describe("end-to-end repair loop scenario", () => {
     assert.equal(selectStrategy(state, [], [issueA]), "targeted_edit");
     state = advanceCycle(state, [], [issueA]);
     assert.equal(state.cycle, 1);
-    // New issue starts at 1 (the first edit attempt already failed)
-    assert.equal(state.issueTracker["error:1:Issue A"].consecutiveEditFailures, 1);
+    // Genuinely new issue (not in previous cycle's empty findings) starts at 0
+    assert.equal(state.issueTracker["error:1:Issue A"].consecutiveEditFailures, 0);
     assert.equal(state.issueTracker["error:1:Issue A"].firstSeenCycle, 1);
 
     // --- Cycle 1: issue A persists after first edit → still targeted_edit (1 < 2) ---
     assert.equal(selectStrategy(state, [], [issueA]), "targeted_edit");
     state = advanceCycle(state, [], [issueA]);
     assert.equal(state.cycle, 2);
+    assert.equal(state.issueTracker["error:1:Issue A"].consecutiveEditFailures, 1);
+
+    // --- Cycle 2: issue A persists again → still targeted_edit (1 < 2) ---
+    assert.equal(selectStrategy(state, [], [issueA]), "targeted_edit");
+    state = advanceCycle(state, [], [issueA]);
+    assert.equal(state.cycle, 3);
     assert.equal(state.issueTracker["error:1:Issue A"].consecutiveEditFailures, 2);
 
-    // --- Cycle 2: issue A has 2 consecutive failures → escalates to partial_regen ---
+    // --- Cycle 3: issue A has 2 consecutive failures → escalates to partial_regen ---
     assert.equal(selectStrategy(state, [], [issueA]), "partial_regen");
 
     // --- Execute partial regen: resolves issue A, new issue B appears ---
     const issueB = makeIssue({ severity: "error", taskNumber: 2, shortDescription: "Issue B" });
     state = advanceCycle(state, [], [issueB]);
-    assert.equal(state.cycle, 3);
+    assert.equal(state.cycle, 4);
     assert.equal(state.issueTracker["error:1:Issue A"], undefined); // resolved
-    // New issue B starts at 1
-    assert.equal(state.issueTracker["error:2:Issue B"].consecutiveEditFailures, 1);
+    // New issue B is genuinely new (not in previous cycle's findings [issueA]) → starts at 0
+    assert.equal(state.issueTracker["error:2:Issue B"].consecutiveEditFailures, 0);
     assert.equal(selectStrategy(state, [], [issueB]), "targeted_edit");
 
-    // --- Cycle 3: issue B persists after first edit ---
+    // --- Cycle 4: issue B persists after first edit ---
     state = advanceCycle(state, [], [issueB]);
-    assert.equal(state.cycle, 4);
+    assert.equal(state.cycle, 5);
+    assert.equal(state.issueTracker["error:2:Issue B"].consecutiveEditFailures, 1);
+
+    // --- Cycle 5: issue B persists again → still targeted_edit (1 < 2) ---
+    assert.equal(selectStrategy(state, [], [issueB]), "targeted_edit");
+    state = advanceCycle(state, [], [issueB]);
+    assert.equal(state.cycle, 6);
     assert.equal(state.issueTracker["error:2:Issue B"].consecutiveEditFailures, 2);
 
-    // --- Cycle 4: issue B has 2 consecutive failures → escalates ---
+    // --- Cycle 6: issue B has 2 consecutive failures → escalates ---
     assert.equal(selectStrategy(state, [], [issueB]), "partial_regen");
   });
 });

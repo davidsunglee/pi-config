@@ -118,6 +118,15 @@ export function advanceCycle(
     currentKeys.add(validationErrorKey(error));
   }
 
+  // Build set of previous cycle's issue keys (from state.findings and state.validationErrors)
+  const previousCycleKeys = new Set<string>();
+  for (const issue of state.findings) {
+    previousCycleKeys.add(issueKey(issue));
+  }
+  for (const error of state.validationErrors) {
+    previousCycleKeys.add(validationErrorKey(error));
+  }
+
   // For each current issue, check if it existed in the previous tracker
   for (const key of currentKeys) {
     const prev = state.issueTracker[key];
@@ -127,12 +136,19 @@ export function advanceCycle(
         firstSeenCycle: prev.firstSeenCycle,
         consecutiveEditFailures: prev.consecutiveEditFailures + 1,
       };
-    } else {
-      // New issue — start at 1 because the issue persisting through an edit
-      // cycle means one failed edit already happened.
+    } else if (previousCycleKeys.has(key)) {
+      // Issue existed in the previous cycle's findings but not in the tracker
+      // (e.g., first cycle). It survived an edit → one failed edit.
       newTracker[key] = {
         firstSeenCycle: nextCycle,
         consecutiveEditFailures: 1,
+      };
+    } else {
+      // Genuinely new issue — did not exist in the previous cycle at all.
+      // Introduced by the edit, never been edited yet → start at 0.
+      newTracker[key] = {
+        firstSeenCycle: nextCycle,
+        consecutiveEditFailures: 0,
       };
     }
   }

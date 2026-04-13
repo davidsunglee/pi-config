@@ -51,9 +51,9 @@ test("parseInput: TODO pattern returns todo type with correct id", async () => {
   assert.deepStrictEqual(result, { type: "todo", todoId: "abc123" });
 });
 
-test("parseInput: TODO pattern is case-insensitive", async () => {
+test("parseInput: TODO pattern is case-insensitive and normalizes to lowercase", async () => {
   const result = await parseInput("todo-DEF456", "/tmp");
-  assert.deepStrictEqual(result, { type: "todo", todoId: "DEF456" });
+  assert.deepStrictEqual(result, { type: "todo", todoId: "def456" });
 });
 
 test("parseInput: existing file path returns file type", async () => {
@@ -76,37 +76,22 @@ test("parseInput: relative file path resolved against cwd", async () => {
   assert.deepStrictEqual(result, { type: "file", filePath });
 });
 
-test("parseInput: non-existent path-like input throws error", async () => {
+test("parseInput: non-existent path-like input falls back to freeform", async () => {
   const dir = await getTempDir();
-  await assert.rejects(
-    () => parseInput("docs/missing-spec.md", dir),
-    (err: Error) => {
-      assert.match(err.message, /File not found:/);
-      return true;
-    },
-  );
+  const result = await parseInput("docs/missing-spec.md", dir);
+  assert.deepStrictEqual(result, { type: "freeform", text: "docs/missing-spec.md" });
 });
 
-test("parseInput: input starting with . that does not exist throws error", async () => {
+test("parseInput: input starting with . that does not exist falls back to freeform", async () => {
   const dir = await getTempDir();
-  await assert.rejects(
-    () => parseInput("./nonexistent.ts", dir),
-    (err: Error) => {
-      assert.match(err.message, /File not found:/);
-      return true;
-    },
-  );
+  const result = await parseInput("./nonexistent.ts", dir);
+  assert.deepStrictEqual(result, { type: "freeform", text: "./nonexistent.ts" });
 });
 
-test("parseInput: input with file extension that does not exist throws error", async () => {
+test("parseInput: input with file extension that does not exist falls back to freeform", async () => {
   const dir = await getTempDir();
-  await assert.rejects(
-    () => parseInput("config.yaml", dir),
-    (err: Error) => {
-      assert.match(err.message, /File not found:/);
-      return true;
-    },
-  );
+  const result = await parseInput("config.yaml", dir);
+  assert.deepStrictEqual(result, { type: "freeform", text: "config.yaml" });
 });
 
 test("parseInput: freeform text returns freeform type", async () => {
