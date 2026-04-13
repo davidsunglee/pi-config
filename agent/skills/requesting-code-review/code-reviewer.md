@@ -28,6 +28,8 @@ git diff --stat {BASE_SHA}..{HEAD_SHA}
 git diff {BASE_SHA}..{HEAD_SHA}
 ```
 
+{RE_REVIEW_BLOCK}
+
 ## Review Checklist
 
 **Code Quality:**
