@@ -24,37 +24,42 @@ export async function loadReviewTemplate(
  * with the provided values.
  *
  * Throws if any unfilled placeholders remain after substitution.
- * Unfilled placeholders are detected as `{UPPER_CASE_NAME}` patterns
- * (all-uppercase letters and underscores), which avoids false positives
- * from user content that happens to contain braces.
+ * Unfilled placeholders are detected as `{WORD_CHARS}` patterns — at least
+ * 2 characters inside braces, letters and underscores only. This catches
+ * `{UPPER_CASE}`, `{Mixed_Case}`, and `{lower_case}` while avoiding false
+ * positives on things like `{x}` or JSON content like `{"key": "value"}`.
  */
 export function fillReviewTemplate(
   template: string,
   params: { planContents: string; originalSpec: string }
 ): string {
-  // Use a sentinel to track substitution positions so user content
+  // Step 1: Replace known placeholders with sentinels so user content
   // containing brace patterns doesn't interfere with placeholder detection.
-  // We replace known placeholders first, then scan for remaining ones.
+  const SENTINEL_PLAN = "\0PLAN_SENTINEL\0";
+  const SENTINEL_SPEC = "\0SPEC_SENTINEL\0";
 
-  // Step 1: Replace known placeholders
-  let filled = template
-    .replace(/\{PLAN_CONTENTS\}/g, params.planContents)
-    .replace(/\{ORIGINAL_SPEC\}/g, params.originalSpec);
+  const skeleton = template
+    .replace(/\{PLAN_CONTENTS\}/g, SENTINEL_PLAN)
+    .replace(/\{ORIGINAL_SPEC\}/g, SENTINEL_SPEC);
 
-  // Step 2: Check for any remaining unfilled placeholders.
-  // Match {ALL_CAPS_WITH_UNDERSCORES} patterns — at least 2 uppercase chars.
-  const unfilledPattern = /\{[A-Z][A-Z_]{1,}\}/g;
-
-  // We need to scan only the "template skeleton" portions, not user-provided values.
-  // Since user values may contain lowercase brace patterns but not UPPER_CASE ones
-  // (by convention), we can scan the full result for UPPER_CASE placeholders.
-  const remaining = filled.match(unfilledPattern);
+  // Step 2: Check the skeleton for any remaining unfilled placeholders.
+  // Match {WORD_CHARS} patterns — at least 2 chars inside braces, letters and
+  // underscores only. This catches {UPPER_CASE}, {Mixed_Case}, and
+  // {lower_case} while avoiding false positives on things like {x} or JSON
+  // content like {"key": "value"}.
+  const unfilledPattern = /\{[A-Za-z][A-Za-z_]{1,}\}/g;
+  const remaining = skeleton.match(unfilledPattern);
   if (remaining) {
     const unique = [...new Set(remaining)];
     throw new Error(
       `Unfilled placeholder(s) in review template: ${unique.join(", ")}`
     );
   }
+
+  // Step 3: Substitute the real user values in place of sentinels
+  const filled = skeleton
+    .split(SENTINEL_PLAN).join(params.planContents)
+    .split(SENTINEL_SPEC).join(params.originalSpec);
 
   return filled;
 }

@@ -232,7 +232,35 @@ describe("parseReviewOutput", () => {
     assert.equal(result.rawOutput, input);
   });
 
-  // (i) parses a realistic review output matching plan-reviewer.md format
+  // (i) returns synthetic parse-error issue when status is Issues Found but issue blocks are malformed
+  it("returns synthetic parse-error issue when status is Issues Found but issue blocks are malformed", () => {
+    const input = [
+      "### Status",
+      "",
+      "**[Issues Found]**",
+      "",
+      "### Issues",
+      "",
+      "There are some problems with the plan but I forgot to use the proper format.",
+      "Task 3 has a missing dependency and Task 5 is vague.",
+      "",
+      "### Summary",
+      "",
+      "Fix the issues above.",
+    ].join("\n");
+
+    const result = parseReviewOutput(input);
+
+    assert.equal(result.status, "issues_found");
+    assert.equal(result.issues.length, 1);
+    assert.equal(result.issues[0].severity, "error");
+    assert.equal(result.issues[0].taskNumber, null);
+    assert.equal(result.issues[0].shortDescription, "Failed to parse review issues");
+    assert.ok(result.issues[0].fullText.includes("some problems with the plan"));
+    assert.ok(result.issues[0].fullText.includes("Task 3 has a missing dependency"));
+  });
+
+  // (j) parses a realistic review output matching plan-reviewer.md format
   it("parses a realistic review output matching the plan-reviewer.md format", () => {
     const input = [
       "### Status",
