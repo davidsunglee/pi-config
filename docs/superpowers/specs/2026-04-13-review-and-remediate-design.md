@@ -16,6 +16,14 @@ Three new components:
 
 The remediator (the agent that fixes code) is `plan-executor` — fixing issues is executing a task.
 
+## Model Configuration
+
+Model selection uses `~/.pi/agent/models.json` (extracted from `settings.json`'s `modelTiers` — see TODO-a3f17c62 for the migration). The review-loop skill references model tiers by role, not by model name:
+
+- **`crossProvider.capable`** — first-pass full review, final verification review
+- **`modelTiers.standard`** — hybrid re-reviews (scoped, cheaper), remediation coordinator
+- **`modelTiers.capable`** — remediator (plan-executor fixing code)
+
 ## Inputs
 
 Provided by whoever invokes the skill:
@@ -24,7 +32,7 @@ Provided by whoever invokes the skill:
 - **Description** — what was implemented
 - **Requirements/plan** — spec or plan to review against (optional; if absent, review is purely quality-focused)
 - **Max iterations** — default 3
-- **Model tiers** — from `~/.pi/agent/settings.json`
+- **Model matrix** — from `~/.pi/agent/models.json`
 - **Working directory** — worktree or project root
 - **Review output path** — e.g., `.pi/reviews/<plan>-code-review.md`
 
@@ -64,7 +72,7 @@ Provided by whoever invokes the skill:
 
 ### Iteration 2..N (Hybrid Re-Review)
 
-1. **Dispatch `code-reviewer`** (model: `crossProvider.capable`)
+1. **Dispatch `code-reviewer`** (model: `modelTiers.standard`)
    - Hybrid re-review mode: remediation diff only (`prev_HEAD..new_HEAD`)
    - Context includes: previous findings, what was claimed fixed, full plan
    - Job: verify fixes addressed the findings, check for regressions in the remediation diff, flag new issues
@@ -78,7 +86,7 @@ Provided by whoever invokes the skill:
 
 When hybrid reviews converge (no Critical/Important issues):
 
-1. **Dispatch `code-reviewer`** for a single full-diff verification review: `BASE_SHA..current_HEAD`
+1. **Dispatch `code-reviewer`** (model: `crossProvider.capable`) for a single full-diff verification review: `BASE_SHA..current_HEAD`
 2. If clean → done, report "clean"
 3. If issues found → **reset the iteration budget** and re-enter the remediation loop. This starts a new "era" — create a new versioned review file (`v2`, `v3`, etc.)
 
@@ -182,7 +190,7 @@ The unversioned path (`<plan>-code-review.md`) is always a copy of the latest ve
 ### `agent/agents/remediation-coordinator.md`
 
 - Orchestrates the review-remediate cycle
-- Model: `claude-sonnet-4-6` (coordinates, doesn't write code)
+- Model: `modelTiers.standard` (coordinates, doesn't write code)
 - Responsibilities:
   - Dispatch `code-reviewer` for each review pass
   - Assess findings and make batching judgment calls
@@ -204,7 +212,7 @@ Template filled by the caller and dispatched to `remediation-coordinator`. Place
 - `{HEAD_SHA}` — current HEAD after implementation
 - `{REVIEW_OUTPUT_PATH}` — base path for review files (coordinator adds version suffixes)
 - `{MAX_ITERATIONS}` — default 3
-- `{MODEL_TIERS}` — full modelTiers object for selecting reviewer and remediator models
+- `{MODEL_MATRIX}` — full model matrix for selecting reviewer and remediator models (from `~/.pi/agent/models.json`)
 - `{WORKING_DIR}` — worktree or project root
 
 Contains the full loop protocol so the coordinator is self-contained.
@@ -231,7 +239,12 @@ git rev-parse --git-dir 2>/dev/null
 
 If that fails: stop with "execute-plan requires a git repository."
 
-This removes all no-git conditional paths throughout the skill.
+This requires a full pass through `execute-plan/SKILL.md` to remove all no-git conditional branches:
+- Step 0: remove "not in a git repo" workspace variant
+- Step 3: remove "disabled (no git repo)" display states; remove checkpoint commit from settings (always on)
+- Step 7: remove "skip main-branch confirmation if not in git" conditional
+- Step 9b: remove "skip if not in a git repo" conditional for commits
+- Step 12: no fallback for missing git range (replaced entirely by review-loop invocation)
 
 ### Simplified Settings (Step 3)
 
@@ -263,7 +276,7 @@ Customization sequence:
 
 The current 65 lines of template loading, placeholder filling, model selection, and fallback logic are replaced with:
 
-1. Gather inputs: `PRE_EXECUTION_SHA`, current HEAD, plan goal, plan contents, working dir, max iterations, model tiers
+1. Gather inputs: `PRE_EXECUTION_SHA`, current HEAD, plan goal, plan contents, working dir, max iterations, model matrix
 2. Invoke `review-loop` skill
 3. Handle coordinator return:
    - `clean` → include review summary in completion report, proceed to Step 13
