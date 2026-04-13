@@ -77,16 +77,20 @@ test("parseInput: relative file path resolved against cwd", async () => {
   assert.deepStrictEqual(result, { type: "file", filePath });
 });
 
-test("parseInput: non-existent path-like input falls back to freeform", async () => {
+test("parseInput: non-existent path with slash throws an error", async () => {
   const dir = await getTempDir();
-  const result = await parseInput("docs/missing-spec.md", dir);
-  assert.deepStrictEqual(result, { type: "freeform", text: "docs/missing-spec.md" });
+  await assert.rejects(
+    () => parseInput("docs/missing-spec.md", dir),
+    /File not found: docs\/missing-spec\.md/,
+  );
 });
 
-test("parseInput: input starting with . that does not exist falls back to freeform", async () => {
+test("parseInput: input starting with . that does not exist throws an error", async () => {
   const dir = await getTempDir();
-  const result = await parseInput("./nonexistent.ts", dir);
-  assert.deepStrictEqual(result, { type: "freeform", text: "./nonexistent.ts" });
+  await assert.rejects(
+    () => parseInput("./nonexistent.ts", dir),
+    /File not found: \.\/nonexistent\.ts/,
+  );
 });
 
 test("parseInput: input with file extension that does not exist falls back to freeform", async () => {
