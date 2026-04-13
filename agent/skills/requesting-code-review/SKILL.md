@@ -42,11 +42,11 @@ Fill these placeholders:
 
 ### 3. Dispatch the subagent
 
-Use pi's `subagent` tool to dispatch a fresh reviewer:
+Use pi's `subagent` tool to dispatch a `code-reviewer` agent:
 
 ```
 subagent {
-  agent: "plan-executor",
+  agent: "code-reviewer",
   task: "<filled code-reviewer.md template>",
   model: "<capable-tier model>"
 }
