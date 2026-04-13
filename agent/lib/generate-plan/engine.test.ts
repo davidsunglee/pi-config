@@ -484,6 +484,32 @@ describe("PlanGenerationEngine", () => {
         },
       );
     });
+
+    it("throws when a stale plan file exists but the generator produces no new output", async () => {
+      // Simulate: plan file exists from a prior run, generator exits 0
+      // but does not write fresh content (the truncation leaves an empty file).
+      const { io } = createMockIO({
+        planFileExists: true,
+        planContent: "",  // readFile returns empty after truncation
+        dispatchOutputSequence: [
+          { text: "", exitCode: 0 },
+        ],
+      });
+      const { callbacks } = createMockCallbacks();
+      const engine = new PlanGenerationEngine(io, CWD, AGENT_DIR);
+
+      await assert.rejects(
+        () =>
+          engine.generate(
+            { type: "freeform", text: "Build something" },
+            callbacks,
+          ),
+        (err: Error) => {
+          assert.match(err.message, /did not produce output/i);
+          return true;
+        },
+      );
+    });
   });
 
   // ───────────────────────────────────────────────────────────────────────
@@ -506,9 +532,10 @@ describe("PlanGenerationEngine", () => {
       assert.equal(result.reviewStatus, "approved_with_notes");
       assert.ok(result.noteCount > 0, "Should have notes");
 
-      // The plan should have been written back with review notes
+      // The plan should have been written back with review notes.
+      // Filter out the truncation write (empty string) that clears stale content.
       const planWrite = calls.writeFileCalls.find(
-        (w) => w.path.includes(".pi/plans/") && !w.path.includes("reviews/"),
+        (w) => w.path.includes(".pi/plans/") && !w.path.includes("reviews/") && w.content.length > 0,
       );
       assert.ok(planWrite, "Should write plan with appended review notes");
       assert.ok(

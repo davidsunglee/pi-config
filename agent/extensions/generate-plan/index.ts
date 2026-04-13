@@ -60,15 +60,26 @@ export async function parseInput(
     return { type: "todo", todoId: todoMatch[1].toLowerCase() };
   }
 
-  // Check if it looks like a file path (contains /, starts with ., or has a file extension)
-  if (trimmed.includes("/") || trimmed.startsWith(".") || FILE_EXTENSION_PATTERN.test(trimmed)) {
+  // Strong file-path signals: contains `/` or starts with `.`
+  // These are unambiguous file references — error if the file doesn't exist.
+  if (trimmed.includes("/") || trimmed.startsWith(".")) {
     const resolved = path.isAbsolute(trimmed)
       ? trimmed
       : path.resolve(cwd, trimmed);
     if (await pathExists(resolved)) {
       return { type: "file", filePath: resolved };
     }
-    // File doesn't exist — fall back to freeform instead of throwing
+    throw new Error(`File not found: ${trimmed}`);
+  }
+
+  // Bare file extension (e.g. "config.yaml") — ambiguous, could be freeform
+  // text like "support node.js", so fall back to freeform if not found.
+  if (FILE_EXTENSION_PATTERN.test(trimmed)) {
+    const resolved = path.resolve(cwd, trimmed);
+    if (await pathExists(resolved)) {
+      return { type: "file", filePath: resolved };
+    }
+    // Ambiguous — could be freeform text like "support node.js"
     return { type: "freeform", text: trimmed };
   }
 
@@ -235,7 +246,8 @@ export function createDispatchFn(
           resolve(code ?? 0);
         });
 
-        proc.on("error", () => {
+        proc.on("error", (err) => {
+          stderrOutput += `\n${err.message}`;
           resolve(1);
         });
       });

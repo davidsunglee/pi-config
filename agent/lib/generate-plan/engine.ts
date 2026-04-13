@@ -223,6 +223,11 @@ export class PlanGenerationEngine {
     planPath: string,
     phase: string,
   ): Promise<string> {
+    // Clear any pre-existing file so stale content can't satisfy the check
+    if (await this.io.fileExists(planPath)) {
+      await this.io.writeFile(planPath, "");
+    }
+
     const output = await this.io.dispatchSubagent({
       agent: "plan-generator",
       task,
@@ -249,14 +254,23 @@ export class PlanGenerationEngine {
       throw new Error(details.join("\n"));
     }
 
+    let content: string;
     try {
-      return await this.io.readFile(planPath);
+      content = await this.io.readFile(planPath);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       throw new Error(
         `Plan generator reported success, but the expected plan file at ${planPath} could not be read during ${phase}: ${message}`,
       );
     }
+
+    if (!content.trim()) {
+      throw new Error(
+        `Plan generator did not produce output at ${planPath} during ${phase}.`,
+      );
+    }
+
+    return content;
   }
 
   private extractMentionedMarkdownPaths(text: string): string[] {
