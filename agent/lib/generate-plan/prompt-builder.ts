@@ -173,13 +173,13 @@ function getAffectedSections(
 function inferSectionFromFinding(finding: ReviewIssue): string {
   const text = `${finding.shortDescription} ${finding.fullText}`.toLowerCase();
 
-  if (/dependenc/i.test(text)) return "Dependencies";
-  if (/architect/i.test(text)) return "Architecture Summary";
-  if (/file.?struct|file.?map/i.test(text)) return "File Structure";
-  if (/risk/i.test(text)) return "Risk Assessment";
-  if (/test.?command/i.test(text)) return "Test Command";
-  if (/tech.?stack/i.test(text)) return "Tech Stack";
-  if (/goal/i.test(text)) return "Goal";
+  if (/dependenc/.test(text)) return "Dependencies";
+  if (/architect/.test(text)) return "Architecture Summary";
+  if (/file.?struct|file.?map/.test(text)) return "File Structure";
+  if (/risk/.test(text)) return "Risk Assessment";
+  if (/test.?command/.test(text)) return "Test Command";
+  if (/tech.?stack/.test(text)) return "Tech Stack";
+  if (/goal/.test(text)) return "Goal";
 
   return "General";
 }

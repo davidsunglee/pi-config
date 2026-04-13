@@ -273,4 +273,24 @@ Add caching middleware to Express routes.
       "partial regen prompt should not instruct targeted editing",
     );
   });
+
+  it("(k) partial regen infers section names from uppercase finding text", () => {
+    const prompt = buildEditPrompt({
+      ...baseEditParams,
+      strategy: "partial_regen",
+      findings: [
+        {
+          severity: "error",
+          taskNumber: null,
+          shortDescription: "TECH STACK mismatch",
+          fullText: "The TECH STACK section is outdated.",
+        },
+      ],
+    });
+
+    assert.ok(
+      prompt.includes("Tech Stack"),
+      "partial regen prompt should infer Tech Stack from uppercase finding text",
+    );
+  });
 });
