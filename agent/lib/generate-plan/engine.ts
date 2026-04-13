@@ -140,8 +140,10 @@ export class PlanGenerationEngine {
           callbacks,
         );
       } else {
-        // Validation still fails — reviewResult stays as-is
-        // (null if never reviewed, or previous value)
+        // Validation still fails — clear stale review findings so only
+        // validation errors drive this repair cycle. Old review issues
+        // should not misdirect repairs or inflate escalation counters.
+        reviewResult = null;
       }
 
       repairState = advanceCycle(

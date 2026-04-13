@@ -190,6 +190,60 @@ Add caching middleware to Express routes.
     );
   });
 
+  it("(j-1) partial regen with empty findings but validation errors derives sections from errors", () => {
+    const prompt = buildEditPrompt({
+      ...baseEditParams,
+      strategy: "partial_regen",
+      findings: [],
+      validationErrors: [
+        'Missing required section: Goal',
+        'Missing required section: File Structure',
+        'Task 3 depends on Task 99, but Task 99 does not exist',
+      ],
+    });
+
+    // Should contain non-empty section references derived from validation errors
+    assert.ok(
+      prompt.includes("## Sections to regenerate"),
+      "partial regen prompt should have Sections to regenerate heading",
+    );
+    assert.ok(
+      prompt.includes("Goal"),
+      "partial regen prompt should derive 'Goal' section from validation error",
+    );
+    assert.ok(
+      prompt.includes("File Structure"),
+      "partial regen prompt should derive 'File Structure' section from validation error",
+    );
+    assert.ok(
+      prompt.includes("Task 3"),
+      "partial regen prompt should derive 'Task 3' section from validation error",
+    );
+    // Should NOT have an empty section list
+    const sectionsBlock = prompt.split("## Sections to regenerate")[1]!;
+    const sectionLines = sectionsBlock.split("\n").filter((l) => l.startsWith("- "));
+    assert.ok(
+      sectionLines.length > 0,
+      "Sections to regenerate should not be empty when validation errors exist",
+    );
+  });
+
+  it("(j-2) partial regen with unparseable validation errors falls back to generic label", () => {
+    const prompt = buildEditPrompt({
+      ...baseEditParams,
+      strategy: "partial_regen",
+      findings: [],
+      validationErrors: [
+        "Some completely unexpected error format",
+      ],
+    });
+
+    assert.ok(
+      prompt.includes("All structurally invalid sections"),
+      "Should fall back to generic label when no specific sections can be parsed",
+    );
+  });
+
   it("(j) partial regen prompt identifies the specific section(s) to regenerate based on findings", () => {
     const prompt = buildEditPrompt({
       ...baseEditParams,

@@ -1077,6 +1077,65 @@ describe("PlanGenerationEngine", () => {
   });
 
   // ───────────────────────────────────────────────────────────────────────
+  // Stale review findings cleared when validation fails after edit
+  // ───────────────────────────────────────────────────────────────────────
+
+  describe("stale review findings cleared on post-edit validation failure", () => {
+    it("clears reviewResult when edit makes plan invalid, so stale findings are not reused", async () => {
+      // Cycle 1: valid plan → review finds errors → engine dispatches edit
+      // Cycle 2: edit makes plan INVALID (validation fails) → reviewResult should be cleared
+      // Cycle 3: plan is valid again → review runs fresh and approves
+      const { io, calls } = createMockIO({
+        planContentSequence: [
+          VALID_PLAN,    // initial generation: valid
+          INVALID_PLAN,  // after first repair edit: now invalid
+          VALID_PLAN,    // after second repair edit: valid again
+        ],
+        dispatchOutputSequence: [
+          { text: "", exitCode: 0 },                       // plan-generator initial
+          { text: REVIEW_WITH_ERRORS_OUTPUT, exitCode: 0 }, // plan-reviewer: errors
+          { text: "", exitCode: 0 },                       // plan-generator repair 1
+          // No reviewer here — plan is invalid after repair 1
+          { text: "", exitCode: 0 },                       // plan-generator repair 2
+          { text: APPROVED_REVIEW_OUTPUT, exitCode: 0 },    // plan-reviewer: approved
+        ],
+      });
+      const { callbacks } = createMockCallbacks();
+      const engine = new PlanGenerationEngine(io, CWD, AGENT_DIR);
+
+      const result = await engine.generate(
+        { type: "freeform", text: "Build something" },
+        callbacks,
+      );
+
+      // The second repair edit prompt (cycle 2, dispatched after invalid plan)
+      // should NOT contain the stale review finding "Missing test coverage"
+      // because reviewResult was cleared when validation failed.
+      const repairCalls = calls.dispatchCalls.filter(
+        (c) => c.agent === "plan-generator" && c.task.includes("targeted edits"),
+      );
+
+      // The repair call after the invalid plan (cycle 2) should only have
+      // validation errors, not stale review findings
+      if (repairCalls.length >= 2) {
+        const secondRepairPrompt = repairCalls[1]!.task;
+        // It should NOT contain the stale review error from cycle 1
+        assert.ok(
+          !secondRepairPrompt.includes("Missing test coverage"),
+          "Second repair prompt should NOT contain stale review findings after validation failure",
+        );
+      }
+
+      // Final result should be approved since the last review passes
+      assert.ok(
+        result.reviewStatus === "approved" ||
+          result.reviewStatus === "approved_with_notes",
+        `Expected approved result, got ${result.reviewStatus}`,
+      );
+    });
+  });
+
+  // ───────────────────────────────────────────────────────────────────────
   // Review re-runs after repair in repair loop
   // ───────────────────────────────────────────────────────────────────────
 
