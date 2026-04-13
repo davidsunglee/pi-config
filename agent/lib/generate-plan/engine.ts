@@ -100,7 +100,10 @@ export class PlanGenerationEngine {
     }
 
     // ── Phase 5 — Repair loop (if needed) ─────────────────────────────
-    let repairState = createRepairState();
+    let repairState = createRepairState(
+      reviewResult?.issues ?? [],
+      validationErrors,
+    );
 
     while (shouldRepair(repairState, validationErrors, reviewResult)) {
       callbacks.onProgress(`Repair cycle ${repairState.cycle + 1}...`);

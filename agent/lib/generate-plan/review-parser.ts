@@ -77,7 +77,7 @@ function parseStatus(text: string): "approved" | "issues_found" | null {
 }
 
 /** Header pattern: **[Error | Warning | Suggestion] — Task N: Short description** or **[Severity] — Short description** */
-const ISSUE_HEADER_RE = /^\*\*\[(Error|Warning|Suggestion)\]\s*—\s*(?:Task\s+(\d+):\s*)?(.+?)\*\*$/;
+const ISSUE_HEADER_RE = /^\*\*\[(Error|Warning|Suggestion)\]\s*[—–-]\s*(?:Task\s+(\d+):\s*)?(.+?)\*\*$/;
 
 function parseIssues(text: string): ReviewIssue[] {
   // Extract the Issues section

@@ -15,7 +15,7 @@ function slugify(text: string): string {
     slug = slug.slice(0, 40).replace(/-+$/, "");
   }
 
-  return slug;
+  return slug || "untitled-plan";
 }
 
 /** Extract filename without extension (strips only the last extension). */
