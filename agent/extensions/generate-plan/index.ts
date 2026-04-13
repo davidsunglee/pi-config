@@ -89,10 +89,15 @@ export async function parseInput(
 
 // ── Pi binary invocation ──────────────────────────────────────────────
 
-function getPiInvocation(args: string[]): { command: string; args: string[] } {
+async function getPiInvocation(args: string[]): Promise<{ command: string; args: string[] }> {
   const currentScript = process.argv[1];
-  if (currentScript && fs.existsSync(currentScript)) {
-    return { command: process.execPath, args: [currentScript, ...args] };
+  if (currentScript) {
+    try {
+      await fs.promises.access(currentScript);
+      return { command: process.execPath, args: [currentScript, ...args] };
+    } catch {
+      // Script not accessible, fall through
+    }
   }
 
   const execName = path.basename(process.execPath).toLowerCase();
@@ -192,8 +197,8 @@ export function createDispatchFn(
       let finalOutput = "";
       let stderrOutput = "";
 
+      const invocation = await getPiInvocation(args);
       const exitCode = await new Promise<number>((resolve) => {
-        const invocation = getPiInvocation(args);
         const spawnOpts = buildSpawnOptions(cwd);
         const proc = spawn(invocation.command, invocation.args, spawnOpts);
 
@@ -407,7 +412,7 @@ export function createCallbacks(
     onWarning: (msg) => notify(msg, "warning"),
     onComplete: isAsync
       ? (result) => {
-          const level = result.reviewStatus === "errors_found" ? "warning"
+          const level = result.reviewStatus === "errors_found" ? "error"
             : "info";
           notify(formatResult(result), level);
         }
