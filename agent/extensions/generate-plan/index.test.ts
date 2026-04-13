@@ -11,6 +11,7 @@ import {
   buildSpawnOptions,
   findJsonObjectEnd,
   createCallbacks,
+  createTodoReadFn,
 } from "./index.ts";
 import type { AgentConfig } from "../execute-plan/subagent-dispatch.ts";
 import type { GenerationResult } from "../../lib/generate-plan/types.ts";
@@ -421,4 +422,75 @@ test("createCallbacks: onProgress and onWarning work in both sync and async mode
     assert.deepStrictEqual(calls[0], { msg: "progress", level: "info" });
     assert.deepStrictEqual(calls[1], { msg: "warning", level: "warning" });
   }
+});
+
+// ── createTodoReadFn ────────────────────────────────────────────────
+
+test("createTodoReadFn: reads and parses a valid todo file with JSON frontmatter and body", async () => {
+  const dir = await getTempDir();
+  const todosDir = path.join(dir, ".pi", "todos");
+  await fs.mkdir(todosDir, { recursive: true });
+
+  const content = '{"title":"Fix the auth bug","priority":"high"}\n\n## Steps\n1. Reproduce\n2. Fix\n';
+  await fs.writeFile(path.join(todosDir, "abc123.md"), content);
+
+  const readTodo = createTodoReadFn(dir);
+  const result = await readTodo("abc123");
+
+  assert.equal(result.title, "Fix the auth bug");
+  assert.equal(result.body, "## Steps\n1. Reproduce\n2. Fix\n");
+});
+
+test("createTodoReadFn: throws when the todo file does not exist", async () => {
+  const dir = await getTempDir();
+
+  const readTodo = createTodoReadFn(dir);
+  await assert.rejects(
+    () => readTodo("nonexistent"),
+    /Todo file not found/,
+  );
+});
+
+test("createTodoReadFn: throws when the todo file has invalid JSON frontmatter", async () => {
+  const dir = await getTempDir();
+  const todosDir = path.join(dir, ".pi", "todos");
+  await fs.mkdir(todosDir, { recursive: true });
+
+  await fs.writeFile(path.join(todosDir, "badjson.md"), "not json at all\n\n## Body\n");
+
+  const readTodo = createTodoReadFn(dir);
+  await assert.rejects(
+    () => readTodo("badjson"),
+    /no JSON frontmatter/,
+  );
+});
+
+test("createTodoReadFn: returns empty string for title when title field is missing", async () => {
+  const dir = await getTempDir();
+  const todosDir = path.join(dir, ".pi", "todos");
+  await fs.mkdir(todosDir, { recursive: true });
+
+  const content = '{"priority":"high","status":"open"}\n\nSome body text\n';
+  await fs.writeFile(path.join(todosDir, "notitle.md"), content);
+
+  const readTodo = createTodoReadFn(dir);
+  const result = await readTodo("notitle");
+
+  assert.equal(result.title, "");
+  assert.equal(result.body, "Some body text\n");
+});
+
+test("createTodoReadFn: handles a todo with empty body (just JSON frontmatter)", async () => {
+  const dir = await getTempDir();
+  const todosDir = path.join(dir, ".pi", "todos");
+  await fs.mkdir(todosDir, { recursive: true });
+
+  const content = '{"title":"Empty body todo"}';
+  await fs.writeFile(path.join(todosDir, "emptybody.md"), content);
+
+  const readTodo = createTodoReadFn(dir);
+  const result = await readTodo("emptybody");
+
+  assert.equal(result.title, "Empty body todo");
+  assert.equal(result.body, "");
 });

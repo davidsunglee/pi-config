@@ -7,9 +7,11 @@
  */
 
 import { spawn } from "node:child_process";
+import type { SpawnOptionsWithoutStdio } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { Type } from "@sinclair/typebox";
 import type {
@@ -34,6 +36,15 @@ import type {
 const TODO_PATTERN = /^TODO-([0-9a-f]+)$/i;
 const FILE_EXTENSION_PATTERN = /\.\w{1,10}$/;
 
+async function pathExists(filePath: string): Promise<boolean> {
+  try {
+    await fs.promises.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Classify raw input string as a todo reference, file path, or freeform text.
  */
@@ -54,7 +65,7 @@ export async function parseInput(
     const resolved = path.isAbsolute(trimmed)
       ? trimmed
       : path.resolve(cwd, trimmed);
-    if (fs.existsSync(resolved)) {
+    if (await pathExists(resolved)) {
       return { type: "file", filePath: resolved };
     }
     // File doesn't exist — fall back to freeform instead of throwing
@@ -118,9 +129,13 @@ export function buildDispatchArgs(
  *
  * Separated so tests can verify cwd propagation without spawning.
  */
+type PipedSpawnOptions = SpawnOptionsWithoutStdio & {
+  stdio: ["ignore", "pipe", "pipe"];
+};
+
 export function buildSpawnOptions(
   cwd: string,
-): { cwd: string; shell: boolean; stdio: Array<string> } {
+): PipedSpawnOptions {
   return { cwd, shell: false, stdio: ["ignore", "pipe", "pipe"] };
 }
 
@@ -168,6 +183,7 @@ export function createDispatchFn(
       const args = buildDispatchArgs(agentConfig, config, tmpPromptPath);
 
       let finalOutput = "";
+      let stderrOutput = "";
 
       const exitCode = await new Promise<number>((resolve) => {
         const invocation = getPiInvocation(args);
@@ -210,6 +226,10 @@ export function createDispatchFn(
           for (const line of lines) processLine(line);
         });
 
+        proc.stderr!.on("data", (data: Buffer) => {
+          stderrOutput += data.toString();
+        });
+
         proc.on("close", (code: number | null) => {
           if (buffer.trim()) processLine(buffer);
           resolve(code ?? 0);
@@ -221,7 +241,9 @@ export function createDispatchFn(
       });
 
       if (exitCode !== 0) {
-        throw new Error(`Subagent '${config.agent}' exited with code ${exitCode}`);
+        const detail = stderrOutput.trim();
+        const suffix = detail ? `\n${detail}` : "";
+        throw new Error(`Subagent '${config.agent}' exited with code ${exitCode}${suffix}`);
       }
 
       return { text: finalOutput, exitCode };
@@ -403,7 +425,7 @@ async function handleGeneratePlan(
   const cwd = ctx.cwd;
   const agentDir = path.dirname(
     path.dirname(
-      path.dirname(import.meta.url.replace("file://", "")),
+      path.dirname(fileURLToPath(import.meta.url)),
     ),
   );
 

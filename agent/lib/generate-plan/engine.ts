@@ -69,11 +69,11 @@ export class PlanGenerationEngine {
       cwd: this.cwd,
       outputPath: planPath,
     });
-    await this.io.dispatchSubagent({
-      agent: "plan-generator",
-      task: generationPrompt,
-    });
-    let planContent = await this.io.readFile(planPath);
+    let planContent = await this.dispatchPlanGeneratorAndReadPlan(
+      generationPrompt,
+      planPath,
+      "initial generation",
+    );
 
     // ── Phase 3 — Validation gate ───────────────────────────────────────
     callbacks.onProgress("Validating plan...");
@@ -122,12 +122,11 @@ export class PlanGenerationEngine {
         strategy,
       });
 
-      await this.io.dispatchSubagent({
-        agent: "plan-generator",
-        task: editPrompt,
-      });
-
-      planContent = await this.io.readFile(planPath);
+      planContent = await this.dispatchPlanGeneratorAndReadPlan(
+        editPrompt,
+        planPath,
+        `repair cycle ${repairState.cycle + 1}`,
+      );
 
       // Re-parse and re-validate
       plan = parsePlan(planContent, fileName);
@@ -217,6 +216,56 @@ export class PlanGenerationEngine {
 
     callbacks.onComplete(result);
     return result;
+  }
+
+  private async dispatchPlanGeneratorAndReadPlan(
+    task: string,
+    planPath: string,
+    phase: string,
+  ): Promise<string> {
+    const output = await this.io.dispatchSubagent({
+      agent: "plan-generator",
+      task,
+    });
+
+    if (!(await this.io.fileExists(planPath))) {
+      const mentionedPaths = this.extractMentionedMarkdownPaths(output.text)
+        .filter((candidate) => candidate !== planPath);
+      const details = [
+        `Plan generator did not write the expected plan file at ${planPath} during ${phase}.`,
+      ];
+
+      if (mentionedPaths.length > 0) {
+        details.push(
+          `The subagent output mentioned a different path instead: ${mentionedPaths.join(", ")}`,
+        );
+      }
+
+      const trimmedOutput = output.text.trim();
+      if (trimmedOutput) {
+        details.push(`Subagent output:\n${trimmedOutput}`);
+      }
+
+      throw new Error(details.join("\n"));
+    }
+
+    try {
+      return await this.io.readFile(planPath);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      throw new Error(
+        `Plan generator reported success, but the expected plan file at ${planPath} could not be read during ${phase}: ${message}`,
+      );
+    }
+  }
+
+  private extractMentionedMarkdownPaths(text: string): string[] {
+    const matches = text.match(/\S+\.md\b/g) ?? [];
+    const cleaned = matches.map((match) =>
+      match.replace(/^[("'`]+|[)"'`,.:;!?]+$/g, "")
+    ).filter((match) => match.length > 0);
+
+    return [...new Set(cleaned)];
   }
 
   /**

@@ -140,6 +140,7 @@ interface MockIOOptions {
   secondDispatchOutput?: string;
   planContentSequence?: string[];
   dispatchOutputSequence?: SubagentOutput[];
+  planFileExists?: boolean;
 }
 
 interface CallRecord {
@@ -158,6 +159,7 @@ function createMockIO(opts: MockIOOptions = {}): {
   const settingsJson = opts.settingsJson ?? SETTINGS_JSON;
   const reviewTemplate = opts.reviewTemplate ?? REVIEW_TEMPLATE;
   const reviewOutput = opts.reviewOutput ?? APPROVED_REVIEW_OUTPUT;
+  const planFileExists = opts.planFileExists ?? true;
 
   let planReadCount = 0;
   let dispatchCount = 0;
@@ -196,7 +198,12 @@ function createMockIO(opts: MockIOOptions = {}): {
     writeFile: async (path: string, content: string) => {
       calls.writeFileCalls.push({ path, content });
     },
-    fileExists: async () => false,
+    fileExists: async (path: string) => {
+      if (path.includes(".pi/plans/") && !path.includes("reviews/")) {
+        return planFileExists;
+      }
+      return false;
+    },
     mkdir: async (path: string) => {
       calls.mkdirCalls.push(path);
     },
@@ -428,6 +435,53 @@ describe("PlanGenerationEngine", () => {
       assert.ok(
         result.reviewPath !== null,
         "Result should include reviewPath",
+      );
+    });
+
+    it("fails with a descriptive error when the plan file is missing after generation", async () => {
+      const { io } = createMockIO({
+        planFileExists: false,
+        dispatchOutputSequence: [{ text: "", exitCode: 0 }],
+      });
+      const { callbacks } = createMockCallbacks();
+      const engine = new PlanGenerationEngine(io, CWD, AGENT_DIR);
+
+      await assert.rejects(
+        () =>
+          engine.generate(
+            { type: "freeform", text: "Build something" },
+            callbacks,
+          ),
+        (err: Error) => {
+          assert.match(err.message, /did not write the expected plan file/i);
+          assert.match(err.message, /\/test\/project\/.pi\/plans\//);
+          return true;
+        },
+      );
+    });
+
+    it("includes alternate output paths from subagent output when generation writes to the wrong path", async () => {
+      const wrongPath = "/test/project/.pi/plans/wrong-output.md";
+      const { io } = createMockIO({
+        planFileExists: false,
+        dispatchOutputSequence: [
+          { text: `Wrote plan to ${wrongPath}`, exitCode: 0 },
+        ],
+      });
+      const { callbacks } = createMockCallbacks();
+      const engine = new PlanGenerationEngine(io, CWD, AGENT_DIR);
+
+      await assert.rejects(
+        () =>
+          engine.generate(
+            { type: "freeform", text: "Build something" },
+            callbacks,
+          ),
+        (err: Error) => {
+          assert.match(err.message, /different path|alternate path|mentioned/i);
+          assert.match(err.message, /wrong-output\.md/);
+          return true;
+        },
       );
     });
   });
