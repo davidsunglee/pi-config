@@ -1,0 +1,212 @@
+import test, { after } from "node:test";
+import assert from "node:assert/strict";
+import * as fs from "node:fs/promises";
+import * as path from "node:path";
+import * as os from "node:os";
+
+import { parseInput, formatResult } from "./index.ts";
+import type { GenerationResult } from "../../lib/generate-plan/types.ts";
+
+// ── Helpers ──────────────────────────────────────────────────────────
+
+let tmpDir: string | null = null;
+
+async function getTempDir(): Promise<string> {
+  if (!tmpDir) {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "gen-index-test-"));
+  }
+  return tmpDir;
+}
+
+after(async () => {
+  if (tmpDir) {
+    await fs.rm(tmpDir, { recursive: true, force: true });
+    tmpDir = null;
+  }
+});
+
+function makeResult(overrides: Partial<GenerationResult> = {}): GenerationResult {
+  return {
+    planPath: "/tmp/plan.md",
+    reviewPath: "/tmp/review.md",
+    reviewStatus: "approved",
+    noteCount: 0,
+    remainingFindings: [],
+    ...overrides,
+  };
+}
+
+// ── parseInput ───────────────────────────────────────────────────────
+
+test("parseInput: TODO pattern returns todo type with correct id", async () => {
+  const result = await parseInput("TODO-abc123", "/tmp");
+  assert.deepStrictEqual(result, { type: "todo", todoId: "abc123" });
+});
+
+test("parseInput: TODO pattern is case-insensitive", async () => {
+  const result = await parseInput("todo-DEF456", "/tmp");
+  assert.deepStrictEqual(result, { type: "todo", todoId: "DEF456" });
+});
+
+test("parseInput: existing file path returns file type", async () => {
+  const dir = await getTempDir();
+  const filePath = path.join(dir, "spec.md");
+  await fs.writeFile(filePath, "# Spec content");
+
+  const result = await parseInput(filePath, dir);
+  assert.deepStrictEqual(result, { type: "file", filePath });
+});
+
+test("parseInput: relative file path resolved against cwd", async () => {
+  const dir = await getTempDir();
+  const subDir = path.join(dir, "docs");
+  await fs.mkdir(subDir, { recursive: true });
+  const filePath = path.join(subDir, "spec.md");
+  await fs.writeFile(filePath, "# Spec");
+
+  const result = await parseInput("docs/spec.md", dir);
+  assert.deepStrictEqual(result, { type: "file", filePath });
+});
+
+test("parseInput: non-existent path-like input throws error", async () => {
+  const dir = await getTempDir();
+  await assert.rejects(
+    () => parseInput("docs/missing-spec.md", dir),
+    (err: Error) => {
+      assert.match(err.message, /File not found:/);
+      return true;
+    },
+  );
+});
+
+test("parseInput: input starting with . that does not exist throws error", async () => {
+  const dir = await getTempDir();
+  await assert.rejects(
+    () => parseInput("./nonexistent.ts", dir),
+    (err: Error) => {
+      assert.match(err.message, /File not found:/);
+      return true;
+    },
+  );
+});
+
+test("parseInput: input with file extension that does not exist throws error", async () => {
+  const dir = await getTempDir();
+  await assert.rejects(
+    () => parseInput("config.yaml", dir),
+    (err: Error) => {
+      assert.match(err.message, /File not found:/);
+      return true;
+    },
+  );
+});
+
+test("parseInput: freeform text returns freeform type", async () => {
+  const result = await parseInput("add user authentication feature", "/tmp");
+  assert.deepStrictEqual(result, {
+    type: "freeform",
+    text: "add user authentication feature",
+  });
+});
+
+test("parseInput: freeform text is trimmed", async () => {
+  const result = await parseInput("  some description  ", "/tmp");
+  assert.deepStrictEqual(result, {
+    type: "freeform",
+    text: "some description",
+  });
+});
+
+// ── formatResult ─────────────────────────────────────────────────────
+
+test("formatResult: approved status includes execute-plan suggestion", () => {
+  const result = makeResult({ reviewStatus: "approved" });
+  const output = formatResult(result);
+
+  assert.match(output, /Plan generated: \/tmp\/plan\.md/);
+  assert.match(output, /Review: approved/);
+  assert.match(output, /To execute this plan, run: \/execute-plan \/tmp\/plan\.md/);
+  assert.ok(!output.includes("Remaining Issues"));
+});
+
+test("formatResult: approved_with_notes includes note count and execute-plan suggestion", () => {
+  const result = makeResult({
+    reviewStatus: "approved_with_notes",
+    noteCount: 3,
+  });
+  const output = formatResult(result);
+
+  assert.match(output, /approved with 3 notes appended to plan/);
+  assert.match(output, /To execute this plan, run: \/execute-plan/);
+  assert.ok(!output.includes("Remaining Issues"));
+});
+
+test("formatResult: approved_with_notes singular note", () => {
+  const result = makeResult({
+    reviewStatus: "approved_with_notes",
+    noteCount: 1,
+  });
+  const output = formatResult(result);
+
+  assert.match(output, /approved with 1 note appended to plan/);
+});
+
+test("formatResult: errors_found includes remaining findings and no execute-plan suggestion", () => {
+  const result = makeResult({
+    reviewStatus: "errors_found",
+    remainingFindings: [
+      {
+        severity: "error",
+        taskNumber: 2,
+        shortDescription: "Missing dependency declaration",
+        fullText: "Task 2 references lodash but it is not in package.json",
+      },
+      {
+        severity: "warning",
+        taskNumber: null,
+        shortDescription: "No test coverage specified",
+        fullText: "The plan does not include any test tasks",
+      },
+    ],
+  });
+  const output = formatResult(result);
+
+  assert.match(output, /2 issues remaining after repair/);
+  assert.match(output, /### Remaining Issues/);
+  assert.match(output, /\[error\] Task 2: Missing dependency declaration/);
+  assert.match(output, /\*\*What:\*\* Task 2 references lodash/);
+  assert.match(output, /\[warning\] General: No test coverage specified/);
+  assert.match(output, /Fix the issues above before executing, or manually edit the plan/);
+  assert.ok(!output.includes("To execute this plan, run:"));
+});
+
+test("formatResult: errors_found with single issue uses singular", () => {
+  const result = makeResult({
+    reviewStatus: "errors_found",
+    remainingFindings: [
+      {
+        severity: "error",
+        taskNumber: 1,
+        shortDescription: "Bad task",
+        fullText: "Details here",
+      },
+    ],
+  });
+  const output = formatResult(result);
+
+  assert.match(output, /1 issue remaining after repair/);
+});
+
+test("formatResult: includes review path when present", () => {
+  const result = makeResult({ reviewPath: "/tmp/reviews/review-1.md" });
+  const output = formatResult(result);
+
+  assert.match(output, /Review details: \/tmp\/reviews\/review-1\.md/);
+});
+
+test("formatResult: omits review path line when null", () => {
+  const result = makeResult({ reviewPath: null });
+  const output = formatResult(result);
+
+  assert.ok(!output.includes("Review details:"));
+});
