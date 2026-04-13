@@ -20,6 +20,7 @@ import type {
 import { PlanGenerationEngine } from "../../lib/generate-plan/engine.ts";
 import { PiGenerationIO } from "./io-adapter.ts";
 import { loadAgentConfig } from "../execute-plan/subagent-dispatch.ts";
+import type { AgentConfig } from "../execute-plan/subagent-dispatch.ts";
 import type {
   GenerationInput,
   GenerationCallbacks,
@@ -80,6 +81,48 @@ function getPiInvocation(args: string[]): { command: string; args: string[] } {
   return { command: "pi", args };
 }
 
+// ── Dispatch helpers (exported for testing) ──────────────────────────
+
+/**
+ * Build the CLI argument array for a subagent invocation.
+ *
+ * Pure function — easy to test without spawning a process.
+ */
+export function buildDispatchArgs(
+  agentConfig: AgentConfig | null,
+  config: SubagentDispatchConfig,
+  systemPromptPath: string | null,
+): string[] {
+  const args: string[] = ["--mode", "json", "-p", "--no-session"];
+
+  // Model: prefer config.model, fall back to agent file model
+  const model = config.model || agentConfig?.model;
+  if (model) args.push("--model", model);
+
+  // Tool allowlist from agent config
+  const tools = agentConfig?.tools;
+  if (tools && tools.length > 0) args.push("--tools", tools.join(","));
+
+  // System prompt path (caller writes the temp file)
+  if (systemPromptPath) args.push("--append-system-prompt", systemPromptPath);
+
+  // Task prompt as final positional argument
+  args.push(config.task);
+
+  return args;
+}
+
+/**
+ * Build the spawn options for a subagent invocation.
+ *
+ * Separated so tests can verify cwd propagation without spawning.
+ */
+export function buildSpawnOptions(
+  cwd: string,
+): { cwd: string; shell: boolean; stdio: Array<string> } {
+  return { cwd, shell: false, stdio: ["ignore", "pipe", "pipe"] };
+}
+
 // ── Dispatch function ─────────────────────────────────────────────────
 
 /**
@@ -95,16 +138,6 @@ export function createDispatchFn(
 ): (config: SubagentDispatchConfig) => Promise<SubagentOutput> {
   return async (config: SubagentDispatchConfig): Promise<SubagentOutput> => {
     const agentConfig = await loadAgentConfig(agentDir, config.agent);
-
-    const args: string[] = ["--mode", "json", "-p", "--no-session"];
-
-    // Model: prefer config.model, fall back to agent file model
-    const model = config.model || agentConfig?.model;
-    if (model) args.push("--model", model);
-
-    // Tool allowlist from agent config
-    const tools = agentConfig?.tools;
-    if (tools && tools.length > 0) args.push("--tools", tools.join(","));
 
     // System prompt from agent config
     let tmpPromptDir: string | null = null;
@@ -124,21 +157,16 @@ export function createDispatchFn(
           encoding: "utf-8",
           mode: 0o600,
         });
-        args.push("--append-system-prompt", tmpPromptPath);
       }
 
-      // Task prompt as final positional argument
-      args.push(config.task);
+      const args = buildDispatchArgs(agentConfig, config, tmpPromptPath);
 
       let finalOutput = "";
 
       const exitCode = await new Promise<number>((resolve) => {
         const invocation = getPiInvocation(args);
-        const proc = spawn(invocation.command, invocation.args, {
-          cwd,
-          shell: false,
-          stdio: ["ignore", "pipe", "pipe"],
-        });
+        const spawnOpts = buildSpawnOptions(cwd);
+        const proc = spawn(invocation.command, invocation.args, spawnOpts);
 
         let buffer = "";
 
@@ -217,7 +245,7 @@ export function createDispatchFn(
  * Tracks quoted strings and escape sequences so braces inside string
  * values do not terminate the scan early.
  */
-function findJsonObjectEnd(content: string): number {
+export function findJsonObjectEnd(content: string): number {
   let depth = 0;
   let inString = false;
   let escaped = false;
@@ -324,6 +352,32 @@ export function formatResult(result: GenerationResult): string {
   return lines.join("\n");
 }
 
+// ── Callback factory (exported for testing) ──────────────────────────
+
+/**
+ * Build the GenerationCallbacks for a plan generation run.
+ *
+ * @param notify - function that delivers a message at a given level
+ * @param isAsync - when true, onComplete also calls notify with the
+ *                  formatted result; when false it is a no-op because
+ *                  the result is surfaced by the command/tool return.
+ */
+export function createCallbacks(
+  notify: (msg: string, level: string) => void,
+  isAsync: boolean,
+): GenerationCallbacks {
+  return {
+    onProgress: (msg) => notify(msg, "info"),
+    onWarning: (msg) => notify(msg, "warning"),
+    onComplete: isAsync
+      ? (result) => notify(formatResult(result), "info")
+      : (_result) => {
+          // Result is surfaced by the command handler or tool return value.
+          // No additional notification needed for sync execution.
+        },
+  };
+}
+
 // ── Shared handler ────────────────────────────────────────────────────
 
 interface GeneratePlanResult {
@@ -357,21 +411,9 @@ async function handleGeneratePlan(
   );
   const engine = new PlanGenerationEngine(io, cwd, agentDir);
 
-  const callbacks: GenerationCallbacks = {
-    onProgress: (msg) =>
-      ctx.ui?.notify?.(msg, "info") ?? console.log(msg),
-    onWarning: (msg) =>
-      ctx.ui?.notify?.(msg, "warning") ?? console.warn(msg),
-    onComplete: isAsync
-      ? (result) => {
-          const formatted = formatResult(result);
-          ctx.ui?.notify?.(formatted, "info") ?? console.log(formatted);
-        }
-      : (_result) => {
-          // Result is surfaced by the command handler or tool return value.
-          // No additional notification needed for sync execution.
-        },
-  };
+  const notify = (msg: string, level: string) =>
+    ctx.ui?.notify?.(msg, level) ?? (level === "warning" ? console.warn(msg) : console.log(msg));
+  const callbacks = createCallbacks(notify, isAsync);
 
   if (isAsync) {
     void engine.generate(parsedInput, callbacks).catch((err) => {

@@ -4,7 +4,15 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import * as os from "node:os";
 
-import { parseInput, formatResult } from "./index.ts";
+import {
+  parseInput,
+  formatResult,
+  buildDispatchArgs,
+  buildSpawnOptions,
+  findJsonObjectEnd,
+  createCallbacks,
+} from "./index.ts";
+import type { AgentConfig } from "../execute-plan/subagent-dispatch.ts";
 import type { GenerationResult } from "../../lib/generate-plan/types.ts";
 
 // ── Helpers ──────────────────────────────────────────────────────────
@@ -209,4 +217,223 @@ test("formatResult: omits review path line when null", () => {
   const output = formatResult(result);
 
   assert.ok(!output.includes("Review details:"));
+});
+
+// ── buildDispatchArgs ───────────────────────────────────────────────
+
+function makeAgentConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
+  return {
+    name: "test-agent",
+    description: "A test agent",
+    model: "",
+    tools: [],
+    systemPrompt: "",
+    ...overrides,
+  };
+}
+
+test("buildDispatchArgs: baseline args without model, tools, or system prompt", () => {
+  const args = buildDispatchArgs(null, { agent: "planner", task: "do stuff" }, null);
+  assert.deepStrictEqual(args, ["--mode", "json", "-p", "--no-session", "do stuff"]);
+});
+
+test("buildDispatchArgs: includes model from config.model when set", () => {
+  const args = buildDispatchArgs(null, { agent: "planner", task: "t", model: "gpt-4" }, null);
+  assert.ok(args.includes("--model"));
+  assert.equal(args[args.indexOf("--model") + 1], "gpt-4");
+});
+
+test("buildDispatchArgs: falls back to agentConfig.model when config.model is unset", () => {
+  const ac = makeAgentConfig({ model: "claude-sonnet" });
+  const args = buildDispatchArgs(ac, { agent: "planner", task: "t" }, null);
+  assert.ok(args.includes("--model"));
+  assert.equal(args[args.indexOf("--model") + 1], "claude-sonnet");
+});
+
+test("buildDispatchArgs: config.model takes precedence over agentConfig.model", () => {
+  const ac = makeAgentConfig({ model: "claude-sonnet" });
+  const args = buildDispatchArgs(ac, { agent: "planner", task: "t", model: "gpt-4" }, null);
+  assert.equal(args[args.indexOf("--model") + 1], "gpt-4");
+});
+
+test("buildDispatchArgs: omits --model when neither source provides one", () => {
+  const ac = makeAgentConfig({ model: "" });
+  const args = buildDispatchArgs(ac, { agent: "planner", task: "t" }, null);
+  assert.ok(!args.includes("--model"));
+});
+
+test("buildDispatchArgs: includes --tools from agentConfig", () => {
+  const ac = makeAgentConfig({ tools: ["read", "write", "bash"] });
+  const args = buildDispatchArgs(ac, { agent: "planner", task: "t" }, null);
+  assert.ok(args.includes("--tools"));
+  assert.equal(args[args.indexOf("--tools") + 1], "read,write,bash");
+});
+
+test("buildDispatchArgs: omits --tools when agent has empty tools array", () => {
+  const ac = makeAgentConfig({ tools: [] });
+  const args = buildDispatchArgs(ac, { agent: "planner", task: "t" }, null);
+  assert.ok(!args.includes("--tools"));
+});
+
+test("buildDispatchArgs: includes --append-system-prompt when path is provided", () => {
+  const args = buildDispatchArgs(null, { agent: "planner", task: "t" }, "/tmp/prompt.md");
+  assert.ok(args.includes("--append-system-prompt"));
+  assert.equal(args[args.indexOf("--append-system-prompt") + 1], "/tmp/prompt.md");
+});
+
+test("buildDispatchArgs: omits --append-system-prompt when path is null", () => {
+  const args = buildDispatchArgs(null, { agent: "planner", task: "t" }, null);
+  assert.ok(!args.includes("--append-system-prompt"));
+});
+
+test("buildDispatchArgs: task is always the last argument", () => {
+  const ac = makeAgentConfig({ model: "m", tools: ["read"] });
+  const args = buildDispatchArgs(ac, { agent: "planner", task: "my task text" }, "/tmp/p.md");
+  assert.equal(args[args.length - 1], "my task text");
+});
+
+// ── buildSpawnOptions ───────────────────────────────────────────────
+
+test("buildSpawnOptions: propagates cwd correctly", () => {
+  const opts = buildSpawnOptions("/my/workspace");
+  assert.equal(opts.cwd, "/my/workspace");
+});
+
+test("buildSpawnOptions: shell is false", () => {
+  const opts = buildSpawnOptions("/tmp");
+  assert.equal(opts.shell, false);
+});
+
+test("buildSpawnOptions: stdio configuration is correct", () => {
+  const opts = buildSpawnOptions("/tmp");
+  assert.deepStrictEqual(opts.stdio, ["ignore", "pipe", "pipe"]);
+});
+
+// ── findJsonObjectEnd ───────────────────────────────────────────────
+
+test("findJsonObjectEnd: simple object", () => {
+  const result = findJsonObjectEnd('{"title":"hello"}');
+  assert.equal(result, 16);
+});
+
+test("findJsonObjectEnd: nested braces", () => {
+  const content = '{"a":{"b":"c"}}rest';
+  const result = findJsonObjectEnd(content);
+  assert.equal(result, 14);
+  assert.equal(content.slice(0, result + 1), '{"a":{"b":"c"}}');
+});
+
+test("findJsonObjectEnd: braces inside string values are ignored", () => {
+  const content = '{"title":"has {braces} inside"}body';
+  const result = findJsonObjectEnd(content);
+  assert.equal(content.slice(0, result + 1), '{"title":"has {braces} inside"}');
+});
+
+test("findJsonObjectEnd: escaped quotes inside strings", () => {
+  const content = '{"title":"say \\"hello\\""}rest';
+  const result = findJsonObjectEnd(content);
+  assert.equal(content.slice(0, result + 1), '{"title":"say \\"hello\\""}');
+});
+
+test("findJsonObjectEnd: returns -1 for empty string", () => {
+  assert.equal(findJsonObjectEnd(""), -1);
+});
+
+test("findJsonObjectEnd: returns -1 for unclosed object", () => {
+  assert.equal(findJsonObjectEnd('{"title":"hello"'), -1);
+});
+
+test("findJsonObjectEnd: returns -1 for no object at all", () => {
+  assert.equal(findJsonObjectEnd("just plain text"), -1);
+});
+
+test("findJsonObjectEnd: handles escaped backslash before closing quote", () => {
+  // The value ends with a literal backslash: "path\\"
+  // The \\\\ in the source is two escaped backslashes = two literal \
+  // Actually let's be precise: "path\\\\" is the source literal for path\\
+  const content = '{"path":"c:\\\\dir\\\\file"}rest';
+  const result = findJsonObjectEnd(content);
+  assert.ok(result > 0);
+  const parsed = JSON.parse(content.slice(0, result + 1));
+  assert.equal(parsed.path, "c:\\dir\\file");
+});
+
+// ── createCallbacks ─────────────────────────────────────────────────
+
+test("createCallbacks: onProgress calls notify with 'info' level", () => {
+  const calls: Array<{ msg: string; level: string }> = [];
+  const notify = (msg: string, level: string) => calls.push({ msg, level });
+
+  const callbacks = createCallbacks(notify, false);
+  callbacks.onProgress("Generating plan...");
+
+  assert.equal(calls.length, 1);
+  assert.deepStrictEqual(calls[0], { msg: "Generating plan...", level: "info" });
+});
+
+test("createCallbacks: onWarning calls notify with 'warning' level", () => {
+  const calls: Array<{ msg: string; level: string }> = [];
+  const notify = (msg: string, level: string) => calls.push({ msg, level });
+
+  const callbacks = createCallbacks(notify, false);
+  callbacks.onWarning("Model fallback occurred");
+
+  assert.equal(calls.length, 1);
+  assert.deepStrictEqual(calls[0], { msg: "Model fallback occurred", level: "warning" });
+});
+
+test("createCallbacks: sync mode onComplete does NOT call notify", () => {
+  const calls: Array<{ msg: string; level: string }> = [];
+  const notify = (msg: string, level: string) => calls.push({ msg, level });
+
+  const callbacks = createCallbacks(notify, false);
+  callbacks.onComplete(makeResult());
+
+  assert.equal(calls.length, 0);
+});
+
+test("createCallbacks: async mode onComplete DOES call notify with formatted result", () => {
+  const calls: Array<{ msg: string; level: string }> = [];
+  const notify = (msg: string, level: string) => calls.push({ msg, level });
+
+  const result = makeResult({ planPath: "/workspace/plan.md", reviewStatus: "approved" });
+  const callbacks = createCallbacks(notify, true);
+  callbacks.onComplete(result);
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].level, "info");
+  assert.match(calls[0].msg, /Plan generated: \/workspace\/plan\.md/);
+  assert.match(calls[0].msg, /Review: approved/);
+});
+
+test("createCallbacks: async onComplete formats errors_found results correctly", () => {
+  const calls: Array<{ msg: string; level: string }> = [];
+  const notify = (msg: string, level: string) => calls.push({ msg, level });
+
+  const result = makeResult({
+    reviewStatus: "errors_found",
+    remainingFindings: [
+      { severity: "error", taskNumber: 1, shortDescription: "Bad", fullText: "Details" },
+    ],
+  });
+  const callbacks = createCallbacks(notify, true);
+  callbacks.onComplete(result);
+
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].msg, /Remaining Issues/);
+});
+
+test("createCallbacks: onProgress and onWarning work in both sync and async modes", () => {
+  for (const isAsync of [true, false]) {
+    const calls: Array<{ msg: string; level: string }> = [];
+    const notify = (msg: string, level: string) => calls.push({ msg, level });
+
+    const callbacks = createCallbacks(notify, isAsync);
+    callbacks.onProgress("progress");
+    callbacks.onWarning("warning");
+
+    assert.equal(calls.length, 2, `Expected 2 calls in isAsync=${isAsync} mode`);
+    assert.deepStrictEqual(calls[0], { msg: "progress", level: "info" });
+    assert.deepStrictEqual(calls[1], { msg: "warning", level: "warning" });
+  }
 });
