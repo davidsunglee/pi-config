@@ -175,11 +175,13 @@ function inferSectionFromFinding(finding: ReviewIssue): string {
 
   if (/dependenc/.test(text)) return "Dependencies";
   if (/architect/.test(text)) return "Architecture Summary";
-  if (/file.?struct|file.?map/.test(text)) return "File Structure";
+  if (/file.?struct|file.?map|file.?list/.test(text)) return "File Structure";
   if (/risk/.test(text)) return "Risk Assessment";
   if (/test.?command/.test(text)) return "Test Command";
   if (/tech.?stack/.test(text)) return "Tech Stack";
-  if (/goal/.test(text)) return "Goal";
+  if (/\bgoal\b/.test(text)) return "Goal";
+  if (/\btask.?\d|task.?granul|task.?siz|task.?scope|task.?split|acceptance.?criter|model.?recommend/.test(text)) return "Tasks";
+  if (/\bscope\b|spec.?coverage|missing.?requirement/.test(text)) return "Goal";
 
   return "General";
 }

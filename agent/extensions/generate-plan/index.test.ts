@@ -412,6 +412,7 @@ test("createCallbacks: async onComplete formats errors_found results correctly",
   callbacks.onComplete(result);
 
   assert.equal(calls.length, 1);
+  assert.equal(calls[0].level, "error");
   assert.match(calls[0].msg, /Remaining Issues/);
 });
 

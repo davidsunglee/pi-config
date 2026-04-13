@@ -273,12 +273,9 @@ export class PlanGenerationEngine {
   }
 
   private extractMentionedMarkdownPaths(text: string): string[] {
-    const matches = text.match(/\S+\.md\b/g) ?? [];
-    const cleaned = matches.map((match) =>
-      match.replace(/^[("'`]+|[)"'`,.:;!?]+$/g, "")
-    ).filter((match) => match.length > 0);
-
-    return [...new Set(cleaned)];
+    // Require at least one / to distinguish file paths from bare words like "error.md"
+    const matches = text.match(/[\w./-]*\/[\w./-]*\.md\b/g) ?? [];
+    return [...new Set(matches)];
   }
 
   /**
@@ -320,7 +317,7 @@ export class PlanGenerationEngine {
         task: filledTemplate,
         model: reviewModel,
       });
-    } catch {
+    } catch (err) {
       // If using crossProvider model and it failed, retry with fallback
       if (crossProviderModel && reviewModel === crossProviderModel) {
         callbacks.onWarning(
@@ -332,7 +329,8 @@ export class PlanGenerationEngine {
           model: fallbackModel,
         });
       } else {
-        throw new Error("Review dispatch failed");
+        const message = err instanceof Error ? err.message : String(err);
+        throw new Error(`Review dispatch failed: ${message}`);
       }
     }
 
