@@ -1,4 +1,4 @@
-# Review-and-Remediate Skill Design
+# Review-Loop Skill Design
 
 ## Goal
 
@@ -10,7 +10,7 @@ The skill is top-level — usable standalone (manual sessions, hotfixes, PR clea
 
 Three new components:
 
-- **`review-and-remediate` skill** — top-level skill defining the loop protocol. Invocable from any context with a git range and optional requirements.
+- **`review-loop` skill** — top-level skill defining the loop protocol. Invocable from any context with a git range and optional requirements.
 - **`code-reviewer` agent** — dedicated agent for reviewing diffs. Replaces the current pattern of dispatching `plan-executor` with the `code-reviewer.md` template.
 - **`remediation-coordinator` agent** — orchestrates the review-remediate cycle. Dispatched by the caller, drives the inner loop, reports back.
 
@@ -194,7 +194,7 @@ The unversioned path (`<plan>-code-review.md`) is always a copy of the latest ve
 
 ## Prompt Templates
 
-### `review-and-remediate/remediation-prompt.md`
+### `review-loop/remediation-prompt.md`
 
 Template filled by the caller and dispatched to `remediation-coordinator`. Placeholders:
 
@@ -209,7 +209,7 @@ Template filled by the caller and dispatched to `remediation-coordinator`. Place
 
 Contains the full loop protocol so the coordinator is self-contained.
 
-### `review-and-remediate/re-review-block.md`
+### `review-loop/re-review-block.md`
 
 Content that the coordinator loads and inserts into the `{RE_REVIEW_BLOCK}` placeholder in `requesting-code-review/code-reviewer.md` for iteration 2+. On the first pass, `{RE_REVIEW_BLOCK}` is filled with an empty string.
 
@@ -264,7 +264,7 @@ Customization sequence:
 The current 65 lines of template loading, placeholder filling, model selection, and fallback logic are replaced with:
 
 1. Gather inputs: `PRE_EXECUTION_SHA`, current HEAD, plan goal, plan contents, working dir, max iterations, model tiers
-2. Invoke `review-and-remediate` skill
+2. Invoke `review-loop` skill
 3. Handle coordinator return:
    - `clean` → include review summary in completion report, proceed to Step 13
    - `max_iterations_reached` → present remaining findings, offer: (a) continue iterating, (b) proceed with known issues, (c) stop
@@ -283,9 +283,9 @@ Per-wave task verification is now orchestrator-only. After each wave, the orches
 |---|---|
 | `agent/agents/code-reviewer.md` | Agent definition — reviewing diffs for production readiness |
 | `agent/agents/remediation-coordinator.md` | Agent definition — orchestrates review-remediate loop |
-| `agent/skills/review-and-remediate/SKILL.md` | Top-level skill — loop protocol |
-| `agent/skills/review-and-remediate/remediation-prompt.md` | Template dispatched to remediation-coordinator |
-| `agent/skills/review-and-remediate/re-review-block.md` | Conditional block for hybrid re-review passes |
+| `agent/skills/review-loop/SKILL.md` | Top-level skill — loop protocol |
+| `agent/skills/review-loop/remediation-prompt.md` | Template dispatched to remediation-coordinator |
+| `agent/skills/review-loop/re-review-block.md` | Conditional block for hybrid re-review passes |
 
 ### Modified Files
 
