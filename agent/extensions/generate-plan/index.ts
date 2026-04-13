@@ -48,14 +48,15 @@ export async function parseInput(
     return { type: "todo", todoId: todoMatch[1] };
   }
 
-  // Check if it looks like a file path (contains / or has a file extension)
-  if (trimmed.includes("/") || FILE_EXTENSION_PATTERN.test(trimmed)) {
+  // Check if it looks like a file path (contains /, starts with ., or has a file extension)
+  if (trimmed.includes("/") || trimmed.startsWith(".") || FILE_EXTENSION_PATTERN.test(trimmed)) {
     const resolved = path.isAbsolute(trimmed)
       ? trimmed
       : path.resolve(cwd, trimmed);
     if (fs.existsSync(resolved)) {
       return { type: "file", filePath: resolved };
     }
+    throw new Error(`File not found: ${resolved}`);
   }
 
   // Default to freeform text
@@ -90,6 +91,7 @@ function getPiInvocation(args: string[]): { command: string; args: string[] } {
  */
 export function createDispatchFn(
   agentDir: string,
+  cwd: string,
 ): (config: SubagentDispatchConfig) => Promise<SubagentOutput> {
   return async (config: SubagentDispatchConfig): Promise<SubagentOutput> => {
     const agentConfig = await loadAgentConfig(agentDir, config.agent);
@@ -133,6 +135,7 @@ export function createDispatchFn(
       const exitCode = await new Promise<number>((resolve) => {
         const invocation = getPiInvocation(args);
         const proc = spawn(invocation.command, invocation.args, {
+          cwd,
           shell: false,
           stdio: ["ignore", "pipe", "pipe"],
         });
@@ -280,7 +283,7 @@ export function createTodoReadFn(
 
 // ── Result formatting ─────────────────────────────────────────────────
 
-function formatResult(result: GenerationResult): string {
+export function formatResult(result: GenerationResult): string {
   const lines: string[] = [];
 
   lines.push(`Plan generated: ${result.planPath}`);
@@ -301,10 +304,22 @@ function formatResult(result: GenerationResult): string {
     lines.push(`Review details: ${result.reviewPath}`);
   }
 
-  lines.push("");
-  lines.push(
-    `To execute this plan, run: /execute-plan ${result.planPath}`,
-  );
+  if (result.reviewStatus === "errors_found") {
+    lines.push("");
+    lines.push("### Remaining Issues");
+    for (const finding of result.remainingFindings) {
+      const taskLabel = finding.taskNumber != null ? `Task ${finding.taskNumber}` : "General";
+      lines.push(`- [${finding.severity}] ${taskLabel}: ${finding.shortDescription}`);
+      lines.push(`  - **What:** ${finding.fullText}`);
+    }
+    lines.push("");
+    lines.push("Fix the issues above before executing, or manually edit the plan.");
+  } else {
+    lines.push("");
+    lines.push(
+      `To execute this plan, run: /execute-plan ${result.planPath}`,
+    );
+  }
 
   return lines.join("\n");
 }
@@ -337,7 +352,7 @@ async function handleGeneratePlan(
   const parsedInput = await parseInput(input, cwd);
 
   const io = new PiGenerationIO(
-    createDispatchFn(agentDir),
+    createDispatchFn(agentDir, cwd),
     createTodoReadFn(cwd),
   );
   const engine = new PlanGenerationEngine(io, cwd, agentDir);
@@ -347,10 +362,15 @@ async function handleGeneratePlan(
       ctx.ui?.notify?.(msg, "info") ?? console.log(msg),
     onWarning: (msg) =>
       ctx.ui?.notify?.(msg, "warning") ?? console.warn(msg),
-    onComplete: (result) => {
-      const formatted = formatResult(result);
-      ctx.ui?.notify?.(formatted, "info") ?? console.log(formatted);
-    },
+    onComplete: isAsync
+      ? (result) => {
+          const formatted = formatResult(result);
+          ctx.ui?.notify?.(formatted, "info") ?? console.log(formatted);
+        }
+      : (_result) => {
+          // Result is surfaced by the command handler or tool return value.
+          // No additional notification needed for sync execution.
+        },
   };
 
   if (isAsync) {
