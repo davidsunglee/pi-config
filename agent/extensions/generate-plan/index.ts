@@ -46,7 +46,7 @@ export async function parseInput(
   // Check for TODO-<hex> pattern
   const todoMatch = trimmed.match(TODO_PATTERN);
   if (todoMatch) {
-    return { type: "todo", todoId: todoMatch[1] };
+    return { type: "todo", todoId: todoMatch[1].toLowerCase() };
   }
 
   // Check if it looks like a file path (contains /, starts with ., or has a file extension)
@@ -57,7 +57,8 @@ export async function parseInput(
     if (fs.existsSync(resolved)) {
       return { type: "file", filePath: resolved };
     }
-    throw new Error(`File not found: ${resolved}`);
+    // File doesn't exist — fall back to freeform instead of throwing
+    return { type: "freeform", text: trimmed };
   }
 
   // Default to freeform text
@@ -277,7 +278,7 @@ export function createTodoReadFn(
   cwd: string,
 ): (todoId: string) => Promise<{ title: string; body: string }> {
   return async (todoId: string): Promise<{ title: string; body: string }> => {
-    const todoPath = path.join(cwd, ".pi", "todos", `${todoId}.md`);
+    const todoPath = path.join(cwd, ".pi", "todos", `${todoId.toLowerCase()}.md`);
 
     let content: string;
     try {
@@ -403,8 +404,6 @@ async function handleGeneratePlan(
     return { success: false, message: msg };
   }
 
-  const parsedInput = await parseInput(input, cwd);
-
   const io = new PiGenerationIO(
     createDispatchFn(agentDir, cwd),
     createTodoReadFn(cwd),
@@ -416,7 +415,10 @@ async function handleGeneratePlan(
   const callbacks = createCallbacks(notify, isAsync);
 
   if (isAsync) {
-    void engine.generate(parsedInput, callbacks).catch((err) => {
+    void (async () => {
+      const parsedInput = await parseInput(input, cwd);
+      await engine.generate(parsedInput, callbacks);
+    })().catch((err) => {
       const errMsg = err instanceof Error ? err.message : String(err);
       callbacks.onProgress(`Error: ${errMsg}`);
     });
@@ -428,6 +430,7 @@ async function handleGeneratePlan(
 
   // Synchronous execution
   try {
+    const parsedInput = await parseInput(input, cwd);
     const result = await engine.generate(parsedInput, callbacks);
     return { success: true, message: formatResult(result) };
   } catch (err) {
