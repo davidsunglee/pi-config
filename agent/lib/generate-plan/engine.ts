@@ -223,9 +223,10 @@ export class PlanGenerationEngine {
     planPath: string,
     phase: string,
   ): Promise<string> {
-    // Clear any pre-existing file so stale content can't satisfy the check
+    // Snapshot existing content so we can detect stale files after dispatch
+    let previousContent: string | null = null;
     if (await this.io.fileExists(planPath)) {
-      await this.io.writeFile(planPath, "");
+      previousContent = await this.io.readFile(planPath);
     }
 
     const output = await this.io.dispatchSubagent({
@@ -254,19 +255,17 @@ export class PlanGenerationEngine {
       throw new Error(details.join("\n"));
     }
 
-    let content: string;
-    try {
-      content = await this.io.readFile(planPath);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      throw new Error(
-        `Plan generator reported success, but the expected plan file at ${planPath} could not be read during ${phase}: ${message}`,
-      );
-    }
+    const content = await this.io.readFile(planPath);
 
     if (!content.trim()) {
       throw new Error(
         `Plan generator did not produce output at ${planPath} during ${phase}.`,
+      );
+    }
+
+    if (previousContent !== null && content === previousContent) {
+      throw new Error(
+        `Plan generator did not update ${planPath} during ${phase} (file content unchanged from previous run).`,
       );
     }
 

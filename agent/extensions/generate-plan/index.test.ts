@@ -12,6 +12,8 @@ import {
   findJsonObjectEnd,
   createCallbacks,
   createTodoReadFn,
+  createDispatchFn,
+  registerGeneratePlanExtension,
 } from "./index.ts";
 import type { AgentConfig } from "../execute-plan/subagent-dispatch.ts";
 import type { GenerationResult } from "../../lib/generate-plan/types.ts";
@@ -497,4 +499,160 @@ test("createTodoReadFn: handles a todo with empty body (just JSON frontmatter)",
 
   assert.equal(result.title, "Empty body todo");
   assert.equal(result.body, "");
+});
+
+// ── createDispatchFn ─────────────────────────────────────────────────
+
+test("createDispatchFn: returns assistant text from spawned subagent output", async () => {
+  const dir = await getTempDir();
+  const agentDir = path.join(dir, "agent-dir-success");
+  const agentsDir = path.join(agentDir, "agents");
+  await fs.mkdir(agentsDir, { recursive: true });
+
+  await fs.writeFile(
+    path.join(agentsDir, "test-agent.md"),
+    `---\nname: test-agent\ndescription: Test agent\nmodel: fake-model\ntools: read, write\n---\nSystem prompt body\n`,
+  );
+
+  const scriptPath = path.join(dir, "dispatch-success.mjs");
+  await fs.writeFile(
+    scriptPath,
+    `process.stdout.write(JSON.stringify({type:"message_end",message:{role:"assistant",content:[{type:"text",text:"hello from subagent"}]}})+"\\n");`,
+  );
+
+  const originalArgv1 = process.argv[1];
+  process.argv[1] = scriptPath;
+  try {
+    const dispatch = createDispatchFn(agentDir, dir);
+    const result = await dispatch({ agent: "test-agent", task: "Do the work" });
+    assert.equal(result.text, "hello from subagent");
+    assert.equal(result.exitCode, 0);
+  } finally {
+    process.argv[1] = originalArgv1;
+  }
+});
+
+test("createDispatchFn: includes stderr output when spawned subagent exits non-zero", async () => {
+  const dir = await getTempDir();
+  const agentDir = path.join(dir, "agent-dir-failure");
+  const agentsDir = path.join(agentDir, "agents");
+  await fs.mkdir(agentsDir, { recursive: true });
+
+  await fs.writeFile(
+    path.join(agentsDir, "test-agent.md"),
+    `---\nname: test-agent\ndescription: Test agent\n---\nSystem prompt body\n`,
+  );
+
+  const scriptPath = path.join(dir, "dispatch-failure.mjs");
+  await fs.writeFile(
+    scriptPath,
+    `process.stderr.write("spawned subagent failed badly\\n");process.exit(2);`,
+  );
+
+  const originalArgv1 = process.argv[1];
+  process.argv[1] = scriptPath;
+  try {
+    const dispatch = createDispatchFn(agentDir, dir);
+    await assert.rejects(
+      () => dispatch({ agent: "test-agent", task: "Do the work" }),
+      /spawned subagent failed badly/,
+    );
+  } finally {
+    process.argv[1] = originalArgv1;
+  }
+});
+
+// ── extension registration + handler wiring ─────────────────────────
+
+test("registerGeneratePlanExtension: registers command and tool", () => {
+  const registrations: { command?: { name: string; handler: Function }; tool?: { name: string; execute: Function } } = {};
+
+  const pi = {
+    registerCommand(name: string, config: { handler: Function }) {
+      registrations.command = { name, handler: config.handler };
+    },
+    registerTool(config: { name: string; execute: Function }) {
+      registrations.tool = { name: config.name, execute: config.execute };
+    },
+  };
+
+  registerGeneratePlanExtension(pi as any, {
+    parseInput: async () => ({ type: "freeform", text: "ignored" }),
+    createIO: () => ({}) as any,
+    createEngine: () => ({ generate: async () => makeResult() }) as any,
+  });
+
+  assert.equal(registrations.command?.name, "generate-plan");
+  assert.equal(registrations.tool?.name, "generate_plan");
+});
+
+test("registerGeneratePlanExtension: command handler notifies error on sync failure", async () => {
+  const notifications: Array<{ msg: string; level: string }> = [];
+  const registrations: { command?: { handler: Function } } = {};
+
+  const pi = {
+    registerCommand(_name: string, config: { handler: Function }) {
+      registrations.command = { handler: config.handler };
+    },
+    registerTool(_config: { name: string; execute: Function }) {},
+  };
+
+  registerGeneratePlanExtension(pi as any, {
+    parseInput: async () => ({ type: "freeform", text: "build thing" }),
+    createIO: () => ({}) as any,
+    createEngine: () => ({
+      generate: async () => {
+        throw new Error("boom");
+      },
+    }) as any,
+  });
+
+  await registrations.command!.handler("build thing", {
+    cwd: "/workspace",
+    ui: { notify: (msg: string, level: string) => notifications.push({ msg, level }) },
+  });
+
+  assert.deepStrictEqual(notifications.at(-1), {
+    msg: "Plan generation failed: boom",
+    level: "error",
+  });
+});
+
+test("registerGeneratePlanExtension: async command handler notifies start and completion", async () => {
+  const notifications: Array<{ msg: string; level: string }> = [];
+  const registrations: { command?: { handler: Function } } = {};
+
+  const pi = {
+    registerCommand(_name: string, config: { handler: Function }) {
+      registrations.command = { handler: config.handler };
+    },
+    registerTool(_config: { name: string; execute: Function }) {},
+  };
+
+  registerGeneratePlanExtension(pi as any, {
+    parseInput: async () => ({ type: "freeform", text: "build thing" }),
+    createIO: () => ({}) as any,
+    createEngine: () => ({
+      generate: async (_input: unknown, callbacks: { onComplete: (result: GenerationResult) => void }) => {
+        callbacks.onComplete(makeResult({ planPath: "/workspace/.pi/plans/plan.md", reviewStatus: "approved" }));
+        return makeResult({ planPath: "/workspace/.pi/plans/plan.md", reviewStatus: "approved" });
+      },
+    }) as any,
+  });
+
+  await registrations.command!.handler("build thing --async", {
+    cwd: "/workspace",
+    ui: { notify: (msg: string, level: string) => notifications.push({ msg, level }) },
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.ok(
+    notifications.some((n) => n.msg === "Plan generation started in background..." && n.level === "info"),
+    "Expected background start notification",
+  );
+  assert.ok(
+    notifications.some((n) => n.msg.includes("Plan generated: /workspace/.pi/plans/plan.md") && n.level === "info"),
+    "Expected async completion notification with formatted result",
+  );
 });

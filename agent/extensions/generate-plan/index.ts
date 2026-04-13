@@ -7,7 +7,6 @@
  */
 
 import { spawn } from "node:child_process";
-import type { SpawnOptionsWithoutStdio } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -27,6 +26,7 @@ import type {
   GenerationInput,
   GenerationCallbacks,
   GenerationResult,
+  GenerationIO,
   SubagentDispatchConfig,
   SubagentOutput,
 } from "../../lib/generate-plan/types.ts";
@@ -140,13 +140,9 @@ export function buildDispatchArgs(
  *
  * Separated so tests can verify cwd propagation without spawning.
  */
-type PipedSpawnOptions = SpawnOptionsWithoutStdio & {
-  stdio: ["ignore", "pipe", "pipe"];
-};
-
 export function buildSpawnOptions(
   cwd: string,
-): PipedSpawnOptions {
+): { cwd: string; shell: boolean; stdio: ["ignore", "pipe", "pipe"] } {
   return { cwd, shell: false, stdio: ["ignore", "pipe", "pipe"] };
 }
 
@@ -403,7 +399,7 @@ export function formatResult(result: GenerationResult): string {
  *                  the result is surfaced by the command/tool return.
  */
 export function createCallbacks(
-  notify: (msg: string, level: string) => void,
+  notify: (msg: string, level: "info" | "warning" | "error") => void,
   isAsync: boolean,
 ): GenerationCallbacks {
   return {
@@ -429,10 +425,38 @@ interface GeneratePlanResult {
   message: string;
 }
 
-async function handleGeneratePlan(
+type GeneratePlanEngine = Pick<PlanGenerationEngine, "generate">;
+
+export interface GeneratePlanExtensionDeps {
+  parseInput?: typeof parseInput;
+  createIO?: (agentDir: string, cwd: string) => GenerationIO;
+  createEngine?: (
+    io: GenerationIO,
+    cwd: string,
+    agentDir: string,
+  ) => GeneratePlanEngine;
+}
+
+function defaultCreateIO(agentDir: string, cwd: string): GenerationIO {
+  return new PiGenerationIO(
+    createDispatchFn(agentDir, cwd),
+    createTodoReadFn(cwd),
+  );
+}
+
+function defaultCreateEngine(
+  io: GenerationIO,
+  cwd: string,
+  agentDir: string,
+): GeneratePlanEngine {
+  return new PlanGenerationEngine(io, cwd, agentDir);
+}
+
+export async function handleGeneratePlan(
   input: string,
   isAsync: boolean,
   ctx: ExtensionContext,
+  deps: GeneratePlanExtensionDeps = {},
 ): Promise<GeneratePlanResult> {
   const cwd = ctx.cwd;
   const agentDir = path.dirname(
@@ -447,19 +471,28 @@ async function handleGeneratePlan(
     return { success: false, message: msg };
   }
 
-  const io = new PiGenerationIO(
-    createDispatchFn(agentDir, cwd),
-    createTodoReadFn(cwd),
-  );
-  const engine = new PlanGenerationEngine(io, cwd, agentDir);
+  const parseInputFn = deps.parseInput ?? parseInput;
+  const createIOFn = deps.createIO ?? defaultCreateIO;
+  const createEngineFn = deps.createEngine ?? defaultCreateEngine;
 
-  const notify = (msg: string, level: string) =>
+  // Validate input eagerly (before async branch) so bad paths fail fast
+  let parsedInput: Awaited<ReturnType<typeof parseInput>>;
+  try {
+    parsedInput = await parseInputFn(input, cwd);
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    return { success: false, message: `Invalid input: ${errMsg}` };
+  }
+
+  const io = createIOFn(agentDir, cwd);
+  const engine = createEngineFn(io, cwd, agentDir);
+
+  const notify = (msg: string, level: "info" | "warning" | "error") =>
     ctx.ui?.notify?.(msg, level) ?? (level === "warning" ? console.warn(msg) : console.log(msg));
   const callbacks = createCallbacks(notify, isAsync);
 
   if (isAsync) {
     void (async () => {
-      const parsedInput = await parseInput(input, cwd);
       await engine.generate(parsedInput, callbacks);
     })().catch((err) => {
       const errMsg = err instanceof Error ? err.message : String(err);
@@ -473,7 +506,6 @@ async function handleGeneratePlan(
 
   // Synchronous execution
   try {
-    const parsedInput = await parseInput(input, cwd);
     const result = await engine.generate(parsedInput, callbacks);
     return { success: true, message: formatResult(result) };
   } catch (err) {
@@ -484,7 +516,10 @@ async function handleGeneratePlan(
 
 // ── Extension factory ─────────────────────────────────────────────────
 
-export default function (pi: ExtensionAPI): void {
+export function registerGeneratePlanExtension(
+  pi: ExtensionAPI,
+  deps: GeneratePlanExtensionDeps = {},
+): void {
   // Register /generate-plan command
   pi.registerCommand("generate-plan", {
     description:
@@ -496,7 +531,7 @@ export default function (pi: ExtensionAPI): void {
       const input = isAsync
         ? tokens.filter((_, i) => i !== asyncIndex).join(" ")
         : args.trim();
-      const result = await handleGeneratePlan(input, isAsync, ctx);
+      const result = await handleGeneratePlan(input, isAsync, ctx, deps);
       const level = result.success ? "info" : "error";
       ctx.ui?.notify?.(result.message, level) ?? (result.success ? console.log(result.message) : console.error(result.message));
     },
@@ -516,11 +551,15 @@ export default function (pi: ExtensionAPI): void {
     }),
     execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
       const { input } = params as { input: string };
-      const result = await handleGeneratePlan(input, false, ctx);
+      const result = await handleGeneratePlan(input, false, ctx, deps);
       return {
         content: [{ type: "text" as const, text: result.message }],
         details: { success: result.success },
       };
     },
   });
+}
+
+export default function (pi: ExtensionAPI): void {
+  registerGeneratePlanExtension(pi);
 }
