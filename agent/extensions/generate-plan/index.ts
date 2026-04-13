@@ -100,6 +100,10 @@ export function createDispatchFn(
     const model = config.model || agentConfig?.model;
     if (model) args.push("--model", model);
 
+    // Tool allowlist from agent config
+    const tools = agentConfig?.tools;
+    if (tools && tools.length > 0) args.push("--tools", tools.join(","));
+
     // System prompt from agent config
     let tmpPromptDir: string | null = null;
     let tmpPromptPath: string | null = null;
@@ -179,6 +183,10 @@ export function createDispatchFn(
         });
       });
 
+      if (exitCode !== 0) {
+        throw new Error(`Subagent '${config.agent}' exited with code ${exitCode}`);
+      }
+
       return { text: finalOutput, exitCode };
     } finally {
       if (tmpPromptPath) {
@@ -202,6 +210,33 @@ export function createDispatchFn(
 // ── Todo reading ──────────────────────────────────────────────────────
 
 /**
+ * String-aware JSON object end finder.
+ * Tracks quoted strings and escape sequences so braces inside string
+ * values do not terminate the scan early.
+ */
+function findJsonObjectEnd(content: string): number {
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < content.length; i += 1) {
+    const char = content[i];
+    if (inString) {
+      if (escaped) { escaped = false; continue; }
+      if (char === "\\") { escaped = true; continue; }
+      if (char === "\"") { inString = false; }
+      continue;
+    }
+    if (char === "\"") { inString = true; continue; }
+    if (char === "{") { depth += 1; continue; }
+    if (char === "}") {
+      depth -= 1;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+/**
  * Create a function that reads a todo file and parses its JSON frontmatter.
  *
  * Todo file format: JSON object starting on line 1 (starts with `{`),
@@ -221,19 +256,7 @@ export function createTodoReadFn(
     }
 
     // Parse JSON frontmatter: find the closing `}` that matches the opening `{`
-    let depth = 0;
-    let jsonEnd = -1;
-    for (let i = 0; i < content.length; i++) {
-      if (content[i] === "{") {
-        depth++;
-      } else if (content[i] === "}") {
-        depth--;
-        if (depth === 0) {
-          jsonEnd = i;
-          break;
-        }
-      }
-    }
+    const jsonEnd = findJsonObjectEnd(content);
 
     if (jsonEnd === -1) {
       throw new Error(`Invalid todo file format (no JSON frontmatter): ${todoPath}`);
@@ -249,7 +272,7 @@ export function createTodoReadFn(
 
     const title =
       typeof frontmatter.title === "string" ? frontmatter.title : "";
-    const body = content.slice(jsonEnd + 1).trim();
+    const body = content.slice(jsonEnd + 1).replace(/^\r?\n+/, "");
 
     return { title, body };
   };
@@ -359,15 +382,11 @@ export default function (pi: ExtensionAPI): void {
     description:
       "Generate a structured implementation plan from a todo, file, or description",
     handler: async (args, ctx) => {
-      // Parse --async flag from args
       const isAsync = /\s*--async\b/.test(args);
       const input = args.replace(/\s*--async\b/, "").trim();
-
       const result = await handleGeneratePlan(input, isAsync, ctx);
-      if (!result.success) {
-        ctx.ui?.notify?.(result.message, "error") ??
-          console.error(result.message);
-      }
+      const level = result.success ? "info" : "error";
+      ctx.ui?.notify?.(result.message, level) ?? (result.success ? console.log(result.message) : console.error(result.message));
     },
   });
 
