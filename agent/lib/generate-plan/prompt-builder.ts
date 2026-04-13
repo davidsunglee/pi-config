@@ -133,32 +133,55 @@ function getAffectedSections(
   const sections: string[] = [];
   const seen = new Set<string>();
 
-  for (const finding of findings) {
-    const label =
-      finding.taskNumber != null ? `Task ${finding.taskNumber}` : "General";
+  const addSection = (label: string) => {
     if (!seen.has(label)) {
       seen.add(label);
       sections.push(label);
     }
+  };
+
+  // Map review findings to concrete sections
+  for (const finding of findings) {
+    if (finding.taskNumber != null) {
+      addSection(`Task ${finding.taskNumber}`);
+    } else {
+      // Derive section from finding content
+      const section = inferSectionFromFinding(finding);
+      addSection(section);
+    }
   }
 
-  // When no review findings exist, derive sections from validation errors
-  if (findings.length === 0 && validationErrors.length > 0) {
-    for (const error of validationErrors) {
-      const parsed = parseSectionFromValidationError(error);
-      if (parsed !== null && !seen.has(parsed)) {
-        seen.add(parsed);
-        sections.push(parsed);
-      }
+  // Always include validation-derived sections (not just when findings.length === 0)
+  for (const error of validationErrors) {
+    const parsed = parseSectionFromValidationError(error);
+    if (parsed !== null) {
+      addSection(parsed);
     }
+  }
 
-    // If we couldn't parse any specific sections, fall back to a generic label
-    if (sections.length === 0) {
-      sections.push("All structurally invalid sections");
-    }
+  // Fallback if nothing was derived
+  if (sections.length === 0) {
+    sections.push("All structurally invalid sections");
   }
 
   return sections;
+}
+
+/**
+ * Infer a plan section name from a non-task review finding based on keywords.
+ */
+function inferSectionFromFinding(finding: ReviewIssue): string {
+  const text = `${finding.shortDescription} ${finding.fullText}`.toLowerCase();
+
+  if (/dependenc/i.test(text)) return "Dependencies";
+  if (/architect/i.test(text)) return "Architecture Summary";
+  if (/file.?struct|file.?map/i.test(text)) return "File Structure";
+  if (/risk/i.test(text)) return "Risk Assessment";
+  if (/test.?command/i.test(text)) return "Test Command";
+  if (/tech.?stack/i.test(text)) return "Tech Stack";
+  if (/goal/i.test(text)) return "Goal";
+
+  return "General";
 }
 
 /**

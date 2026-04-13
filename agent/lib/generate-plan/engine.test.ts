@@ -573,11 +573,11 @@ describe("PlanGenerationEngine", () => {
 
   describe("per-issue escalation", () => {
     it("(j) escalates to partial_regen after 2 consecutive edit failures on same issue", async () => {
-      // Issue persists through 4 cycles: first 3 are targeted_edit, fourth is partial_regen
-      // (genuinely new issues start at 0, so it takes 3 edit failures to reach 2)
+      // Issue persists through 3 cycles: first 2 are targeted_edit, third is partial_regen.
+      // Initial review findings seed the repair state, so the first repair cycle already
+      // sees the issue as persisting (consecutiveEditFailures=1 after cycle 1).
       const { io, calls } = createMockIO({
         planContentSequence: [
-          VALID_PLAN,
           VALID_PLAN,
           VALID_PLAN,
           VALID_PLAN,
@@ -586,13 +586,11 @@ describe("PlanGenerationEngine", () => {
         dispatchOutputSequence: [
           { text: "", exitCode: 0 }, // plan-generator initial
           { text: REVIEW_WITH_ERRORS_OUTPUT, exitCode: 0 }, // reviewer: errors
-          { text: "", exitCode: 0 }, // plan-generator repair 1 (targeted_edit, issue at 0)
+          { text: "", exitCode: 0 }, // plan-generator repair 1 (targeted_edit, issue at 1)
           { text: REVIEW_WITH_ERRORS_OUTPUT, exitCode: 0 }, // reviewer: same errors
-          { text: "", exitCode: 0 }, // plan-generator repair 2 (targeted_edit, issue at 1)
+          { text: "", exitCode: 0 }, // plan-generator repair 2 (targeted_edit, issue at 2)
           { text: REVIEW_WITH_ERRORS_OUTPUT, exitCode: 0 }, // reviewer: same errors again
-          { text: "", exitCode: 0 }, // plan-generator repair 3 (targeted_edit, issue at 2)
-          { text: REVIEW_WITH_ERRORS_OUTPUT, exitCode: 0 }, // reviewer: same errors again
-          { text: "", exitCode: 0 }, // plan-generator repair 4 (should be partial_regen, issue at 3)
+          { text: "", exitCode: 0 }, // plan-generator repair 3 (should be partial_regen, issue at 3)
           { text: APPROVED_REVIEW_OUTPUT, exitCode: 0 }, // reviewer: approved
         ],
       });

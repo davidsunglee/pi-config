@@ -25,14 +25,21 @@ export function validationErrorKey(error: string): string {
 
 /**
  * Initialize a fresh repair cycle state.
+ *
+ * When initialFindings / initialValidationErrors are provided the state
+ * records them so that `advanceCycle` can tell persisting issues apart
+ * from genuinely new ones on the very first repair cycle.
  */
-export function createRepairState(): RepairCycleState {
+export function createRepairState(
+  initialFindings?: ReviewIssue[],
+  initialValidationErrors?: string[],
+): RepairCycleState {
   return {
     cycle: 0,
     maxCycles: 10,
     strategy: "targeted_edit",
-    findings: [],
-    validationErrors: [],
+    findings: initialFindings ?? [],
+    validationErrors: initialValidationErrors ?? [],
     issueTracker: {},
   };
 }

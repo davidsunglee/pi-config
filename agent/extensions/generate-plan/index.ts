@@ -139,6 +139,11 @@ export function createDispatchFn(
 ): (config: SubagentDispatchConfig) => Promise<SubagentOutput> {
   return async (config: SubagentDispatchConfig): Promise<SubagentOutput> => {
     const agentConfig = await loadAgentConfig(agentDir, config.agent);
+    if (!agentConfig) {
+      throw new Error(
+        `Agent definition not found: "${config.agent}" (expected at ${agentDir}/agents/${config.agent}.md)`,
+      );
+    }
 
     // System prompt from agent config
     let tmpPromptDir: string | null = null;
@@ -371,7 +376,11 @@ export function createCallbacks(
     onProgress: (msg) => notify(msg, "info"),
     onWarning: (msg) => notify(msg, "warning"),
     onComplete: isAsync
-      ? (result) => notify(formatResult(result), "info")
+      ? (result) => {
+          const level = result.reviewStatus === "errors_found" ? "warning"
+            : "info";
+          notify(formatResult(result), level);
+        }
       : (_result) => {
           // Result is surfaced by the command handler or tool return value.
           // No additional notification needed for sync execution.
@@ -420,7 +429,7 @@ async function handleGeneratePlan(
       await engine.generate(parsedInput, callbacks);
     })().catch((err) => {
       const errMsg = err instanceof Error ? err.message : String(err);
-      callbacks.onProgress(`Error: ${errMsg}`);
+      notify(`Plan generation error: ${errMsg}`, "error");
     });
     return {
       success: true,
@@ -447,8 +456,12 @@ export default function (pi: ExtensionAPI): void {
     description:
       "Generate a structured implementation plan from a todo, file, or description",
     handler: async (args, ctx) => {
-      const isAsync = /\s*--async\b/.test(args);
-      const input = args.replace(/\s*--async\b/, "").trim();
+      const tokens = args.trim().split(/\s+/);
+      const asyncIndex = tokens.indexOf("--async");
+      const isAsync = asyncIndex !== -1;
+      const input = isAsync
+        ? tokens.filter((_, i) => i !== asyncIndex).join(" ")
+        : args.trim();
       const result = await handleGeneratePlan(input, isAsync, ctx);
       const level = result.success ? "info" : "error";
       ctx.ui?.notify?.(result.message, level) ?? (result.success ? console.log(result.message) : console.error(result.message));
