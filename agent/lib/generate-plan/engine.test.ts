@@ -50,9 +50,52 @@ TypeScript
 No risks
 `;
 
+// A second valid plan with slightly different content (used to simulate
+// the subagent writing fresh output during repair cycles).
+const VALID_PLAN_V2 = `# Test Plan
+
+## Goal
+Test goal (revised)
+
+## Architecture Summary
+Test architecture
+
+## Tech Stack
+TypeScript
+
+## File Structure
+- \`test.ts\` (Create) — Test file
+
+## Tasks
+
+### Task 1: Test task
+
+**Files:**
+- Create: \`test.ts\`
+
+**Steps:**
+- [ ] **Step 1** — Do the thing
+
+**Acceptance criteria:**
+- [ ] Works
+
+**Model recommendation:** cheap
+
+## Dependencies
+- Task 1 has no dependencies
+
+## Risk Assessment
+No risks
+`;
+
 const INVALID_PLAN = `# Bad Plan
 
 Some text without required sections.
+`;
+
+const INVALID_PLAN_V2 = `# Bad Plan
+
+Some text without required sections. (revised)
 `;
 
 // Plan with errors that reviewer will flag
@@ -141,6 +184,9 @@ interface MockIOOptions {
   planContentSequence?: string[];
   dispatchOutputSequence?: SubagentOutput[];
   planFileExists?: boolean;
+  /** Whether the plan file exists before the first dispatch (for snapshot).
+   *  Defaults to false (file is new). */
+  planFileExistsBefore?: boolean;
 }
 
 interface CallRecord {
@@ -160,9 +206,11 @@ function createMockIO(opts: MockIOOptions = {}): {
   const reviewTemplate = opts.reviewTemplate ?? REVIEW_TEMPLATE;
   const reviewOutput = opts.reviewOutput ?? APPROVED_REVIEW_OUTPUT;
   const planFileExists = opts.planFileExists ?? true;
+  const planFileExistsBefore = opts.planFileExistsBefore ?? false;
 
   let planReadCount = 0;
   let dispatchCount = 0;
+  let hasDispatched = false;
 
   const calls: CallRecord = {
     dispatchCalls: [],
@@ -200,7 +248,8 @@ function createMockIO(opts: MockIOOptions = {}): {
     },
     fileExists: async (path: string) => {
       if (path.includes(".pi/plans/") && !path.includes("reviews/")) {
-        return planFileExists;
+        // Before first dispatch, use planFileExistsBefore; after, use planFileExists
+        return hasDispatched ? planFileExists : planFileExistsBefore;
       }
       return false;
     },
@@ -219,6 +268,7 @@ function createMockIO(opts: MockIOOptions = {}): {
       config: SubagentDispatchConfig,
     ): Promise<SubagentOutput> => {
       calls.dispatchCalls.push(config);
+      hasDispatched = true;
 
       if (
         opts.dispatchShouldThrow &&
@@ -373,9 +423,9 @@ describe("PlanGenerationEngine", () => {
 
   describe("validation failure skips review", () => {
     it("(d) invalid plan goes to repair without dispatching plan-reviewer", async () => {
-      // First read returns invalid plan, second read after repair returns valid
+      // Sequence: [post-initial, snapshot-before-repair, post-repair]
       const { io, calls } = createMockIO({
-        planContentSequence: [INVALID_PLAN, VALID_PLAN],
+        planContentSequence: [INVALID_PLAN, INVALID_PLAN, VALID_PLAN],
       });
       const { callbacks } = createMockCallbacks();
       const engine = new PlanGenerationEngine(io, CWD, AGENT_DIR);
@@ -487,10 +537,11 @@ describe("PlanGenerationEngine", () => {
 
     it("throws when a stale plan file exists but the generator produces no new output", async () => {
       // Simulate: plan file exists from a prior run, generator exits 0
-      // but does not write fresh content (the truncation leaves an empty file).
+      // but does not write fresh content (file content unchanged).
       const { io } = createMockIO({
+        planFileExistsBefore: true,
         planFileExists: true,
-        planContent: "",  // readFile returns empty after truncation
+        planContent: VALID_PLAN,  // readFile returns same content before and after dispatch
         dispatchOutputSequence: [
           { text: "", exitCode: 0 },
         ],
@@ -505,7 +556,7 @@ describe("PlanGenerationEngine", () => {
             callbacks,
           ),
         (err: Error) => {
-          assert.match(err.message, /did not produce output/i);
+          assert.match(err.message, /unchanged/i);
           return true;
         },
       );
@@ -533,9 +584,8 @@ describe("PlanGenerationEngine", () => {
       assert.ok(result.noteCount > 0, "Should have notes");
 
       // The plan should have been written back with review notes.
-      // Filter out the truncation write (empty string) that clears stale content.
       const planWrite = calls.writeFileCalls.find(
-        (w) => w.path.includes(".pi/plans/") && !w.path.includes("reviews/") && w.content.length > 0,
+        (w) => w.path.includes(".pi/plans/") && !w.path.includes("reviews/"),
       );
       assert.ok(planWrite, "Should write plan with appended review notes");
       assert.ok(
@@ -551,8 +601,9 @@ describe("PlanGenerationEngine", () => {
 
   describe("repair loop entry", () => {
     it("(g) enters repair loop when validation fails", async () => {
+      // Sequence: [post-initial, snapshot-before-repair, post-repair]
       const { io, calls } = createMockIO({
-        planContentSequence: [INVALID_PLAN, VALID_PLAN],
+        planContentSequence: [INVALID_PLAN, INVALID_PLAN, VALID_PLAN],
       });
       const { callbacks, record } = createMockCallbacks();
       const engine = new PlanGenerationEngine(io, CWD, AGENT_DIR);
@@ -580,9 +631,10 @@ describe("PlanGenerationEngine", () => {
 
     it("(h) enters repair loop when review finds errors", async () => {
       // Plan is valid but review finds errors, then second plan also valid and review approves
+      // Sequence: [post-initial, snapshot-before-repair, post-repair]
       const { io, calls } = createMockIO({
         reviewOutput: REVIEW_WITH_ERRORS_OUTPUT,
-        planContentSequence: [VALID_PLAN, VALID_PLAN],
+        planContentSequence: [VALID_PLAN, VALID_PLAN, VALID_PLAN_V2],
         dispatchOutputSequence: [
           // First: plan-generator initial
           { text: "", exitCode: 0 },
@@ -618,8 +670,9 @@ describe("PlanGenerationEngine", () => {
 
   describe("edit prompt construction", () => {
     it("(i) edit prompt includes review findings", async () => {
+      // Sequence: [post-initial, snapshot-before-repair, post-repair]
       const { io, calls } = createMockIO({
-        planContentSequence: [VALID_PLAN, VALID_PLAN],
+        planContentSequence: [VALID_PLAN, VALID_PLAN, VALID_PLAN_V2],
         dispatchOutputSequence: [
           { text: "", exitCode: 0 }, // plan-generator
           { text: REVIEW_WITH_ERRORS_OUTPUT, exitCode: 0 }, // plan-reviewer
@@ -657,12 +710,17 @@ describe("PlanGenerationEngine", () => {
       // Issue persists through 3 cycles: first 2 are targeted_edit, third is partial_regen.
       // Initial review findings seed the repair state, so the first repair cycle already
       // sees the issue as persisting (consecutiveEditFailures=1 after cycle 1).
+      // Sequence alternates to satisfy content-comparison check:
+      // [post-initial, snap-r1, post-r1, snap-r2, post-r2, snap-r3, post-r3]
       const { io, calls } = createMockIO({
         planContentSequence: [
-          VALID_PLAN,
-          VALID_PLAN,
-          VALID_PLAN,
-          VALID_PLAN,
+          VALID_PLAN,       // post initial dispatch
+          VALID_PLAN,       // snapshot before repair 1
+          VALID_PLAN_V2,    // post repair 1 dispatch
+          VALID_PLAN_V2,    // snapshot before repair 2
+          VALID_PLAN,       // post repair 2 dispatch
+          VALID_PLAN,       // snapshot before repair 3
+          VALID_PLAN_V2,    // post repair 3 dispatch
         ],
         dispatchOutputSequence: [
           { text: "", exitCode: 0 }, // plan-generator initial
@@ -703,8 +761,9 @@ describe("PlanGenerationEngine", () => {
 
   describe("convergence after repair", () => {
     it("(k) converges when repair fixes all issues", async () => {
+      // Sequence: [post-initial, snapshot-before-repair, post-repair]
       const { io } = createMockIO({
-        planContentSequence: [INVALID_PLAN, VALID_PLAN],
+        planContentSequence: [INVALID_PLAN, INVALID_PLAN, VALID_PLAN],
       });
       const { callbacks } = createMockCallbacks();
       const engine = new PlanGenerationEngine(io, CWD, AGENT_DIR);
@@ -733,9 +792,17 @@ describe("PlanGenerationEngine", () => {
 
   describe("max cycles exceeded", () => {
     it("(l) surfaces remaining findings after max 10 repair cycles", async () => {
-      // Always return invalid plan so repair never converges
+      // Always return invalid plan so repair never converges.
+      // Alternate between two invalid plans so the content-comparison
+      // check does not trigger a false "unchanged" error.
+      const seq: string[] = [INVALID_PLAN]; // post-initial dispatch
+      for (let i = 0; i < 10; i++) {
+        // snapshot before repair, post-repair dispatch (alternate)
+        seq.push(i % 2 === 0 ? INVALID_PLAN : INVALID_PLAN_V2);
+        seq.push(i % 2 === 0 ? INVALID_PLAN_V2 : INVALID_PLAN);
+      }
       const { io } = createMockIO({
-        planContent: INVALID_PLAN,
+        planContentSequence: seq,
       });
       const { callbacks } = createMockCallbacks();
       const engine = new PlanGenerationEngine(io, CWD, AGENT_DIR);
@@ -1042,8 +1109,15 @@ describe("PlanGenerationEngine", () => {
     });
 
     it("returns errors_found when plan cannot be fixed", async () => {
+      // Alternate between two invalid plans so content-comparison check
+      // does not trigger "unchanged" errors during repair cycles.
+      const seq: string[] = [INVALID_PLAN];
+      for (let i = 0; i < 10; i++) {
+        seq.push(i % 2 === 0 ? INVALID_PLAN : INVALID_PLAN_V2);
+        seq.push(i % 2 === 0 ? INVALID_PLAN_V2 : INVALID_PLAN);
+      }
       const { io } = createMockIO({
-        planContent: INVALID_PLAN,
+        planContentSequence: seq,
       });
       const { callbacks } = createMockCallbacks();
       const engine = new PlanGenerationEngine(io, CWD, AGENT_DIR);
@@ -1168,11 +1242,15 @@ describe("PlanGenerationEngine", () => {
       // Cycle 1: valid plan → review finds errors → engine dispatches edit
       // Cycle 2: edit makes plan INVALID (validation fails) → reviewResult should be cleared
       // Cycle 3: plan is valid again → review runs fresh and approves
+      // Read sequence accounts for snapshot reads before each repair dispatch:
+      // [post-initial, snap-r1, post-r1, snap-r2, post-r2]
       const { io, calls } = createMockIO({
         planContentSequence: [
-          VALID_PLAN,    // initial generation: valid
-          INVALID_PLAN,  // after first repair edit: now invalid
-          VALID_PLAN,    // after second repair edit: valid again
+          VALID_PLAN,    // post-initial: valid → review finds errors
+          VALID_PLAN,    // snapshot before repair 1
+          INVALID_PLAN,  // post repair 1: now invalid
+          INVALID_PLAN,  // snapshot before repair 2
+          VALID_PLAN,    // post repair 2: valid again → review approves
         ],
         dispatchOutputSequence: [
           { text: "", exitCode: 0 },                       // plan-generator initial
@@ -1228,12 +1306,19 @@ describe("PlanGenerationEngine", () => {
       // Cycle 2: edit makes plan INVALID (validation fails) → reviewResult cleared
       // Plan never recovers → max cycles exhausted
       // reviewPath should still be set because a review file was written
+      // Read sequence: [post-initial, snap-r1, post-r1, snap-r2, post-r2, ...]
+      const seq: string[] = [
+        VALID_PLAN,   // post-initial: valid → review runs and finds errors
+        VALID_PLAN,   // snapshot before repair 1
+        INVALID_PLAN, // post repair 1: now invalid → reviewResult cleared
+      ];
+      // Remaining repair cycles: plan stays invalid, alternate to avoid "unchanged"
+      for (let i = 1; i < 10; i++) {
+        seq.push(i % 2 === 0 ? INVALID_PLAN : INVALID_PLAN_V2);   // snapshot
+        seq.push(i % 2 === 0 ? INVALID_PLAN_V2 : INVALID_PLAN);   // post-dispatch
+      }
       const { io } = createMockIO({
-        planContentSequence: [
-          VALID_PLAN,     // initial generation: valid → review runs
-          INVALID_PLAN,   // after first repair edit: now invalid → reviewResult cleared
-          INVALID_PLAN,   // stays invalid through remaining cycles
-        ],
+        planContentSequence: seq,
         dispatchOutputSequence: [
           { text: "", exitCode: 0 },                        // plan-generator initial
           { text: REVIEW_WITH_ERRORS_OUTPUT, exitCode: 0 }, // plan-reviewer: errors
@@ -1281,8 +1366,9 @@ describe("PlanGenerationEngine", () => {
   describe("review re-run after repair", () => {
     it("re-runs review after repair fixes validation errors", async () => {
       // First plan invalid, second plan valid — review should run on second
+      // Sequence: [post-initial, snapshot-before-repair, post-repair]
       const { io, calls } = createMockIO({
-        planContentSequence: [INVALID_PLAN, VALID_PLAN],
+        planContentSequence: [INVALID_PLAN, INVALID_PLAN, VALID_PLAN],
       });
       const { callbacks } = createMockCallbacks();
       const engine = new PlanGenerationEngine(io, CWD, AGENT_DIR);
