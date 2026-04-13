@@ -79,7 +79,7 @@ export function buildEditPrompt(params: {
     );
   } else {
     // partial_regen strategy
-    const affectedSections = getAffectedSections(findings);
+    const affectedSections = getAffectedSections(findings, validationErrors);
 
     lines.push(
       "The following plan needs partial regeneration. Specific sections must be regenerated to address review findings, while preserving all unaffected content.",
@@ -126,7 +126,10 @@ export function buildEditPrompt(params: {
   return lines.join("\n");
 }
 
-function getAffectedSections(findings: ReviewIssue[]): string[] {
+function getAffectedSections(
+  findings: ReviewIssue[],
+  validationErrors: string[],
+): string[] {
   const sections: string[] = [];
   const seen = new Set<string>();
 
@@ -139,5 +142,44 @@ function getAffectedSections(findings: ReviewIssue[]): string[] {
     }
   }
 
+  // When no review findings exist, derive sections from validation errors
+  if (findings.length === 0 && validationErrors.length > 0) {
+    for (const error of validationErrors) {
+      const parsed = parseSectionFromValidationError(error);
+      if (parsed !== null && !seen.has(parsed)) {
+        seen.add(parsed);
+        sections.push(parsed);
+      }
+    }
+
+    // If we couldn't parse any specific sections, fall back to a generic label
+    if (sections.length === 0) {
+      sections.push("All structurally invalid sections");
+    }
+  }
+
   return sections;
+}
+
+/**
+ * Attempts to extract a section name from a validation error message.
+ *
+ * Recognized patterns:
+ * - "Missing required section: <Name>"  →  "<Name>"
+ * - "Task N ..."                        →  "Task N"
+ */
+function parseSectionFromValidationError(error: string): string | null {
+  // "Missing required section: Goal" → "Goal"
+  const sectionMatch = error.match(/Missing required section:\s*(.+)/i);
+  if (sectionMatch) {
+    return sectionMatch[1]!.trim();
+  }
+
+  // "Task 3 depends on Task 99 ..." → "Task 3"
+  const taskMatch = error.match(/^(Task\s+\d+)\b/i);
+  if (taskMatch) {
+    return taskMatch[1]!;
+  }
+
+  return null;
 }

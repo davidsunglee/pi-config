@@ -24,10 +24,11 @@ export async function loadReviewTemplate(
  * with the provided values.
  *
  * Throws if any unfilled placeholders remain after substitution.
- * Unfilled placeholders are detected as `{WORD_CHARS}` patterns — at least
- * 2 characters inside braces, letters and underscores only. This catches
- * `{UPPER_CASE}`, `{Mixed_Case}`, and `{lower_case}` while avoiding false
- * positives on things like `{x}` or JSON content like `{"key": "value"}`.
+ * Unfilled placeholders are detected as `{IDENTIFIER}` patterns — at least
+ * 2 characters inside braces, starting with a letter, then letters, digits,
+ * underscores, or hyphens. This catches `{UPPER_CASE}`, `{Mixed_Case}`,
+ * `{VAR2}`, and `{PLACEHOLDER-1}` while avoiding false positives on things
+ * like `{x}` or JSON content like `{"key": "value"}`.
  */
 export function fillReviewTemplate(
   template: string,
@@ -43,11 +44,12 @@ export function fillReviewTemplate(
     .replace(/\{ORIGINAL_SPEC\}/g, SENTINEL_SPEC);
 
   // Step 2: Check the skeleton for any remaining unfilled placeholders.
-  // Match {WORD_CHARS} patterns — at least 2 chars inside braces, letters and
-  // underscores only. This catches {UPPER_CASE}, {Mixed_Case}, and
-  // {lower_case} while avoiding false positives on things like {x} or JSON
-  // content like {"key": "value"}.
-  const unfilledPattern = /\{[A-Za-z][A-Za-z_]{1,}\}/g;
+  // Match {PLACEHOLDER} patterns — at least 2 chars inside braces, starting
+  // with a letter, then letters, digits, underscores, or hyphens. This catches
+  // {UPPER_CASE}, {Mixed_Case}, {lower_case}, {VAR2}, and {PLACEHOLDER-1}
+  // while avoiding false positives on things like {x} or JSON content like
+  // {"key": "value"}.
+  const unfilledPattern = /\{[A-Za-z][A-Za-z0-9_-]{1,}\}/g;
   const remaining = skeleton.match(unfilledPattern);
   if (remaining) {
     const unique = [...new Set(remaining)];

@@ -180,6 +180,46 @@ describe("fillReviewTemplate", () => {
     );
   });
 
+  test("throws when a hyphenated placeholder like {PLACEHOLDER-1} remains in the template", () => {
+    const templateWithHyphen =
+      "## Spec\n\n{ORIGINAL_SPEC}\n\n{PLAN_CONTENTS}\n\n{PLACEHOLDER-1}";
+
+    assert.throws(
+      () =>
+        fillReviewTemplate(templateWithHyphen, {
+          planContents: "plan",
+          originalSpec: "spec",
+        }),
+      (err: Error) => {
+        assert.ok(
+          err.message.includes("{PLACEHOLDER-1}"),
+          `Expected error message to mention {PLACEHOLDER-1}, got: ${err.message}`
+        );
+        return true;
+      }
+    );
+  });
+
+  test("throws when a placeholder with digits like {VAR2} remains in the template", () => {
+    const templateWithDigit =
+      "## Spec\n\n{ORIGINAL_SPEC}\n\n{PLAN_CONTENTS}\n\n{VAR2}";
+
+    assert.throws(
+      () =>
+        fillReviewTemplate(templateWithDigit, {
+          planContents: "plan",
+          originalSpec: "spec",
+        }),
+      (err: Error) => {
+        assert.ok(
+          err.message.includes("{VAR2}"),
+          `Expected error message to mention {VAR2}, got: ${err.message}`
+        );
+        return true;
+      }
+    );
+  });
+
   test("does not throw when parameter values happen to contain brace patterns", () => {
     // Values that look like placeholders should NOT trigger the unfilled check
     const result = fillReviewTemplate(template, {
