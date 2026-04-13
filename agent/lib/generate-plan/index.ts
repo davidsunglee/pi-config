@@ -32,6 +32,9 @@ export { parseReviewOutput } from "./review-parser.ts";
 // Review notes
 export { appendReviewNotes } from "./review-notes.ts";
 
+// Engine
+export { PlanGenerationEngine } from "./engine.ts";
+
 // Repair loop
 export {
   issueKey,
