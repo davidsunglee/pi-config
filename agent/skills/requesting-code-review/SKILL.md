@@ -41,6 +41,12 @@ Fill these placeholders:
 - `{DESCRIPTION}` — brief summary of changes
 - `{RE_REVIEW_BLOCK}` — empty string (standalone reviews are always full reviews, not re-reviews)
 
+### 2b. Resolve model and dispatch
+
+Read the model matrix from `~/.pi/agent/model-tiers.json`. If the file doesn't exist or is unreadable, stop with: "requesting-code-review requires `~/.pi/agent/model-tiers.json` — see model matrix configuration."
+
+Use the `capable` tier for the reviewer model. Resolve the dispatch target using the `dispatch` map — see execute-plan Step 6 for the full algorithm. Default to `"pi"` if absent.
+
 ### 3. Dispatch the subagent
 
 Use pi's `subagent` tool to dispatch a `code-reviewer` agent:
@@ -49,11 +55,12 @@ Use pi's `subagent` tool to dispatch a `code-reviewer` agent:
 subagent {
   agent: "code-reviewer",
   task: "<filled review-code-prompt.md template>",
-  model: "<capable-tier model>"
+  model: "<capable from model-tiers.json>",
+  dispatch: "<dispatch for capable>"
 }
 ```
 
-Use a capable-tier model in a fresh context — the reviewer must see
+Use the `capable` model from `model-tiers.json` in a fresh context — the reviewer must see
 the code without bias from the generation process.
 
 ### 4. Act on feedback

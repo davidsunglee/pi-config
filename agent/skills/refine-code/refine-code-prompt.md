@@ -25,10 +25,23 @@ You are the code refiner. Drive the review-remediate cycle for the changes descr
 
 {MODEL_MATRIX}
 
-Use these model tiers for dispatch:
+Model tier assignments:
 - `crossProvider.capable` — first-pass full review and final verification review
 - `standard` — hybrid re-reviews (cheaper, scoped to remediation diff)
 - `capable` — remediator (coder fixing code)
+
+### Dispatch resolution
+
+The model matrix above includes a `dispatch` map that maps provider prefixes to CLI dispatch targets. For each subagent call:
+
+1. Take the resolved model string (e.g., `anthropic/claude-opus-4-6`)
+2. Extract the provider prefix — the substring before the first `/` (e.g., `anthropic`)
+3. Look up `dispatch["<prefix>"]` in the model matrix (e.g., `dispatch["anthropic"]` → `"claude"`)
+4. Pass the result as `dispatch: "<value>"` in the subagent call
+
+If the `dispatch` map is absent from the model matrix, or the provider has no entry, default to `"pi"`.
+
+Always pass `dispatch` explicitly on every subagent call, even when it resolves to `"pi"`.
 
 ## Protocol
 
@@ -44,12 +57,13 @@ Use these model tiers for dispatch:
    - `{DESCRIPTION}` — the Plan Goal above (same as `{WHAT_WAS_IMPLEMENTED}`)
    - `{RE_REVIEW_BLOCK}` — empty string (first pass)
 
-3. **Dispatch `code-reviewer`** with model `crossProvider.capable` from the model matrix:
+3. **Dispatch `code-reviewer`** with model `crossProvider.capable` and corresponding `dispatch` from the model matrix:
    ```
    subagent {
      agent: "code-reviewer",
      task: "<filled template>",
-     model: "<crossProvider.capable from model matrix>"
+     model: "<crossProvider.capable from model matrix>",
+     dispatch: "<dispatch for crossProvider.capable>"
    }
    ```
 
@@ -65,12 +79,13 @@ Use these model tiers for dispatch:
    - Prefer smaller batches — one batch at a time, sequential dispatch
    - All Critical findings should be in early batches
 
-7. **Dispatch remediator** for one batch — use model `capable` from the model matrix:
+7. **Dispatch remediator** for one batch — use model `capable` and corresponding `dispatch` from the model matrix:
    ```
    subagent {
      agent: "coder",
      task: "Fix the following code review findings:\n\n<batched findings with file:line refs>\n\nContext:\n<relevant plan/spec sections>\n\nWorking directory: {WORKING_DIR}",
-     model: "<capable from model matrix>"
+     model: "<capable from model matrix>",
+     dispatch: "<dispatch for capable>"
    }
    ```
 
@@ -105,7 +120,7 @@ Use these model tiers for dispatch:
    - `{RE_REVIEW_BLOCK}` — the filled re-review block content
    - `{DESCRIPTION}` — the Plan Goal above (same as iteration 1)
 
-5. **Dispatch `code-reviewer`** with model `standard` from the model matrix (hybrid re-reviews are scoped and cheaper).
+5. **Dispatch `code-reviewer`** with model `standard` and corresponding `dispatch` from the model matrix (hybrid re-reviews are scoped and cheaper).
 
 6. **Overwrite review sections** in the current versioned file; **append** to remediation log.
 
@@ -115,7 +130,7 @@ Use these model tiers for dispatch:
 
 When a review pass finds no Critical/Important issues (hybrid reviews converge):
 
-1. **Dispatch `code-reviewer`** with model `crossProvider.capable` for a **full-diff** verification:
+1. **Dispatch `code-reviewer`** with model `crossProvider.capable` and corresponding `dispatch` for a **full-diff** verification:
    - `{BASE_SHA}` — original BASE_SHA from this prompt (pre-implementation)
    - `{HEAD_SHA}` — current HEAD (includes all remediations)
    - `{RE_REVIEW_BLOCK}` — empty string (full review, not re-review)

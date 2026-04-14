@@ -36,6 +36,12 @@ The model matrix provides tier mappings used by the coordinator:
 - `standard` — hybrid re-reviews, coordinator model
 - `capable` — remediator
 
+### Dispatch resolution
+
+After reading the model matrix, resolve the dispatch target for the `code-refiner` call using the `dispatch` map from `model-tiers.json`. See execute-plan Step 6 for the full resolution algorithm.
+
+The `code-refiner` receives the full model matrix (including the `dispatch` map) as `{MODEL_MATRIX}` and resolves dispatch for its own subagent calls internally — see `refine-code-prompt.md`.
+
 If the file doesn't exist or is unreadable, stop with: "refine-code requires ~/.pi/agent/model-tiers.json — see model matrix configuration."
 
 ## Step 3: Assemble coordinator prompt
@@ -58,7 +64,8 @@ Fill placeholders:
 subagent {
   agent: "code-refiner",
   task: "<filled refine-code-prompt.md>",
-  model: "<standard from model matrix>"
+  model: "<standard from model matrix>",
+  dispatch: "<dispatch for standard>"
 }
 ```
 
@@ -82,5 +89,5 @@ The caller (execute-plan or user) makes the decision. This skill does not auto-c
 ## Edge Cases
 
 - **No changes in range** (`BASE_SHA` equals `HEAD_SHA`): Stop with "No changes to review."
-- **Code-refiner fails to dispatch** (model unavailable): Retry with `capable` from the model matrix (same provider fallback). If that also fails, stop with error.
+- **Code-refiner fails to dispatch** (model unavailable): Retry with `capable` from the model matrix (re-resolving dispatch for the fallback model). If that also fails, stop with error.
 - **Empty requirements**: Review is purely quality-focused — no spec compliance check. The code-refiner handles this (it passes empty `{PLAN_CONTENTS}` through to the reviewer).

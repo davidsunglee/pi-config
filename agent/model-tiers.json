@@ -5,5 +5,9 @@
     "crossProvider": {
         "capable": "openai-codex/gpt-5.4",
         "standard": "openai-codex/gpt-5.4"
+    },
+    "dispatch": {
+        "anthropic": "claude",
+        "openai-codex": "pi"
     }
 }
