@@ -90,7 +90,7 @@ git diff {BASE_SHA}..{HEAD_SHA}
 
 ### Assessment
 
-**Ready to merge?** [Yes/No/With fixes]
+**Ready to merge: [Yes/No/With fixes]**
 
 **Reasoning:** [Technical assessment in 1-2 sentences]
 

@@ -48,10 +48,16 @@ You cannot complete the task. After the status line, explain the blocker:
 STATUS: <code>
 
 ## Completed
-What was done.
+What was implemented.
+
+## Tests
+What was tested and results.
 
 ## Files Changed
-- `path/to/file.ts` — what changed
+- `path/to/file` — what changed
+
+## Self-Review Findings
+Any issues found and fixed during self-review, or "None."
 
 ## Concerns / Needs / Blocker
 (only for DONE_WITH_CONCERNS, NEEDS_CONTEXT, or BLOCKED)
