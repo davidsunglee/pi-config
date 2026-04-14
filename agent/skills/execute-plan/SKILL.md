@@ -385,67 +385,27 @@ Apply wave pacing from Step 3:
 
 After all waves complete successfully (and if the user chose review in Step 3):
 
-1. **Determine git range:**
-   ```bash
-   BASE_SHA=$PRE_EXECUTION_SHA  # recorded in Step 7
-   HEAD_SHA=$(git rev-parse HEAD)
-   ```
+1. **Gather inputs:**
+   - `BASE_SHA` = `PRE_EXECUTION_SHA` (recorded in Step 7)
+   - `HEAD_SHA` = `git rev-parse HEAD`
+   - Description = the plan's Goal section
+   - Requirements = full plan file contents
+   - Max iterations = from Step 3 settings (default 3)
+   - Working directory = current workspace path
+   - Review output path = `.pi/reviews/<plan-name>-code-review` (derived from plan filename, e.g., plan `2026-04-06-my-feature.md` → `.pi/reviews/2026-04-06-my-feature-code-review`)
 
-   The git range `BASE_SHA..HEAD_SHA` covers all wave commits (one per wave when commit-per-wave is enabled) or all uncommitted changes (when commits are disabled). No change to the range logic is needed — `BASE_SHA..HEAD_SHA` already handles both cases.
+2. **Invoke the `review-loop` skill** with the gathered inputs.
 
-2. **Load the review template** — read `~/.pi/agent/skills/requesting-code-review/code-reviewer.md`.
+3. **Handle the result:**
 
-3. **Fill placeholders:**
-   - `{WHAT_WAS_IMPLEMENTED}` — the plan's Goal section
-   - `{PLAN_OR_REQUIREMENTS}` — the full plan file contents
-   - `{BASE_SHA}` — SHA before execution
-   - `{HEAD_SHA}` — current HEAD
-   - `{DESCRIPTION}` — "Plan execution: <plan filename>"
+   **`clean`:** Include the review summary (iteration count, review file path) in the Step 13 completion report. Proceed to Step 13.
 
-4. **Dispatch review subagent:**
+   **`max_iterations_reached`:** Present remaining findings to the user. Offer:
+   - **(a) Continue iterating** — re-invoke `review-loop` (budget resets, new era)
+   - **(b) Proceed** — move to Step 13 with known issues noted in the summary
+   - **(c) Stop** — halt execution, report partial progress (Step 11)
 
-   Determine the review output path from the plan filename. For a plan named `2026-04-06-my-feature.md`, the review path is `.pi/reviews/2026-04-06-my-feature-code-review.md`.
-
-   Use `modelTiers.crossProvider.capable` from `~/.pi/agent/settings.json` (already read in Step 6) for an independent cross-provider perspective:
-   ```
-   subagent {
-     agent: "plan-executor",
-     task: "<filled template>",
-     model: "<modelTiers.crossProvider.capable>",
-     output: ".pi/reviews/<plan-name>-code-review.md"
-   }
-   ```
-
-   **Fallback:** If the dispatch fails (model unavailable, provider error), retry with `modelTiers.capable` (same provider) and notify the user:
-   ```
-   ⚠️ Cross-provider review failed (<modelTiers.crossProvider.capable>).
-   Falling back to same-provider review (<modelTiers.capable>).
-   ```
-
-   The fallback dispatch (same `output` path):
-   ```
-   subagent {
-     agent: "plan-executor",
-     task: "<filled template>",
-     model: "<modelTiers.capable>",
-     output: ".pi/reviews/<plan-name>-code-review.md"
-   }
-   ```
-
-5. **Handle review results:**
-
-   Read the full review from the output file:
-   ```
-   Read .pi/reviews/<plan-name>-code-review.md
-   ```
-
-   Use the full review contents (strengths, issues by severity, recommendations, assessment) when reporting to the user:
-
-   - **Critical/Important issues found:** Present the full findings from the review file to the user. Offer to dispatch fix-up tasks or proceed to completion.
-   - **Minor issues only or clean:** Include the full review summary in the completion summary. Proceed to Step 13.
-   - **Review skipped** (user chose to disable in Step 3): Proceed directly to Step 13.
-
-   The review file at `.pi/reviews/<plan-name>-code-review.md` is kept for reference (do not delete it).
+   **Review disabled** (user chose to disable in Step 3): Skip directly to Step 13.
 
 ## Step 13: Complete
 
