@@ -27,14 +27,14 @@ Two new optional fields in agent markdown frontmatter:
 name: coder
 model: claude-sonnet-4-6
 dispatch: claude           # pi (default) | claude
-permissionMode: auto       # auto (default) | bypassPermissions | plan
+permissionMode: bypassPermissions  # bypassPermissions (default) | auto | plan
 ---
 ```
 
 - **`dispatch`** — which CLI spawns the subagent. Default: `pi` (current behavior). When `claude`, the extension spawns the `claude` CLI instead.
 - **`permissionMode`** — only applies when `dispatch: claude`. Maps to Claude Code's `--permission-mode` flag. Supported values:
-  - `auto` (default) — autonomous with safety guardrails
-  - `bypassPermissions` — no permission prompts
+  - `bypassPermissions` (default) — no permission prompts, subagents operate fully autonomously
+  - `auto` — autonomous with safety guardrails
   - `plan` — read-only, no file mutations (useful for reviewers)
 
 ### Invocation-Time Override
@@ -42,7 +42,7 @@ permissionMode: auto       # auto (default) | bypassPermissions | plan
 Callers can override both fields at invocation time:
 
 ```
-subagent { agent: "coder", task: "...", dispatch: "claude", permissionMode: "auto" }
+subagent { agent: "coder", task: "...", dispatch: "claude", permissionMode: "plan" }
 ```
 
 Precedence: invocation-time override > agent frontmatter > extension default (`pi`).
@@ -58,7 +58,7 @@ interface AgentConfig {
     tools?: string[];
     model?: string;
     dispatch?: string;         // "pi" | "claude"
-    permissionMode?: string;   // "auto" | "bypassPermissions" | "plan"
+    permissionMode?: string;   // "bypassPermissions" | "auto" | "plan"
     systemPrompt: string;
     source: "user" | "project";
     filePath: string;
