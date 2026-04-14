@@ -155,26 +155,26 @@ If a wave has more than 7 tasks, split it into sequential sub-waves of ≤7 task
 
 ## Step 6: Resolve model tiers
 
-Read the model matrix from `~/.pi/agent/models.json`:
+Read the model matrix from `~/.pi/agent/model-tiers.json`:
 
 ```bash
-cat ~/.pi/agent/models.json | python3 -c "import sys,json; print(json.dumps(json.load(sys.stdin), indent=2))"
+cat ~/.pi/agent/model-tiers.json | python3 -c "import sys,json; print(json.dumps(json.load(sys.stdin), indent=2))"
 ```
 
 Map each task's model recommendation to the tier map:
 
 | Task recommendation | Model to use |
 |---------------------|-------------|
-| `capable` | `capable` from models.json |
-| `standard` | `standard` from models.json |
-| `cheap` | `cheap` from models.json |
+| `capable` | `capable` from model-tiers.json |
+| `standard` | `standard` from model-tiers.json |
+| `cheap` | `cheap` from model-tiers.json |
 
 If a task has no tier specified, apply this rubric:
 - Touches 1–2 files with a complete spec → `cheap`
 - Touches multiple files with integration concerns → `standard`
 - Requires design judgment or broad codebase understanding → `capable`
 
-Always pass an explicit `model` override per task in the subagent dispatch using the resolved value from the tier map. Do not parse, guess, or derive model name strings — use the exact strings from `models.json`.
+Always pass an explicit `model` override per task in the subagent dispatch using the resolved value from the tier map. Do not parse, guess, or derive model name strings — use the exact strings from `model-tiers.json`.
 
 ## Step 6b: Baseline test capture
 
