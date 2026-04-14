@@ -1,6 +1,6 @@
 ---
 name: execute-plan
-description: "Executes a structured plan file from .pi/plans/. Decomposes tasks into dependency-ordered waves and dispatches plan-executor subagents in parallel. Use when the user wants to execute an existing plan."
+description: "Executes a structured plan file from .pi/plans/. Decomposes tasks into dependency-ordered waves and dispatches coder subagents in parallel. Use when the user wants to execute an existing plan."
 ---
 
 # Execute Plan
@@ -229,20 +229,20 @@ This confirmation is asked once at the start, not per wave. If the user is on a 
 For each wave, dispatch all tasks in parallel:
 ```
 subagent { tasks: [
-  { agent: "plan-executor", task: "<self-contained prompt>", model: "<resolved>" },
-  { agent: "plan-executor", task: "<self-contained prompt>", model: "<resolved>" },
+  { agent: "coder", task: "<self-contained prompt>", model: "<resolved>" },
+  { agent: "coder", task: "<self-contained prompt>", model: "<resolved>" },
   ...
 ]}
 ```
 
 For sequential mode, dispatch one task at a time:
 ```
-subagent { agent: "plan-executor", task: "<self-contained prompt>", model: "<resolved>" }
+subagent { agent: "coder", task: "<self-contained prompt>", model: "<resolved>" }
 ```
 
 ### Assembling worker prompts
 
-Read [implementer-prompt.md](implementer-prompt.md) in this directory once (before the first wave). For each task, fill the placeholders:
+Read [execute-task-prompt.md](execute-task-prompt.md) in this directory once (before the first wave). For each task, fill the placeholders:
 
 - `{TASK_SPEC}` — the full text of the task from the plan: task name, Files section, all checkbox steps, and acceptance criteria. Paste the complete text, do not summarize.
 - `{CONTEXT}` — where this task fits in the plan. Include:
@@ -269,7 +269,7 @@ Read [implementer-prompt.md](implementer-prompt.md) in this directory once (befo
 
   If TDD is disabled, fill `{TDD_BLOCK}` with an empty string.
 
-The filled template becomes the task prompt for the `plan-executor` subagent. The template already includes self-review instructions, escalation guidance, code organization guidance, and the report format — do not add these separately.
+The filled template becomes the task prompt for the `coder` subagent. The template already includes self-review instructions, escalation guidance, code organization guidance, and the report format — do not add these separately.
 
 ## Step 8: Handle worker status codes
 
@@ -394,16 +394,16 @@ After all waves complete successfully (and if the user chose review in Step 3):
    - Working directory = current workspace path
    - Review output path = `.pi/reviews/<plan-name>-code-review` (derived from plan filename, e.g., plan `2026-04-06-my-feature.md` → `.pi/reviews/2026-04-06-my-feature-code-review`)
 
-2. **Invoke the `review-loop` skill** with the gathered inputs.
+2. **Invoke the `refine-code` skill** with the gathered inputs.
 
 3. **Handle the result:**
 
    **`clean`:** Include the review summary (iteration count, review file path) in the Step 13 completion report. Proceed to Step 13.
 
    **`max_iterations_reached`:** Present remaining findings to the user. Offer:
-   - **(a) Continue iterating** — re-invoke `review-loop` (budget resets, new era)
-   - **(b) Proceed** — move to Step 13 with known issues noted in the summary
-   - **(c) Stop** — halt execution, report partial progress (Step 11)
+   - **(a) Keep iterating** — re-invoke refine-code, budget resets
+   - **(b) Proceed with issues** — continue to completion with findings noted
+   - **(c) Stop execution** — skip completion, report partial progress
 
    **Review disabled** (user chose to disable in Step 3): Skip directly to Step 13.
 

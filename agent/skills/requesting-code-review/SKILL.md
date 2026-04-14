@@ -31,7 +31,7 @@ HEAD_SHA=$(git rev-parse HEAD)
 
 ### 2. Read the prompt template and fill placeholders
 
-Read [code-reviewer.md](code-reviewer.md) in this directory.
+Read [review-code-prompt.md](review-code-prompt.md) in this directory.
 
 Fill these placeholders:
 - `{WHAT_WAS_IMPLEMENTED}` — what was built
@@ -47,7 +47,7 @@ Use pi's `subagent` tool to dispatch a `code-reviewer` agent:
 ```
 subagent {
   agent: "code-reviewer",
-  task: "<filled code-reviewer.md template>",
+  task: "<filled review-code-prompt.md template>",
   model: "<capable-tier model>"
 }
 ```
@@ -74,7 +74,7 @@ tests or code. Don't implement suggestions that break things.
 BASE_SHA=$(git rev-parse HEAD~15)  # SHA before execution started
 HEAD_SHA=$(git rev-parse HEAD)
 
-[Read code-reviewer.md, fill placeholders]
+[Read review-code-prompt.md, fill placeholders]
 [Dispatch subagent with filled template]
 
 [Reviewer returns]:

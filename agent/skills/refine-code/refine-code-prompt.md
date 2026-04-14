@@ -34,7 +34,7 @@ Use these model tiers for dispatch:
 
 ### Iteration 1: Full Review
 
-1. **Read the review template** at `~/.pi/agent/skills/requesting-code-review/code-reviewer.md`.
+1. **Read the review template** at `~/.pi/agent/skills/requesting-code-review/review-code-prompt.md`.
 
 2. **Fill placeholders** for a full review:
    - `{WHAT_WAS_IMPLEMENTED}` — the Plan Goal above
