@@ -38,6 +38,12 @@ Fallback is triggered by dispatch failure, not preemptively checked. On fallback
 Falling back to same-provider review (<capable model>).
 ```
 
+### Dispatch resolution
+
+After resolving the model for each role, also resolve its dispatch target using the `dispatch` map from `model-tiers.json`. See execute-plan Step 6 for the full resolution algorithm. In brief: extract the provider prefix (substring before the first `/`), look it up in `dispatch`, default to `"pi"` if absent.
+
+When falling back from `crossProvider.capable` to `capable`, re-resolve the dispatch target — it will change if the providers differ (e.g., `openai-codex` dispatches to `"pi"`, `anthropic` dispatches to `"claude"`).
+
 If `model-tiers.json` doesn't exist or is unreadable, stop with: "generate-plan requires `~/.pi/agent/model-tiers.json` — see model matrix configuration."
 
 ## Step 3: Generate the plan
@@ -50,7 +56,7 @@ If `model-tiers.json` doesn't exist or is unreadable, stop with: "generate-plan 
    - `{SOURCE_TODO}` — `Source todo: TODO-<id>` if input was a todo, empty string otherwise
 3. Dispatch `planner` agent synchronously:
    ```
-   subagent { agent: "planner", task: "<filled template>", model: "<capable from model-tiers.json>" }
+   subagent { agent: "planner", task: "<filled template>", model: "<capable from model-tiers.json>", dispatch: "<dispatch for capable>" }
    ```
 
 ## Step 4: Review-edit loop
@@ -68,10 +74,11 @@ If `model-tiers.json` doesn't exist or is unreadable, stop with: "generate-plan 
    subagent {
      agent: "plan-reviewer",
      task: "<filled review-plan-prompt.md>",
-     model: "<crossProvider.capable from model-tiers.json>"
+     model: "<crossProvider.capable from model-tiers.json>",
+     dispatch: "<dispatch for crossProvider.capable>"
    }
    ```
-   If the cross-provider dispatch fails, retry with `capable` from model-tiers.json and notify the user (see Step 2 fallback message).
+   If the cross-provider dispatch fails, retry with `capable` from model-tiers.json (re-resolving dispatch for the fallback model) and notify the user (see Step 2 fallback message).
 6. Write review output to the versioned path. Create `.pi/plans/reviews/` if it doesn't exist.
 
 ### 4.2: Assess review
@@ -107,7 +114,7 @@ Read the review output file. Parse for the Status line (`**[Approved]**` or `**[
    - `{OUTPUT_PATH}` — path to the current plan file (same path used in Step 3)
 3. Dispatch `planner` with the filled template:
    ```
-   subagent { agent: "planner", task: "<filled edit-plan-prompt.md>", model: "<capable from model-tiers.json>" }
+   subagent { agent: "planner", task: "<filled edit-plan-prompt.md>", model: "<capable from model-tiers.json>", dispatch: "<dispatch for capable>" }
    ```
 4. The planner writes the edited plan back to the same path (overwriting the previous version).
 

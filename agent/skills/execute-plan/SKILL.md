@@ -176,6 +176,18 @@ If a task has no tier specified, apply this rubric:
 
 Always pass an explicit `model` override per task in the subagent dispatch using the resolved value from the tier map. Do not parse, guess, or derive model name strings — use the exact strings from `model-tiers.json`.
 
+### Dispatch resolution
+
+After resolving each task's model, also resolve its dispatch target:
+
+1. Extract the provider prefix — the substring before the first `/` in the resolved model string (e.g., `anthropic/claude-opus-4-6` → `anthropic`)
+2. Look up the prefix in the `dispatch` object from `model-tiers.json` (e.g., `dispatch["anthropic"]` → `"claude"`)
+3. Use the mapped value as the `dispatch` property in the subagent call
+
+If `model-tiers.json` has no `dispatch` key, or the provider prefix has no entry in the dispatch map, default to `"pi"`.
+
+Always pass `dispatch` explicitly on every subagent call, even when it resolves to `"pi"`.
+
 ## Step 6b: Baseline test capture
 
 **Skip if:** Integration test is disabled (Step 3 settings) or no test command is available.
@@ -229,15 +241,15 @@ This confirmation is asked once at the start, not per wave. If the user is on a 
 For each wave, dispatch all tasks in parallel:
 ```
 subagent { tasks: [
-  { agent: "coder", task: "<self-contained prompt>", model: "<resolved>" },
-  { agent: "coder", task: "<self-contained prompt>", model: "<resolved>" },
+  { agent: "coder", task: "<self-contained prompt>", model: "<resolved>", dispatch: "<resolved>" },
+  { agent: "coder", task: "<self-contained prompt>", model: "<resolved>", dispatch: "<resolved>" },
   ...
 ]}
 ```
 
 For sequential mode, dispatch one task at a time:
 ```
-subagent { agent: "coder", task: "<self-contained prompt>", model: "<resolved>" }
+subagent { agent: "coder", task: "<self-contained prompt>", model: "<resolved>", dispatch: "<resolved>" }
 ```
 
 ### Assembling worker prompts
