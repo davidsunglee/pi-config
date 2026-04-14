@@ -27,10 +27,10 @@ Model assignments:
 
 | Role | Tier |
 |------|------|
-| Plan generation | `modelTiers.capable` |
-| Plan review (primary) | `modelTiers.crossProvider.capable` |
-| Plan review (fallback) | `modelTiers.capable` |
-| Plan editing | `modelTiers.capable` |
+| Plan generation | `capable` from models.json |
+| Plan review (primary) | `crossProvider.capable` from models.json |
+| Plan review (fallback) | `capable` from models.json |
+| Plan editing | `capable` from models.json |
 
 Fallback is triggered by dispatch failure, not preemptively checked. On fallback, notify the user:
 ```
@@ -50,7 +50,7 @@ If `models.json` doesn't exist or is unreadable, stop with: "generate-plan requi
    - `{SOURCE_TODO}` — `Source todo: TODO-<id>` if input was a todo, empty string otherwise
 3. Dispatch `planner` agent synchronously:
    ```
-   subagent { agent: "planner", task: "<filled template>", model: "<modelTiers.capable>" }
+   subagent { agent: "planner", task: "<filled template>", model: "<capable from models.json>" }
    ```
 
 ## Step 4: Review-edit loop
@@ -68,10 +68,10 @@ If `models.json` doesn't exist or is unreadable, stop with: "generate-plan requi
    subagent {
      agent: "plan-reviewer",
      task: "<filled review-plan-prompt.md>",
-     model: "<modelTiers.crossProvider.capable>"
+     model: "<crossProvider.capable from models.json>"
    }
    ```
-   If the cross-provider dispatch fails, retry with `modelTiers.capable` and notify the user (see Step 2 fallback message).
+   If the cross-provider dispatch fails, retry with `capable` from models.json and notify the user (see Step 2 fallback message).
 6. Write review output to the versioned path. Create `.pi/plans/reviews/` if it doesn't exist.
 
 ### 4.2: Assess review
@@ -107,7 +107,7 @@ Read the review output file. Parse for the Status line (`**[Approved]**` or `**[
    - `{OUTPUT_PATH}` — path to the current plan file (same path used in Step 3)
 3. Dispatch `planner` with the filled template:
    ```
-   subagent { agent: "planner", task: "<filled edit-plan-prompt.md>", model: "<modelTiers.capable>" }
+   subagent { agent: "planner", task: "<filled edit-plan-prompt.md>", model: "<capable from models.json>" }
    ```
 4. The planner writes the edited plan back to the same path (overwriting the previous version).
 
