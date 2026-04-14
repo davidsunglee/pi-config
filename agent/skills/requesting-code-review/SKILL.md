@@ -39,6 +39,7 @@ Fill these placeholders:
 - `{BASE_SHA}` — starting commit
 - `{HEAD_SHA}` — ending commit
 - `{DESCRIPTION}` — brief summary of changes
+- `{RE_REVIEW_BLOCK}` — empty string (standalone reviews are always full reviews, not re-reviews)
 
 ### 3. Dispatch the subagent
 

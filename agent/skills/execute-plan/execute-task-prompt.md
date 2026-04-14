@@ -1,4 +1,4 @@
-# Implementer Prompt
+# Execute Task Prompt
 
 Prompt template dispatched to worker agents for a single plan task. Fill placeholders before sending.
 
