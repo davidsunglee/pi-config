@@ -1,9 +1,9 @@
 ---
 name: generate-plan
-description: "Generates a structured implementation plan from a todo or spec file. Dispatches the plan-generator subagent for deep codebase analysis. Use when the user wants to plan work before executing it."
+description: "Generates a structured implementation plan from a todo or spec file. Dispatches the planner subagent for deep codebase analysis, then runs an iterative review-edit loop. Use when the user wants to plan work before executing it."
 ---
 
-Dispatch the `plan-generator` subagent to analyze the codebase and produce a structured plan file in `.pi/plans/`.
+Dispatch the `planner` subagent to analyze the codebase and produce a structured plan file in `.pi/plans/`, then review and refine the plan through an iterative review-edit loop.
 
 ## Step 1: Determine the input source
 
@@ -13,144 +13,131 @@ The user will provide one of three input sources:
 2. **File path** (e.g., a spec, RFC, or design doc) — use the `read` tool to load the file contents. Do NOT pass just the path; include the actual file contents in the prompt.
 3. **Freeform description** — use the text as-is.
 
-## Step 2: Assemble the task prompt for the subagent
+The resolved text becomes `{TASK_DESCRIPTION}`. If the input is a todo, also capture the ID for `{SOURCE_TODO}`.
 
-Build a prompt string that includes:
-- The full task description (todo body, file contents, or freeform text)
-- The current working directory / repo name for context
-- An instruction to write the plan to `.pi/plans/yyyy-MM-dd-<short-description>.md` (the subagent will create the directory if it doesn't exist)
-- If the input source is a todo: include `Source todo: TODO-<id>` on its own line after the task description. This tells the plan-generator to add a `**Source:** TODO-<id>` field to the plan header.
+## Step 2: Resolve model tiers
 
-Example prompt structure (when source is a todo):
-```
-Analyze the codebase at <cwd> and produce a structured implementation plan.
+Read the model matrix from `~/.pi/agent/models.json`:
 
-Task (from TODO-<id>):
-<full todo body>
-
-Source todo: TODO-<id>
-
-Write the plan to .pi/plans/<yyyy-MM-dd-short-description>.md.
+```bash
+cat ~/.pi/agent/models.json | python3 -c "import sys,json; print(json.dumps(json.load(sys.stdin), indent=2))"
 ```
 
-Example prompt structure (when source is a file or freeform):
+Model assignments:
+
+| Role | Tier |
+|------|------|
+| Plan generation | `modelTiers.capable` |
+| Plan review (primary) | `modelTiers.crossProvider.capable` |
+| Plan review (fallback) | `modelTiers.capable` |
+| Plan editing | `modelTiers.capable` |
+
+Fallback is triggered by dispatch failure, not preemptively checked. On fallback, notify the user:
 ```
-Analyze the codebase at <cwd> and produce a structured implementation plan.
-
-Task:
-<full task description / file contents / freeform text>
-
-Write the plan to .pi/plans/<yyyy-MM-dd-short-description>.md.
-```
-
-## Step 3: Dispatch the subagent
-
-Run the `plan-generator` subagent synchronously:
-```
-subagent { agent: "plan-generator", task: "<assembled prompt>" }
+⚠️ Cross-provider plan review failed (<crossProvider.capable model>).
+Falling back to same-provider review (<capable model>).
 ```
 
-**Async option:** If the analysis will be long-running and the user wants to continue other work, dispatch asynchronously:
-```
-subagent { agent: "plan-generator", task: "<assembled prompt>", async: true }
-```
-If run async, tell the user they can check progress with `subagent_status`.
+If `models.json` doesn't exist or is unreadable, stop with: "generate-plan requires `~/.pi/agent/models.json` — see model matrix configuration."
 
-**Note:** Async dispatch skips the review step (Step 3.5) since the plan isn't available yet. When the plan-generator completes, suggest the user run plan review by re-invoking this skill with the generated plan path. The user can opt out, but review is recommended.
+## Step 3: Generate the plan
 
-## Step 3.5: Review the generated plan
+1. Read [generate-plan-prompt.md](generate-plan-prompt.md) in this directory.
+2. Fill placeholders:
+   - `{TASK_DESCRIPTION}` — resolved text from Step 1
+   - `{WORKING_DIR}` — absolute path to cwd
+   - `{OUTPUT_PATH}` — `.pi/plans/yyyy-MM-dd-<short-description>.md` (derive short description from task)
+   - `{SOURCE_TODO}` — `Source todo: TODO-<id>` if input was a todo, empty string otherwise
+3. Dispatch `planner` agent synchronously:
+   ```
+   subagent { agent: "planner", task: "<filled template>", model: "<modelTiers.capable>" }
+   ```
 
-After the plan-generator completes, dispatch a reviewer to check for structural issues before presenting the plan to the user.
+## Step 4: Review-edit loop
 
-### 1. Read the generated plan
+### 4.1: Review the plan
 
-Read the plan file that the plan-generator just wrote (the path from its output, e.g., `.pi/plans/2026-04-06-my-feature.md`).
+1. Read the generated plan file (path from planner's output).
+2. Read [review-plan-prompt.md](review-plan-prompt.md) in this directory.
+3. Fill placeholders:
+   - `{PLAN_CONTENTS}` — full plan file contents
+   - `{ORIGINAL_SPEC}` — original task description from Step 1
+4. Determine review output path from the plan filename. For a plan at `.pi/plans/2026-04-13-my-feature.md`, the review path is `.pi/plans/reviews/2026-04-13-my-feature-plan-review-v1.md`.
+5. Dispatch `plan-reviewer`:
+   ```
+   subagent {
+     agent: "plan-reviewer",
+     task: "<filled review-plan-prompt.md>",
+     model: "<modelTiers.crossProvider.capable>"
+   }
+   ```
+   If the cross-provider dispatch fails, retry with `modelTiers.capable` and notify the user (see Step 2 fallback message).
+6. Write review output to the versioned path. Create `.pi/plans/reviews/` if it doesn't exist.
 
-### 2. Read the prompt template and fill placeholders
+### 4.2: Assess review
 
-Read [plan-reviewer.md](plan-reviewer.md) in this directory.
+Read the review output file. Parse for the Status line (`**[Approved]**` or `**[Issues Found]**`) and all issues (Error / Warning / Suggestion severity).
 
-Fill these placeholders:
-- `{PLAN_CONTENTS}` — the full contents of the generated plan file
-- `{ORIGINAL_SPEC}` — the original task description (todo body, file contents, or freeform text from Step 1)
+**If Approved (no errors):**
+- If warnings or suggestions exist, append them as a `## Review Notes` section at the end of the plan file:
+  ```markdown
+  ## Review Notes
 
-### 3. Select the review model
+  _Added by plan reviewer — informational, not blocking._
 
-Read `modelTiers` from `~/.pi/agent/settings.json` (use `cat` + `python3 -c` as in execute-plan Step 6).
+  ### Warnings
+  - **Task N**: <full warning text from review, including "What", "Why it matters", and "Recommendation">
 
-Use `modelTiers.crossProvider.capable` for cross-provider review.
+  ### Suggestions
+  - **Task N**: <full suggestion text from review, including "What", "Why it matters", and "Recommendation">
+  ```
+  The review file at `.pi/plans/reviews/` is kept for reference (do not delete it).
+- Proceed to Step 5.
 
-**Fallback:** If the dispatch fails (model unavailable, provider error), retry with `modelTiers.capable` (same provider) and notify the user:
-```
-⚠️ Cross-provider plan review failed (<modelTiers.crossProvider.capable>).
-Falling back to same-provider review (<modelTiers.capable>).
-```
+**If Issues Found (errors):**
+- Continue to Step 4.3.
 
-### 4. Dispatch the reviewer
+### 4.3: Edit the plan
 
-Determine the review output path from the plan filename. For a plan at `.pi/plans/2026-04-06-my-feature.md`, the review path is `.pi/plans/reviews/2026-04-06-my-feature-review.md`.
+1. Read [edit-plan-prompt.md](edit-plan-prompt.md) in this directory.
+2. Fill placeholders:
+   - `{PLAN_CONTENTS}` — current plan file contents
+   - `{REVIEW_FINDINGS}` — full text of all error-severity findings from the review
+   - `{ORIGINAL_SPEC}` — original task description from Step 1
+3. Dispatch `planner` with the filled template:
+   ```
+   subagent { agent: "planner", task: "<filled edit-plan-prompt.md>", model: "<modelTiers.capable>" }
+   ```
+4. The planner writes the edited plan back to the same path (overwriting the previous version).
 
-```
-subagent {
-  agent: "plan-executor",
-  task: "<filled plan-reviewer.md template>",
-  model: "<modelTiers.crossProvider.capable>",
-  output: ".pi/plans/reviews/<plan-name>-review.md"
-}
-```
+### 4.4: Iterate or escalate
 
-If the cross-provider model failed and fallback is in effect, use `modelTiers.capable` instead. The `output` path remains the same regardless of which model is used.
+Loop back to Step 4.1 (re-review the edited plan). Max 3 iterations per era. Each iteration overwrites the current versioned review file.
 
-### 5. Handle reviewer findings
+**On convergence (Approved within budget):** proceed to Step 5.
 
-Read the full review from the output file:
+**On budget exhaustion (3 iterations, errors persist):**
 
-```
-Read .pi/plans/reviews/<plan-name>-review.md
-```
+Present all remaining findings to the user and offer:
+- **(a) Keep iterating** — reset budget, update plan version
+- **(b) Proceed with issues** — report plan with findings noted
 
-Parse the review file contents for the Status line (`[Approved]` or `[Issues Found]`) and all issues (errors, warnings, suggestions with task numbers and descriptions).
+If **(a):** increment era (v1 → v2), create a new versioned review file (e.g., `-plan-review-v2.md`), loop back to Step 4.1 with fresh budget.
 
-**If errors found (`[Issues Found]` with any Error-severity issues):**
-- Present all findings from the review file (full text of each error, warning, and suggestion) to the user.
-- The user decides:
-  - **Re-generate:** Re-run Step 3 with the reviewer findings appended to the plan-generator prompt (so the generator can address them). Then re-run Step 3.5. **Re-generate at most once.** If errors persist after one re-generation, present the plan to the user with all findings and let them manually fix or proceed as-is.
-  - **Manually fix:** The user edits the plan file themselves. Skip to Step 4.
+If **(b):** proceed to Step 5 with outstanding findings noted.
 
-**If only warnings/suggestions (no errors):**
-- Append the findings as a `## Review Notes` section at the end of the plan file, using the **full text** of each finding from the review file:
+## Step 5: Report result
 
-```markdown
-## Review Notes
-
-_Added by plan reviewer — informational, not blocking._
-
-### Warnings
-- **Task N**: <full warning text from review, including "What", "Why it matters", and "Recommendation">
-
-### Suggestions
-- **Task N**: <full suggestion text from review, including "What", "Why it matters", and "Recommendation">
-```
-
-The review file at `.pi/plans/reviews/<plan-name>-review.md` is kept for reference (do not delete it).
-
-- Continue to Step 4.
-
-**If clean (`[Approved]` with no issues):**
-- Continue to Step 4 with no changes to the plan file.
-
-## Step 4: Report the result
-
-After the review step completes:
-- Show the path to the generated plan file (e.g., `.pi/plans/2026-04-06-my-feature.md`)
+- Show the path to the generated plan file (e.g., `.pi/plans/2026-04-13-my-feature.md`)
 - Report the review status:
-  - **Approved:** "Plan reviewed — no issues found."
-  - **Approved with notes:** "Plan reviewed — N warnings/suggestions appended as Review Notes."
-  - **Errors found:** Already handled in Step 3.5 (user chose to re-generate or manually fix).
-- Suggest running it with the `execute-plan` skill: `/skill:execute-plan`
+  - **Clean:** "Plan reviewed — no issues found."
+  - **Clean with notes:** "Plan reviewed — N warnings/suggestions appended as Review Notes."
+  - **Proceeded with issues:** "Plan reviewed — N outstanding issues noted. Review: `<review-path>`"
+- Suggest running it with the `execute-plan` skill.
 
 ## Edge cases
 
 - **Todo ID provided:** Read the todo body first with the `todo` tool, include the full body text in the prompt — do not pass only the ID.
 - **File path provided:** Read the file first with the `read` tool, include its full contents in the prompt — do not pass only the path.
 - **`.pi/plans/` missing:** The subagent handles creating the directory; no action needed from the main agent.
+- **`.pi/plans/reviews/` missing:** Create it before writing the review file.
