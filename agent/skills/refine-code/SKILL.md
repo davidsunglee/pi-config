@@ -28,7 +28,7 @@ If `BASE_SHA` or `HEAD_SHA` is not provided, stop with an error — the skill ca
 ## Step 2: Read model matrix
 
 ```bash
-cat ~/.pi/agent/models.json | python3 -c "import sys,json; print(json.dumps(json.load(sys.stdin), indent=2))"
+cat ~/.pi/agent/model-tiers.json | python3 -c "import sys,json; print(json.dumps(json.load(sys.stdin), indent=2))"
 ```
 
 The model matrix provides tier mappings used by the coordinator:
@@ -36,7 +36,7 @@ The model matrix provides tier mappings used by the coordinator:
 - `standard` — hybrid re-reviews, coordinator model
 - `capable` — remediator
 
-If the file doesn't exist or is unreadable, stop with: "refine-code requires ~/.pi/agent/models.json — see model matrix configuration."
+If the file doesn't exist or is unreadable, stop with: "refine-code requires ~/.pi/agent/model-tiers.json — see model matrix configuration."
 
 ## Step 3: Assemble coordinator prompt
 

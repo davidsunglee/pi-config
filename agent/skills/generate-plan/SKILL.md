@@ -17,20 +17,20 @@ The resolved text becomes `{TASK_DESCRIPTION}`. If the input is a todo, also cap
 
 ## Step 2: Resolve model tiers
 
-Read the model matrix from `~/.pi/agent/models.json`:
+Read the model matrix from `~/.pi/agent/model-tiers.json`:
 
 ```bash
-cat ~/.pi/agent/models.json | python3 -c "import sys,json; print(json.dumps(json.load(sys.stdin), indent=2))"
+cat ~/.pi/agent/model-tiers.json | python3 -c "import sys,json; print(json.dumps(json.load(sys.stdin), indent=2))"
 ```
 
 Model assignments:
 
 | Role | Tier |
 |------|------|
-| Plan generation | `capable` from models.json |
-| Plan review (primary) | `crossProvider.capable` from models.json |
-| Plan review (fallback) | `capable` from models.json |
-| Plan editing | `capable` from models.json |
+| Plan generation | `capable` from model-tiers.json |
+| Plan review (primary) | `crossProvider.capable` from model-tiers.json |
+| Plan review (fallback) | `capable` from model-tiers.json |
+| Plan editing | `capable` from model-tiers.json |
 
 Fallback is triggered by dispatch failure, not preemptively checked. On fallback, notify the user:
 ```
@@ -38,7 +38,7 @@ Fallback is triggered by dispatch failure, not preemptively checked. On fallback
 Falling back to same-provider review (<capable model>).
 ```
 
-If `models.json` doesn't exist or is unreadable, stop with: "generate-plan requires `~/.pi/agent/models.json` — see model matrix configuration."
+If `model-tiers.json` doesn't exist or is unreadable, stop with: "generate-plan requires `~/.pi/agent/model-tiers.json` — see model matrix configuration."
 
 ## Step 3: Generate the plan
 
@@ -50,7 +50,7 @@ If `models.json` doesn't exist or is unreadable, stop with: "generate-plan requi
    - `{SOURCE_TODO}` — `Source todo: TODO-<id>` if input was a todo, empty string otherwise
 3. Dispatch `planner` agent synchronously:
    ```
-   subagent { agent: "planner", task: "<filled template>", model: "<capable from models.json>" }
+   subagent { agent: "planner", task: "<filled template>", model: "<capable from model-tiers.json>" }
    ```
 
 ## Step 4: Review-edit loop
@@ -68,10 +68,10 @@ If `models.json` doesn't exist or is unreadable, stop with: "generate-plan requi
    subagent {
      agent: "plan-reviewer",
      task: "<filled review-plan-prompt.md>",
-     model: "<crossProvider.capable from models.json>"
+     model: "<crossProvider.capable from model-tiers.json>"
    }
    ```
-   If the cross-provider dispatch fails, retry with `capable` from models.json and notify the user (see Step 2 fallback message).
+   If the cross-provider dispatch fails, retry with `capable` from model-tiers.json and notify the user (see Step 2 fallback message).
 6. Write review output to the versioned path. Create `.pi/plans/reviews/` if it doesn't exist.
 
 ### 4.2: Assess review
@@ -107,7 +107,7 @@ Read the review output file. Parse for the Status line (`**[Approved]**` or `**[
    - `{OUTPUT_PATH}` — path to the current plan file (same path used in Step 3)
 3. Dispatch `planner` with the filled template:
    ```
-   subagent { agent: "planner", task: "<filled edit-plan-prompt.md>", model: "<capable from models.json>" }
+   subagent { agent: "planner", task: "<filled edit-plan-prompt.md>", model: "<capable from model-tiers.json>" }
    ```
 4. The planner writes the edited plan back to the same path (overwriting the previous version).
 
