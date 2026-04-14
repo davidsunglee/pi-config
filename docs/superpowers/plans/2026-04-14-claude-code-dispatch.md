@@ -50,7 +50,7 @@ export interface AgentConfig {
     tools?: string[];
     model?: string;
     dispatch?: string;         // "pi" | "claude" — default: "pi"
-    permissionMode?: string;   // "auto" | "bypassPermissions" | "plan" — default: "auto"
+    permissionMode?: string;   // "bypassPermissions" | "auto" | "plan" — default: "bypassPermissions"
     systemPrompt: string;
     source: "user" | "project";
     filePath: string;
@@ -87,12 +87,12 @@ name: test-agent
 description: Test agent with claude dispatch
 model: claude-sonnet-4-6
 dispatch: claude
-permissionMode: auto
+permissionMode: bypassPermissions
 ---
 System prompt here.
 ```
 
-produces an `AgentConfig` with `dispatch: "claude"` and `permissionMode: "auto"`.
+produces an `AgentConfig` with `dispatch: "claude"` and `permissionMode: "bypassPermissions"`.
 
 - [ ] **Step 4: Commit**
 
@@ -188,25 +188,25 @@ describe("buildClaudeArgs", () => {
         const result = buildClaudeArgs({
             task: "Do something",
             model: "anthropic/claude-sonnet-4-6",
-            permissionMode: "auto",
+            permissionMode: "bypassPermissions",
         });
         assert.deepEqual(result.args, [
             "-p",
             "--output-format", "json",
             "--no-session-persistence",
             "--model", "claude-sonnet-4-6",
-            "--permission-mode", "auto",
+            "--permission-mode", "bypassPermissions",
             "Do something",
         ]);
         assert.equal(result.tempDir, undefined);
     });
 
-    it("defaults permissionMode to auto", () => {
+    it("defaults permissionMode to bypassPermissions", () => {
         const result = buildClaudeArgs({
             task: "Do something",
             model: "anthropic/claude-opus-4-6",
         });
-        assert.ok(result.args.includes("auto"));
+        assert.ok(result.args.includes("bypassPermissions"));
     });
 
     it("writes system prompt to temp file", () => {
@@ -267,7 +267,7 @@ export function buildClaudeArgs(input: BuildClaudeArgsInput): BuildClaudeArgsRes
         args.push("--model", nativeModel);
     }
 
-    args.push("--permission-mode", input.permissionMode || "auto");
+    args.push("--permission-mode", input.permissionMode || "bypassPermissions");
 
     if (input.systemPrompt) {
         tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-claude-dispatch-"));
@@ -544,7 +544,7 @@ After the agent is found, resolve:
 
 ```typescript
 const effectiveDispatch = dispatch || agent.dispatch || "pi";
-const effectivePermissionMode = permissionMode || agent.permissionMode || "auto";
+const effectivePermissionMode = permissionMode || agent.permissionMode || "bypassPermissions";
 ```
 
 - [ ] **Step 4: Branch on dispatch for arg building and process spawning**
@@ -651,7 +651,7 @@ const SubagentParams = Type.Object({
     ),
     cwd: Type.Optional(Type.String({ description: "Working directory for the agent process (single mode)" })),
     dispatch: Type.Optional(Type.String({ description: 'CLI to spawn: "pi" (default) or "claude"' })),
-    permissionMode: Type.Optional(Type.String({ description: 'Claude Code permission mode: "auto" (default), "bypassPermissions", or "plan"' })),
+    permissionMode: Type.Optional(Type.String({ description: 'Claude Code permission mode: "bypassPermissions" (default), "auto", or "plan"' })),
 });
 ```
 
