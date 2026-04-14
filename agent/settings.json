@@ -21,14 +21,5 @@
     "openai-codex/gpt-5.4-mini",
     "google-gemini-cli/gemini-3.1-pro-preview",
     "google-gemini-cli/gemini-3-flash-preview"
-  ],
-  "modelTiers": {
-    "capable": "openai-codex/gpt-5.4",
-    "standard": "anthropic/claude-sonnet-4-6",
-    "cheap": "openai-codex/gpt-5.4-mini",
-    "crossProvider": {
-      "capable": "openai-codex/gpt-5.4",
-      "standard": "anthropic/claude-sonnet-4-6"
-    }
-  }
+  ]
 }
