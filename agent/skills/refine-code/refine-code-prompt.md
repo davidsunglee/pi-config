@@ -41,7 +41,7 @@ Use these model tiers for dispatch:
    - `{PLAN_OR_REQUIREMENTS}` — the Requirements/Plan above
    - `{BASE_SHA}` — `{BASE_SHA}` from this prompt
    - `{HEAD_SHA}` — `{HEAD_SHA}` from this prompt
-   - `{DESCRIPTION}` — "Refine-code: full review"
+   - `{DESCRIPTION}` — the Plan Goal above (same as `{WHAT_WAS_IMPLEMENTED}`)
    - `{RE_REVIEW_BLOCK}` — empty string (first pass)
 
 3. **Dispatch `code-reviewer`** with model `crossProvider.capable` from the model matrix:
@@ -103,7 +103,7 @@ Use these model tiers for dispatch:
    - `{BASE_SHA}` — the PREV_HEAD (only review remediation diff)
    - `{HEAD_SHA}` — the NEW_HEAD
    - `{RE_REVIEW_BLOCK}` — the filled re-review block content
-   - `{DESCRIPTION}` — "Refine-code: hybrid re-review (iteration N)"
+   - `{DESCRIPTION}` — the Plan Goal above (same as iteration 1)
 
 5. **Dispatch `code-reviewer`** with model `standard` from the model matrix (hybrid re-reviews are scoped and cheaper).
 
@@ -119,7 +119,7 @@ When a review pass finds no Critical/Important issues (hybrid reviews converge):
    - `{BASE_SHA}` — original BASE_SHA from this prompt (pre-implementation)
    - `{HEAD_SHA}` — current HEAD (includes all remediations)
    - `{RE_REVIEW_BLOCK}` — empty string (full review, not re-review)
-   - `{DESCRIPTION}` — "Refine-code: final verification"
+   - `{DESCRIPTION}` — the Plan Goal above (same as iteration 1)
 
 2. **If clean** (no Critical/Important issues):
    - Write final review to the versioned file

@@ -165,16 +165,16 @@ Map each task's model recommendation to the tier map:
 
 | Task recommendation | Model to use |
 |---------------------|-------------|
-| `capable` | `modelTiers.capable` |
-| `standard` | `modelTiers.standard` |
-| `cheap` | `modelTiers.cheap` |
+| `capable` | `capable` from models.json |
+| `standard` | `standard` from models.json |
+| `cheap` | `cheap` from models.json |
 
 If a task has no tier specified, apply this rubric:
 - Touches 1–2 files with a complete spec → `cheap`
 - Touches multiple files with integration concerns → `standard`
 - Requires design judgment or broad codebase understanding → `capable`
 
-Always pass an explicit `model` override per task in the subagent dispatch using the resolved value from the tier map. Do not parse, guess, or derive model name strings — use the exact strings from `modelTiers`.
+Always pass an explicit `model` override per task in the subagent dispatch using the resolved value from the tier map. Do not parse, guess, or derive model name strings — use the exact strings from `models.json`.
 
 ## Step 6b: Baseline test capture
 
@@ -222,7 +222,7 @@ Continue? (y/n)
 ```
 
 - **If `y`:** Proceed with commits after each wave as configured.
-- **If `n`:** Disable commit-per-wave for this entire execution (proceed without checkpoints). Do not ask again.
+- **If `n`:** Cancel execution. The user should create a feature branch or worktree first.
 
 This confirmation is asked once at the start, not per wave. If the user is on a feature branch or in a worktree, skip this check entirely — commits on feature branches are expected.
 
@@ -296,7 +296,7 @@ After verifying outputs yourself (above), the orchestrator's own acceptance crit
 
 ## Step 9b: Post-wave commit and integration tests
 
-After wave verification (Step 9) and spec review complete successfully for a wave, perform the following steps in order.
+After wave verification (Step 9) completes successfully for a wave, perform the following steps in order.
 
 ### 1. Commit wave changes
 

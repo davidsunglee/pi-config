@@ -10,19 +10,19 @@ The skill is top-level — usable standalone (manual sessions, hotfixes, PR clea
 
 Three new components:
 
-- **`review-loop` skill** — top-level skill defining the loop protocol. Invocable from any context with a git range and optional requirements.
-- **`code-reviewer` agent** — dedicated agent for reviewing diffs. Replaces the current pattern of dispatching `plan-executor` with the `code-reviewer.md` template.
-- **`remediation-coordinator` agent** — orchestrates the review-remediate cycle. Dispatched by the caller, drives the inner loop, reports back.
+- **`refine-code` skill** — top-level skill defining the loop protocol. Invocable from any context with a git range and optional requirements.
+- **`code-reviewer` agent** — dedicated agent for reviewing diffs. Replaces the current pattern of dispatching `coder` with the `code-reviewer.md` template.
+- **`code-refiner` agent** — orchestrates the review-remediate cycle. Dispatched by the caller, drives the inner loop, reports back.
 
-The remediator (the agent that fixes code) is `plan-executor` — fixing issues is executing a task.
+The remediator (the agent that fixes code) is `coder` — fixing issues is executing a task.
 
 ## Model Configuration
 
-Model selection uses `~/.pi/agent/models.json` (extracted from `settings.json`'s `modelTiers` — see TODO-a3f17c62 for the migration). The review-loop skill references model tiers by role, not by model name:
+Model selection uses `~/.pi/agent/models.json` (extracted from `settings.json`'s `modelTiers` — see TODO-a3f17c62 for the migration). The refine-code skill references model tiers by role, not by model name:
 
 - **`crossProvider.capable`** — first-pass full review, final verification review
-- **`modelTiers.standard`** — hybrid re-reviews (scoped, cheaper), remediation coordinator
-- **`modelTiers.capable`** — remediator (plan-executor fixing code)
+- **`standard`** — hybrid re-reviews (scoped, cheaper), remediation coordinator
+- **`capable`** — remediator (coder fixing code)
 
 ## Inputs
 
@@ -57,7 +57,7 @@ Provided by whoever invokes the skill:
    - Prefer smaller batches — remediation should be deliberate
    - Dispatch one batch at a time (sequential, not parallel)
 
-5. **Dispatch `plan-executor` as remediator** (model: `modelTiers.capable`)
+5. **Dispatch `coder` as remediator** (model: `capable`)
    - Task: fix the batched findings
    - Context: relevant review findings with file:line references, the plan/spec
    - Working dir: same as the original implementation
@@ -72,7 +72,7 @@ Provided by whoever invokes the skill:
 
 ### Iteration 2..N (Hybrid Re-Review)
 
-1. **Dispatch `code-reviewer`** (model: `modelTiers.standard`)
+1. **Dispatch `code-reviewer`** (model: `standard`)
    - Hybrid re-review mode: remediation diff only (`prev_HEAD..new_HEAD`)
    - Context includes: previous findings, what was claimed fixed, full plan
    - Job: verify fixes addressed the findings, check for regressions in the remediation diff, flag new issues
@@ -114,7 +114,7 @@ The caller decides:
 
 ## Coordinator Return Contract
 
-The `remediation-coordinator` reports back with:
+The `code-refiner` reports back with:
 
 ```
 STATUS: clean | max_iterations_reached
@@ -187,14 +187,14 @@ The unversioned path (`<plan>-code-review.md`) is always a copy of the latest ve
   - Full review (first pass): review entire diff
   - Hybrid re-review (subsequent passes): focus on remediation diff, verify fixes, check regressions
 
-### `agent/agents/remediation-coordinator.md`
+### `agent/agents/code-refiner.md`
 
 - Orchestrates the review-remediate cycle
-- Model: `modelTiers.standard` (coordinates, doesn't write code)
+- Model: `standard` (coordinates, doesn't write code)
 - Responsibilities:
   - Dispatch `code-reviewer` for each review pass
   - Assess findings and make batching judgment calls
-  - Dispatch `plan-executor` for remediation (one batch at a time, sequentially)
+  - Dispatch `coder` for remediation (one batch at a time, sequentially)
   - Commit per iteration with detailed messages
   - Manage the review file (overwrite review sections, append remediation log)
   - Handle convergence detection and budget tracking
@@ -202,9 +202,9 @@ The unversioned path (`<plan>-code-review.md`) is always a copy of the latest ve
 
 ## Prompt Templates
 
-### `review-loop/remediation-prompt.md`
+### `refine-code/refine-code-prompt.md`
 
-Template filled by the caller and dispatched to `remediation-coordinator`. Placeholders:
+Template filled by the caller and dispatched to `code-refiner`. Placeholders:
 
 - `{PLAN_GOAL}` — what was built
 - `{PLAN_CONTENTS}` — full plan/spec (optional; empty if no plan)
@@ -217,7 +217,7 @@ Template filled by the caller and dispatched to `remediation-coordinator`. Place
 
 Contains the full loop protocol so the coordinator is self-contained.
 
-### `review-loop/re-review-block.md`
+### `refine-code/review-fix-block.md`
 
 Content that the coordinator loads and inserts into the `{RE_REVIEW_BLOCK}` placeholder in `requesting-code-review/code-reviewer.md` for iteration 2+. On the first pass, `{RE_REVIEW_BLOCK}` is filled with an empty string.
 
@@ -244,7 +244,7 @@ This requires a full pass through `execute-plan/SKILL.md` to remove all no-git c
 - Step 3: remove "disabled (no git repo)" display states; remove checkpoint commit from settings (always on)
 - Step 7: remove "skip main-branch confirmation if not in git" conditional
 - Step 9b: remove "skip if not in a git repo" conditional for commits
-- Step 12: no fallback for missing git range (replaced entirely by review-loop invocation)
+- Step 12: no fallback for missing git range (replaced entirely by refine-code invocation)
 
 ### Simplified Settings (Step 3)
 
@@ -277,7 +277,7 @@ Customization sequence:
 The current 65 lines of template loading, placeholder filling, model selection, and fallback logic are replaced with:
 
 1. Gather inputs: `PRE_EXECUTION_SHA`, current HEAD, plan goal, plan contents, working dir, max iterations, model matrix
-2. Invoke `review-loop` skill
+2. Invoke `refine-code` skill
 3. Handle coordinator return:
    - `clean` → include review summary in completion report, proceed to Step 13
    - `max_iterations_reached` → present remaining findings, offer: (a) continue iterating, (b) proceed with known issues, (c) stop
@@ -295,10 +295,10 @@ Per-wave task verification is now orchestrator-only. After each wave, the orches
 | File | Purpose |
 |---|---|
 | `agent/agents/code-reviewer.md` | Agent definition — reviewing diffs for production readiness |
-| `agent/agents/remediation-coordinator.md` | Agent definition — orchestrates review-remediate loop |
-| `agent/skills/review-loop/SKILL.md` | Top-level skill — loop protocol |
-| `agent/skills/review-loop/remediation-prompt.md` | Template dispatched to remediation-coordinator |
-| `agent/skills/review-loop/re-review-block.md` | Conditional block for hybrid re-review passes |
+| `agent/agents/code-refiner.md` | Agent definition — orchestrates review-remediate loop |
+| `agent/skills/refine-code/SKILL.md` | Top-level skill — loop protocol |
+| `agent/skills/refine-code/refine-code-prompt.md` | Template dispatched to code-refiner |
+| `agent/skills/refine-code/review-fix-block.md` | Conditional block for hybrid re-review passes |
 
 ### Modified Files
 
