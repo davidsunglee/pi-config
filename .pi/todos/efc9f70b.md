@@ -1,8 +1,13 @@
 {
   "id": "efc9f70b",
   "title": "Add review-loop skill to replace fire-and-forget code review in execute-plan",
-  "tags": ["execute-plan", "code-review", "review-loop", "workflow"],
-  "status": "open",
+  "tags": [
+    "execute-plan",
+    "code-review",
+    "review-loop",
+    "workflow"
+  ],
+  "status": "closed",
   "created_at": "2026-04-13T20:00:00.000Z"
 }
 
