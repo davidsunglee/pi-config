@@ -136,7 +136,7 @@ When executing a plan on `main`, the workflow defaults to creating a **git workt
 
 ### Model tier routing
 
-Not every task needs the most capable model. The plan generator assigns per-task model recommendations (`cheap`, `standard`, `capable`), and the executor resolves them against the configured `modelTiers` in `settings.json`. Reviews use cross-provider models (e.g., OpenAI reviewing Anthropic-generated code) to reduce model bias.
+Not every task needs the most capable model. The plan generator assigns per-task model recommendations (`cheap`, `standard`, `capable`), and the executor resolves them against the tiers configured in `agent/model-tiers.json`. A `dispatch` map in the same file routes each provider to its CLI target (e.g., `anthropic` → `claude`, `openai` → `pi`). Reviews use cross-provider models (e.g., OpenAI reviewing Anthropic-generated code) to reduce model bias.
 
 ## Skills
 
@@ -161,7 +161,7 @@ The most complex skill. Orchestrates multi-wave parallel plan execution with ver
 - Validates the plan structure
 - Presents configurable execution settings (worktree, parallelism, TDD, review, spec check, commits, integration tests)
 - Builds a dependency graph and groups tasks into waves
-- Resolves model tiers from `settings.json`
+- Resolves model tiers from `agent/model-tiers.json`
 - Captures a baseline test snapshot
 - Dispatches workers in parallel per wave using filled `implementer-prompt.md` templates
 - Handles worker status codes and retries (up to 3, then escalates)
@@ -181,7 +181,7 @@ Dispatches an independent code reviewer with precisely crafted context.
 - Fills the `code-reviewer.md` template with what was implemented, the plan/requirements, and the diff range
 - Dispatches in fresh context with a capable-tier model
 - Categorizes findings by severity (critical, important, minor)
-- Used both standalone and as the final review step in `execute-plan`
+- Used standalone (execute-plan invokes `refine-code` for its post-execution review)
 
 **Files:** `SKILL.md`, `code-reviewer.md`
 

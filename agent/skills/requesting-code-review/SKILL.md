@@ -1,6 +1,6 @@
 ---
 name: requesting-code-review
-description: "Use after completing major features, after all plan execution waves complete, or before merging to main. Dispatches a code-reviewer subagent with git diff context and requirements for production readiness review."
+description: "Use after completing major features outside of execute-plan, or before merging to main. Dispatches a code-reviewer subagent with git diff context and requirements for production readiness review."
 ---
 
 # Requesting Code Review
@@ -11,7 +11,7 @@ gets precisely crafted context — never your session's history.
 ## When to Request Review
 
 **Mandatory:**
-- After all waves complete in `execute-plan` (full diff review)
+- After completing a major feature outside of `execute-plan` (standalone full diff review)
 - After completing a major feature
 - Before merge to main
 
