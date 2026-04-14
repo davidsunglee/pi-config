@@ -9,6 +9,13 @@ description: "Executes a structured plan file from .pi/plans/. Decomposes tasks 
 
 Before starting execution, determine the workspace.
 
+**Precondition:** Verify this is a git repository:
+```bash
+git rev-parse --git-dir 2>/dev/null || { echo "execute-plan requires a git repository."; exit 1; }
+```
+
+If the check fails, stop with: "execute-plan requires a git repository."
+
 **Auto-detect:** Check if already on a feature branch or in a worktree:
 ```bash
 # Check if in a worktree (git-common-dir differs from .git only in worktrees)
@@ -65,22 +72,17 @@ Plan:  <plan filename>
 Goal:  <plan goal>
 Tasks: <count> across <N> waves
 
-  Global
     Workspace:          <see workspace values below>
-    Execution:          parallel, pause on failure
     TDD:                enabled
-    Final review:       enabled
-  Per wave
-    Spec check:         enabled
-    Checkpoint commit:  <see defaults below>
+    Execution:          parallel, pause on failure
     Integration test:   <see defaults below>
+    Final review:       enabled (max 3 remediation iterations)
 
 Ready to execute: (s)tart / (c)ustomize / (q)uit
 ```
 
 **Workspace values:**
 - Already on a feature branch or in a worktree: `current workspace (on <branch-name>)`
-- On main but not in a git repo: `current workspace (<path>, no git repo)`
 - On main in a git repo (default): `new worktree (branch: <suggested-branch>)`
 
 **Integration test value:** When enabled and a test command is available, include the command: `enabled (<command>)`. When no test command is available: `disabled (no test command)`.
@@ -90,12 +92,10 @@ Ready to execute: (s)tart / (c)ustomize / (q)uit
 | Setting | Default | Notes |
 |---------|---------|-------|
 | Workspace | new worktree | Auto-detected if already on branch/worktree — shows current state, not a choice |
-| Execution | parallel, pause on failure | Can customize to sequential, or change pacing |
 | TDD | enabled | Can disable for non-code plans (docs, config, content) |
-| Final review | enabled | Code quality review after all waves — can disable |
-| Spec check | enabled | Lightweight spec compliance check after each wave — can disable for speed |
-| Checkpoint commit | enabled | If not in a git repo, show `disabled (no git repo)` |
+| Execution | parallel, pause on failure | Can customize to sequential, or change pacing |
 | Integration test | enabled | If a test command is available, show `enabled (<command>)`. If no test command, show `disabled (no test command)` |
+| Final review | enabled (max 3 iterations) | Iterative review-remediate loop after all waves — can disable or adjust max iterations |
 
 **Test command resolution order:**
 1. If the plan contains a `## Test Command` section (extracted in Step 2), use that command.
@@ -111,14 +111,11 @@ Ready to execute: (s)tart / (c)ustomize / (q)uit
 
 **If `c`:** Ask each setting individually:
 1. Workspace — New worktree / Current workspace (only if not auto-detected)
-2. Execution mode — Sequential / Parallel
-3. Wave pacing (if parallel) — Pause between waves / Auto-continue / Auto-continue unless failures
-4. TDD — Enabled / Disabled
-5. Final review — Enabled / Disabled
-6. Spec check — Enabled / Disabled
-7. Checkpoint commit — Enabled / Disabled (only if git repo detected)
-8. Integration test — Enabled / Disabled. If enabling and no test command yet detected, ask: "Enter test command (e.g., `npm test`):"
-9. Test command — Show current (from plan or auto-detect). Allow override or confirmation.
+2. TDD — Enabled / Disabled
+3. Execution mode — Sequential / Parallel
+4. Wave pacing (if parallel) — Pause between waves / Auto-continue / Auto-continue unless failures
+5. Integration test — Enabled / Disabled. If enabling and no test command yet detected, ask: "Enter test command (e.g., `npm test`):"
+6. Final review — Enabled / Disabled. If enabling, ask: "Max remediation iterations (default 3):"
 
 After customization, show the final settings summary for confirmation.
 
@@ -158,10 +155,10 @@ If a wave has more than 7 tasks, split it into sequential sub-waves of ≤7 task
 
 ## Step 6: Resolve model tiers
 
-Read the `modelTiers` section from `~/.pi/agent/settings.json`:
+Read the model matrix from `~/.pi/agent/models.json`:
 
 ```bash
-cat ~/.pi/agent/settings.json | python3 -c "import sys,json; print(json.dumps(json.load(sys.stdin).get('modelTiers', {}), indent=2))"
+cat ~/.pi/agent/models.json | python3 -c "import sys,json; print(json.dumps(json.load(sys.stdin), indent=2))"
 ```
 
 Map each task's model recommendation to the tier map:
@@ -216,8 +213,6 @@ PRE_EXECUTION_SHA=$(git rev-parse HEAD)
 ```
 
 ### Main-branch confirmation
-
-**Skip if:** Checkpoint commit is disabled (Step 3 settings).
 
 If executing directly on main/master/develop (not on a feature branch, not in a worktree), prompt the user once before the first commit:
 
@@ -295,42 +290,15 @@ After each wave completes, process each worker response:
 
 After each wave, read each output file and verify its content against the plan's acceptance criteria point-by-point. Checking file existence or non-emptiness is **not sufficient** — review actual content. If content doesn't match the acceptance criteria, treat it as a failure and apply Step 10 retry logic.
 
-### Spec check (if enabled in Step 3 settings)
+### Task verification
 
-After verifying outputs yourself, dispatch an independent spec check for each completed task in the wave.
-
-1. **Read the template** — read [spec-reviewer.md](spec-reviewer.md) in this directory.
-
-2. **Fill placeholders** for each task:
-   - `{TASK_SPEC}` — the full text of the task from the plan (same as what the implementer received)
-   - `{IMPLEMENTER_REPORT}` — the implementer's full status report (from Step 8)
-
-3. **Select the spec review model:**
-   - Use `modelTiers.standard` from `~/.pi/agent/settings.json` (already read in Step 6).
-   - This is the same provider as the implementer — cross-provider rotation is not used for per-wave spec review.
-
-4. **Dispatch:**
-   - If parallel execution mode → dispatch all spec reviews for the wave in parallel:
-     ```
-     subagent { tasks: [
-       { agent: "plan-executor", task: "<filled spec-reviewer.md for task A>", model: "<modelTiers.standard>" },
-       { agent: "plan-executor", task: "<filled spec-reviewer.md for task B>", model: "<modelTiers.standard>" },
-       ...
-     ]}
-     ```
-   - If sequential execution mode → dispatch each review sequentially
-
-5. **Handle results:**
-   - **✅ Spec compliant** — task passes. Proceed.
-   - **❌ Issues found** — treat as a task failure. Re-dispatch the implementer (Step 10 retry logic) with the reviewer's findings appended to the task prompt so the worker knows exactly what to fix. The retry counts toward the 3-retry limit in Step 10.
+After verifying outputs yourself (above), the orchestrator's own acceptance criteria check is the per-wave verification. No subagent is dispatched for this step — the orchestrator reads the code and checks criteria directly. If any acceptance criterion is not met, treat it as a failure and apply Step 10 retry logic.
 
 ## Step 9b: Post-wave commit and integration tests
 
 After wave verification (Step 9) and spec review complete successfully for a wave, perform the following steps in order.
 
 ### 1. Commit wave changes
-
-**Skip if:** Checkpoint commit is disabled (Step 3 settings) or not in a git repo.
 
 Stage and commit all changes from the completed wave:
 
@@ -356,8 +324,6 @@ feat(plan): wave 2 - Add execution checkpoints to execute-plan
 ```
 
 **If `git add -A` stages nothing** (wave produced no file changes): skip the commit silently. This can happen if a wave's tasks were verification-only.
-
-**If not in a git repo:** Skip commits silently. Do not error or warn — working on files outside version control is anomalous but allowed.
 
 ### 2. Run integration tests
 
