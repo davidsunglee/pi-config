@@ -73,9 +73,9 @@ Parse the code-refiner's response for the STATUS line:
 **`STATUS: max_iterations_reached`**
 - Present remaining findings to caller
 - Offer choices:
-  - **(a) Continue iterating** — re-invoke this skill from Step 3 with the same inputs but `HEAD_SHA` updated to current HEAD (budget resets, new cycle)
-  - **(b) Proceed** — caller continues with known issues noted
-  - **(c) Stop** — caller halts
+  - **(a) Keep iterating** — re-invoke this skill from Step 3 with the same inputs but `HEAD_SHA` updated to current HEAD (budget resets, new cycle)
+  - **(b) Proceed with issues** — caller continues with known issues noted
+  - **(c) Stop execution** — caller halts
 
 The caller (execute-plan or user) makes the decision. This skill does not auto-continue.
 

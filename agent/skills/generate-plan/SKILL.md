@@ -104,6 +104,7 @@ Read the review output file. Parse for the Status line (`**[Approved]**` or `**[
    - `{PLAN_CONTENTS}` — current plan file contents
    - `{REVIEW_FINDINGS}` — full text of all error-severity findings from the review
    - `{ORIGINAL_SPEC}` — original task description from Step 1
+   - `{OUTPUT_PATH}` — path to the current plan file (same path used in Step 3)
 3. Dispatch `planner` with the filled template:
    ```
    subagent { agent: "planner", task: "<filled edit-plan-prompt.md>", model: "<modelTiers.capable>" }

@@ -18,6 +18,10 @@ For reference — the original task description this plan was generated from:
 
 {ORIGINAL_SPEC}
 
+## Output
+
+Write the edited plan to `{OUTPUT_PATH}` (overwrite the existing file).
+
 ## Instructions
 
 1. Read each finding carefully
@@ -25,4 +29,3 @@ For reference — the original task description this plan was generated from:
 3. Do NOT rewrite sections that are not flagged
 4. Do NOT add new tasks unless a finding explicitly identifies a missing task
 5. Do NOT remove tasks unless a finding explicitly identifies scope creep
-6. Write the edited plan back to the same file path (overwrite)

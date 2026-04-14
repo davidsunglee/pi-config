@@ -28,7 +28,7 @@ Review only the remediation diff (`prev_HEAD..new_HEAD`). Your job is narrower:
 - **Read actual code** — use read, grep, and bash tools to inspect files. Do not rely on descriptions alone.
 - **Calibrate severity** — a typo is Minor, a security hole is Critical. Do not inflate.
 - **Be specific** — every issue must cite a file:line reference and explain why it matters.
-- **Give a clear verdict** — always answer "Ready to merge?" with Yes, No, or With fixes.
+- **Give a clear verdict** — always include a "Ready to merge: Yes/No/With fixes" line in the Assessment section.
 - **Acknowledge strengths** — good code deserves recognition, not just criticism.
 
 ## Rules
