@@ -1,6 +1,6 @@
 # Review-Remediate Loop
 
-You are the remediation coordinator. Drive the review-remediate cycle for the changes described below.
+You are the code refiner. Drive the review-remediate cycle for the changes described below.
 
 ## What Was Implemented
 
@@ -28,7 +28,7 @@ You are the remediation coordinator. Drive the review-remediate cycle for the ch
 Use these model tiers for dispatch:
 - `crossProvider.capable` — first-pass full review and final verification review
 - `standard` — hybrid re-reviews (cheaper, scoped to remediation diff)
-- `capable` — remediator (plan-executor fixing code)
+- `capable` — remediator (coder fixing code)
 
 ## Protocol
 
@@ -41,7 +41,7 @@ Use these model tiers for dispatch:
    - `{PLAN_OR_REQUIREMENTS}` — the Requirements/Plan above
    - `{BASE_SHA}` — `{BASE_SHA}` from this prompt
    - `{HEAD_SHA}` — `{HEAD_SHA}` from this prompt
-   - `{DESCRIPTION}` — "Review-loop: full review"
+   - `{DESCRIPTION}` — "Refine-code: full review"
    - `{RE_REVIEW_BLOCK}` — empty string (first pass)
 
 3. **Dispatch `code-reviewer`** with model `crossProvider.capable` from the model matrix:
@@ -68,7 +68,7 @@ Use these model tiers for dispatch:
 7. **Dispatch remediator** for one batch — use model `capable` from the model matrix:
    ```
    subagent {
-     agent: "plan-executor",
+     agent: "coder",
      task: "Fix the following code review findings:\n\n<batched findings with file:line refs>\n\nContext:\n<relevant plan/spec sections>\n\nWorking directory: {WORKING_DIR}",
      model: "<capable from model matrix>"
    }
@@ -91,7 +91,7 @@ Use these model tiers for dispatch:
 
 1. **Read the review template** (same as iteration 1).
 
-2. **Read the re-review block** at `~/.pi/agent/skills/review-loop/re-review-block.md`.
+2. **Read the re-review block** at `~/.pi/agent/skills/refine-code/review-fix-block.md`.
 
 3. **Fill re-review block placeholders:**
    - `{PREVIOUS_FINDINGS}` — all findings from the previous review pass (full text)
@@ -103,7 +103,7 @@ Use these model tiers for dispatch:
    - `{BASE_SHA}` — the PREV_HEAD (only review remediation diff)
    - `{HEAD_SHA}` — the NEW_HEAD
    - `{RE_REVIEW_BLOCK}` — the filled re-review block content
-   - `{DESCRIPTION}` — "Review-loop: hybrid re-review (iteration N)"
+   - `{DESCRIPTION}` — "Refine-code: hybrid re-review (iteration N)"
 
 5. **Dispatch `code-reviewer`** with model `standard` from the model matrix (hybrid re-reviews are scoped and cheaper).
 
@@ -119,7 +119,7 @@ When a review pass finds no Critical/Important issues (hybrid reviews converge):
    - `{BASE_SHA}` — original BASE_SHA from this prompt (pre-implementation)
    - `{HEAD_SHA}` — current HEAD (includes all remediations)
    - `{RE_REVIEW_BLOCK}` — empty string (full review, not re-review)
-   - `{DESCRIPTION}` — "Review-loop: final verification"
+   - `{DESCRIPTION}` — "Refine-code: final verification"
 
 2. **If clean** (no Critical/Important issues):
    - Write final review to the versioned file
