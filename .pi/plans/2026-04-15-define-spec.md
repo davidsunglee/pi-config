@@ -15,7 +15,9 @@
 ## File Structure
 
 - `agent/skills/define-spec/SKILL.md` (Create) — The define-spec skill definition: input resolution, scout brief lookup, codebase exploration, interactive questioning, spec writing, and generate-plan handoff
-- `agent/skills/generate-plan/SKILL.md` (Modify) — Two changes: Step 1 adds scout brief passthrough for spec file inputs; Step 5 changes from suggesting execute-plan to offering to invoke it
+- `agent/skills/generate-plan/SKILL.md` (Modify) — Step 1: provenance extraction + scout brief passthrough; Step 3: new placeholder fill instructions; Step 5: offer continuation to execute-plan
+- `agent/skills/generate-plan/generate-plan-prompt.md` (Modify) — Add `{SOURCE_SPEC}` and `{SOURCE_BRIEF}` placeholders
+- `agent/agents/planner.md` (Modify) — Update plan header to include Spec and Scout brief provenance fields
 
 ---
 
@@ -252,7 +254,7 @@ git commit -m "feat(generate-plan): offer to invoke execute-plan after plan crea
 
 ---
 
-### Task 3: Add scout brief passthrough to generate-plan Step 1
+### Task 3: Add provenance extraction and scout brief passthrough to generate-plan Step 1
 
 **Files:**
 - Modify: `agent/skills/generate-plan/SKILL.md:8-16`
@@ -273,31 +275,157 @@ The user will provide one of three input sources:
 The resolved text becomes `{TASK_DESCRIPTION}`. If the input is a todo, also capture the ID for `{SOURCE_TODO}`.
 ```
 
-- [ ] **Step 2: Add scout brief passthrough after the input resolution paragraph**
+- [ ] **Step 2: Add provenance extraction and scout brief passthrough**
 
 After the line "The resolved text becomes `{TASK_DESCRIPTION}`..." add:
 
 ```markdown
 
-**Scout brief passthrough:** After resolving the input, check whether the input file (if it is a file) contains a `Scout brief:` reference line (e.g., `Scout brief: .pi/briefs/TODO-ccbbedd6-brief.md`). If it does, read the referenced brief file and append its contents to `{TASK_DESCRIPTION}` under a `## Codebase Brief` heading. This gives the planner scout reconnaissance context alongside the spec, so it can skip redundant exploratory reads.
+**Provenance extraction (file-path inputs only):** When the input is a file, scan its header for provenance references:
+
+- `Source: TODO-<id>` — capture the todo ID for `{SOURCE_TODO}`. This allows provenance to flow through from define-spec: the spec references the original todo, and generate-plan passes it to the planner.
+- `Scout brief: .pi/briefs/<filename>` — read the referenced brief file and append its contents to `{TASK_DESCRIPTION}` under a `## Codebase Brief` heading. This gives the planner scout reconnaissance context alongside the spec.
+
+Also capture the spec file path itself for `{SOURCE_SPEC}`.
 ```
 
 - [ ] **Step 3: Verify the edit**
 
-Read the updated Step 1 and confirm the scout brief passthrough is present and follows the input resolution paragraph.
+Read the updated Step 1 and confirm the provenance extraction paragraph is present and follows the input resolution paragraph.
 
 - [ ] **Step 4: Commit**
 
 ```bash
 git add agent/skills/generate-plan/SKILL.md
-git commit -m "feat(generate-plan): pass scout brief to planner when spec references one"
+git commit -m "feat(generate-plan): extract provenance and pass scout brief from spec inputs"
 ```
 
 **Acceptance criteria:**
-- generate-plan Step 1 checks for a `Scout brief:` reference in file-path inputs
-- When found, the brief contents are appended to `{TASK_DESCRIPTION}` under a `## Codebase Brief` heading
-- When no reference is found, behavior is unchanged
-- The planner receives both the spec and the brief in a single prompt
+- generate-plan Step 1 extracts `Source: TODO-<id>` from spec file inputs and captures it for `{SOURCE_TODO}`
+- generate-plan Step 1 extracts `Scout brief:` references, reads the brief, and appends to `{TASK_DESCRIPTION}`
+- generate-plan Step 1 captures the spec file path for `{SOURCE_SPEC}`
+- When no provenance references are found, behavior is unchanged
+
+**Model recommendation:** cheap
+
+---
+
+### Task 4: Add provenance placeholders to generate-plan-prompt.md
+
+**Files:**
+- Modify: `agent/skills/generate-plan/generate-plan-prompt.md`
+
+- [ ] **Step 1: Read the current template**
+
+Read `agent/skills/generate-plan/generate-plan-prompt.md` to confirm the current content:
+
+```markdown
+# Plan Generation Task
+
+Analyze the codebase at `{WORKING_DIR}` and produce a structured implementation plan.
+
+## Task Description
+
+{TASK_DESCRIPTION}
+
+{SOURCE_TODO}
+
+## Output
+
+Write the plan to `{OUTPUT_PATH}`.
+
+Create the directory if it doesn't exist.
+```
+
+- [ ] **Step 2: Add the new provenance placeholders**
+
+Change the section after `{TASK_DESCRIPTION}` from:
+
+```markdown
+{SOURCE_TODO}
+```
+
+To:
+
+```markdown
+{SOURCE_TODO}
+
+{SOURCE_SPEC}
+
+{SOURCE_BRIEF}
+```
+
+- [ ] **Step 3: Update the placeholder list in generate-plan SKILL.md Step 3**
+
+Read `agent/skills/generate-plan/SKILL.md` Step 3 and add the new placeholders to the fill list:
+
+```markdown
+   - `{SOURCE_SPEC}` — `Source spec: .pi/specs/<filename>` if the input was a spec file, empty string otherwise
+   - `{SOURCE_BRIEF}` — `Scout brief: .pi/briefs/<filename>` if a scout brief was consumed, empty string otherwise
+```
+
+These go after the existing `{SOURCE_TODO}` placeholder entry.
+
+- [ ] **Step 4: Verify the edits**
+
+Read both files back and confirm the new placeholders are present in the template and in the Step 3 fill list.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add agent/skills/generate-plan/generate-plan-prompt.md agent/skills/generate-plan/SKILL.md
+git commit -m "feat(generate-plan): add source spec and scout brief provenance placeholders"
+```
+
+**Acceptance criteria:**
+- `generate-plan-prompt.md` has `{SOURCE_TODO}`, `{SOURCE_SPEC}`, and `{SOURCE_BRIEF}` placeholders
+- `generate-plan/SKILL.md` Step 3 lists all three provenance placeholders with fill instructions
+- Empty strings are used when a provenance value is not applicable
+
+**Model recommendation:** cheap
+
+---
+
+### Task 5: Update planner.md plan header to include full provenance
+
+**Files:**
+- Modify: `agent/agents/planner.md:55`
+
+- [ ] **Step 1: Read the current Source field instruction**
+
+Read `agent/agents/planner.md` line 55 to confirm the current content:
+
+```markdown
+**Source:** `TODO-<id>` — Only include this field when the plan originates from a todo. The todo ID will be provided in the task prompt as `Source todo: TODO-<id>`. If the input is a file path or freeform description (no source todo ID provided), omit this field entirely.
+```
+
+- [ ] **Step 2: Replace with full provenance fields**
+
+Replace the single Source field instruction with:
+
+```markdown
+**Source:** `TODO-<id>` — Include when a `Source todo: TODO-<id>` line is provided in the task prompt. Omit otherwise.
+**Spec:** `.pi/specs/<filename>` — Include when a `Source spec: .pi/specs/<filename>` line is provided in the task prompt. Omit otherwise.
+**Scout brief:** `.pi/briefs/<filename>` — Include when a `Scout brief: .pi/briefs/<filename>` line is provided in the task prompt. Omit otherwise.
+```
+
+All three fields are optional. Include each only when the corresponding value appears in the task prompt.
+
+- [ ] **Step 3: Verify the edit**
+
+Read the updated planner.md and confirm all three provenance fields are documented.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add agent/agents/planner.md
+git commit -m "feat(planner): add spec and scout brief provenance fields to plan header"
+```
+
+**Acceptance criteria:**
+- planner.md documents three optional provenance fields: Source (todo), Spec, Scout brief
+- Each field is included only when the corresponding value is provided in the task prompt
+- The plan header carries the full lineage from todo through spec and scout brief
 
 **Model recommendation:** cheap
 
@@ -305,13 +433,22 @@ git commit -m "feat(generate-plan): pass scout brief to planner when spec refere
 
 ## Dependencies
 
-- Task 2 and Task 3 are independent of each other
-- Task 2 and Task 3 are independent of Task 1
-- All three tasks can be executed in parallel
+- Task 1 is independent of all other tasks
+- Task 2 is independent of all other tasks
+- Task 3 and Task 4 both modify `generate-plan/SKILL.md` — execute Task 3 before Task 4, or combine into one commit
+- Task 5 is independent of Tasks 1 and 2, but should follow Task 4 (the planner needs to know about placeholders that generate-plan fills)
+
+```
+Task 1 ─────────────────────────────────────── (independent)
+Task 2 ─────────────────────────────────────── (independent)
+Task 3 → Task 4 ───────────────────────────── (sequential, both touch generate-plan)
+Task 5 ─────────────────────────────────────── (independent, but logically after Task 4)
+```
 
 ## Risk Assessment
 
-**Low risk overall.** This plan creates one new file and makes two small edits to an existing file.
+**Low risk overall.** This plan creates one new file and makes small edits to four existing files.
 
 - **Risk:** define-spec SKILL.md is large — the model might truncate or lose fidelity when writing it. **Mitigation:** Task 1 Step 2 contains the complete file content; verify by reading back after creation.
-- **Risk:** generate-plan edits could conflict if applied to different versions of the file. **Mitigation:** Tasks 2 and 3 modify different sections (Step 5 and Step 1 respectively) — no overlap.
+- **Risk:** Tasks 3 and 4 both modify `generate-plan/SKILL.md`. **Mitigation:** They modify different sections (Step 1 and Step 3) — execute sequentially to avoid conflicts.
+- **Risk:** Planner might not emit the new provenance fields if it doesn't see the placeholder values. **Mitigation:** The instruction says "include only when provided" — absence is the correct default.
