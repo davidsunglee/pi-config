@@ -18,6 +18,7 @@
 - `agent/skills/generate-plan/SKILL.md` (Modify) — Step 1: provenance extraction + scout brief passthrough; Step 3: new placeholder fill instructions; Step 5: offer continuation to execute-plan
 - `agent/skills/generate-plan/generate-plan-prompt.md` (Modify) — Add `{SOURCE_SPEC}` and `{SOURCE_BRIEF}` placeholders
 - `agent/agents/planner.md` (Modify) — Update plan header to include Spec and Scout brief provenance fields
+- `README.md` (Modify) — Add define-spec skill entry to the Skills section
 
 ---
 
@@ -360,14 +361,18 @@ To:
 
 - [ ] **Step 3: Update the placeholder list in generate-plan SKILL.md Step 3**
 
-Read `agent/skills/generate-plan/SKILL.md` Step 3 and add the new placeholders to the fill list:
+Read `agent/skills/generate-plan/SKILL.md` Step 3. First, revise the existing `{SOURCE_TODO}` fill instruction. The current instruction says `{SOURCE_TODO}` is filled only when the input is a todo. Update it to say:
+
+```markdown
+   - `{SOURCE_TODO}` — `Source todo: TODO-<id>` when a source todo ID is available — either directly (input was a todo ID) or indirectly (extracted from a spec file's preamble `Source: TODO-<id>` line during provenance extraction in Step 1). Empty string otherwise.
+```
+
+Then add the new placeholders after the updated `{SOURCE_TODO}` entry:
 
 ```markdown
    - `{SOURCE_SPEC}` — `Source spec: .pi/specs/<filename>` if the input was a spec file, empty string otherwise
    - `{SOURCE_BRIEF}` — `Scout brief: .pi/briefs/<filename>` if a scout brief was consumed, empty string otherwise
 ```
-
-These go after the existing `{SOURCE_TODO}` placeholder entry.
 
 - [ ] **Step 4: Verify the edits**
 
@@ -434,21 +439,71 @@ git commit -m "feat(planner): add spec and scout brief provenance fields to plan
 
 ---
 
+### Task 6: Add define-spec to README skills section
+
+**Files:**
+- Modify: `README.md`
+
+- [ ] **Step 1: Read the Skills section**
+
+Read `README.md` and locate the `## Skills` section. Skill subsections are ordered alphabetically (e.g., `### \`agent/skills/commit/\`` comes before `### \`agent/skills/execute-plan/\``).
+
+- [ ] **Step 2: Add the define-spec entry**
+
+Add a new subsection for define-spec **before** the `### \`agent/skills/generate-plan/\`` entry (alphabetical order). Use the same format as existing skill entries:
+
+```markdown
+### `agent/skills/define-spec/`
+
+Interactive spec writing from a todo or freeform description.
+
+- Resolves input from a todo ID or freeform text
+- Checks for and consumes scout briefs when available
+- Explores the codebase for informed questioning
+- Asks clarifying questions to externalize user intent, scope, constraints, and acceptance criteria
+- Writes a structured spec to `.pi/specs/` optimized for generate-plan consumption
+- Offers to invoke generate-plan with the resulting spec
+
+**Files:** `SKILL.md`
+```
+
+- [ ] **Step 3: Verify the edit**
+
+Read the Skills section and confirm the define-spec entry appears in alphabetical order before generate-plan.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add README.md
+git commit -m "docs: add define-spec to README skills section"
+```
+
+**Acceptance criteria:**
+- `README.md` has a `### \`agent/skills/define-spec/\`` subsection in the Skills section
+- The entry is in alphabetical order (after `commit/`, before `execute-plan/`)
+- The entry follows the same format as other skill entries (heading, one-line description, bullet list of capabilities, Files line)
+
+**Model recommendation:** cheap
+
+---
+
 ## Dependencies
 
 - Task 1 is independent of all other tasks
 - Tasks 2, 3, and 4 all modify `generate-plan/SKILL.md` (Steps 5, 1, and 3 respectively) — execute them sequentially to avoid conflicts: Task 2 → Task 3 → Task 4
 - Task 5 is independent of all other tasks, but should logically follow Task 4 (the planner needs to know about placeholders that generate-plan fills)
+- Task 6 is independent of all other tasks (modifies only `README.md`)
 
 ```
 Task 1 ─────────────────────────────────────── (independent)
 Task 2 → Task 3 → Task 4 ─────────────────── (sequential, all touch generate-plan/SKILL.md)
 Task 5 ─────────────────────────────────────── (independent, but logically after Task 4)
+Task 6 ─────────────────────────────────────── (independent)
 ```
 
 ## Risk Assessment
 
-**Low risk overall.** This plan creates one new file and makes small edits to four existing files.
+**Low risk overall.** This plan creates one new file and makes small edits to five existing files.
 
 - **Risk:** define-spec SKILL.md is large — the model might truncate or lose fidelity when writing it. **Mitigation:** Task 1 Step 2 contains the complete file content; verify by reading back after creation.
 - **Risk:** Tasks 3 and 4 both modify `generate-plan/SKILL.md`. **Mitigation:** They modify different sections (Step 1 and Step 3) — execute sequentially to avoid conflicts.
