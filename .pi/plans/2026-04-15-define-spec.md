@@ -284,7 +284,7 @@ After the line "The resolved text becomes `{TASK_DESCRIPTION}`..." add:
 **Provenance extraction (file-path inputs only):** When the input is a file, parse provenance references from the file preamble — the lines between the `# Title` and the first `## ` heading. Ignore any matching lines later in the document (including inside fenced code blocks or examples). Require exact prefix matches:
 
 - `Source: TODO-<id>` — capture the todo ID for `{SOURCE_TODO}`. This allows provenance to flow through from define-spec: the spec references the original todo, and generate-plan passes it to the planner.
-- `Scout brief: .pi/briefs/<filename>` — read the referenced brief file and append its contents to `{TASK_DESCRIPTION}` under a `## Codebase Brief` heading. Also capture the brief file path for `{SOURCE_BRIEF}`.
+- `Scout brief: .pi/briefs/<filename>` — read the referenced brief file and append its contents to `{TASK_DESCRIPTION}` under a `## Codebase Brief` heading. Also capture the brief file path for `{SOURCE_BRIEF}`. If the referenced file does not exist, warn the user ("Scout brief referenced in spec not found at `<path>` — proceeding without it."), leave `{SOURCE_BRIEF}` as an empty string, and continue without appending brief content.
 
 Set `{SOURCE_SPEC}` only when the input file path is under `.pi/specs/`. For other file inputs (RFCs, design docs at arbitrary paths), leave `{SOURCE_SPEC}` as an empty string.
 ```
@@ -305,6 +305,7 @@ git commit -m "feat(generate-plan): extract provenance and pass scout brief from
 - generate-plan Step 1 extracts `Source: TODO-<id>` from spec file inputs and captures it for `{SOURCE_TODO}`
 - generate-plan Step 1 extracts `Scout brief:` references, reads the brief, appends to `{TASK_DESCRIPTION}`, and captures the brief path for `{SOURCE_BRIEF}`
 - `{SOURCE_SPEC}` is set only when the input path is under `.pi/specs/`; empty string otherwise
+- If a referenced scout brief file does not exist, generate-plan warns the user and proceeds without appending brief content or setting `{SOURCE_BRIEF}`
 - When no provenance references are found, behavior is unchanged
 
 **Model recommendation:** cheap
