@@ -1,6 +1,6 @@
 {
   "id": "9ffd09cc",
-  "title": "Strengthen execute-plan worker discipline and test-failure handling",
+  "title": "Strengthen execute-plan worker discipline, test-failure handling, and subagent limits",
   "tags": [
     "execute-plan",
     "tdd",
@@ -14,17 +14,19 @@
 
 ## Summary
 
-Strengthen the execution pipeline in two related areas:
+Strengthen the execution pipeline in three related areas:
 1. Give worker agents much stronger TDD guidance or direct access to the TDD skill.
 2. Improve post-wave integration test failure handling in `execute-plan` Step 9b so failures are debugged systematically and user choices match suite conventions.
+3. Align the execute-plan wave size limit with the pi-subagent extension's `MAX_PARALLEL_TASKS` constant (currently 8) instead of hardcoding a separate value.
 
 This todo now absorbs `TODO-845e6978` as an internal task rather than tracking it separately.
 
 ## Why this belongs together
 
-Both tasks improve the reliability of plan execution after worker dispatch:
+All three tasks improve the reliability of plan execution after worker dispatch:
 - stronger TDD discipline should reduce regressions introduced by workers
 - better Step 9b handling should make regressions easier to diagnose and resolve when they still happen
+- respecting the subagent extension's own limits prevents the skill from either under-utilizing capacity or exceeding the extension's enforced maximum
 
 ## Tasks
 
@@ -86,10 +88,29 @@ Replace the blunt retry path with a more systematic debugging flow and align the
   - **(b) Skip tests** — proceed to the next wave despite failures
   - **(c) Stop execution** — skip completion and report partial progress
 
+### Task 3: Align wave size limit with pi-subagent extension
+
+#### Problem
+
+The `execute-plan` skill hardcodes a wave size limit of 7 tasks (SKILL.md line 154: "If a wave has more than 7 tasks, split it into sequential sub-waves of ≤7 tasks each"). Meanwhile, the pi-subagent extension enforces its own maximum of 8 parallel tasks (`MAX_PARALLEL_TASKS = 8` in `pi-subagent/index.ts:31`), rejecting any dispatch that exceeds it.
+
+These two limits are defined independently. The skill's limit (7) is more restrictive than the extension's (8), which wastes one slot of available parallelism. More importantly, the two values can drift apart — if the extension's limit changes, the skill won't know, and could either under-utilize capacity or attempt dispatches that get rejected.
+
+#### Goal
+
+The execute-plan skill should never dispatch more parallel agents than the pi-subagent extension allows. The skill's wave size limit should be derived from or explicitly aligned with the extension's `MAX_PARALLEL_TASKS` (currently 8), not hardcoded separately.
+
+#### Expected changes
+
+- Update the wave splitting threshold in `execute-plan/SKILL.md` from ≤7 to ≤8, matching the extension's current `MAX_PARALLEL_TASKS`
+- Add a comment or note anchoring the value to the pi-subagent extension's limit so future maintainers know the source of truth
+- Verify that no other locations in the execute-plan skill or related orchestration code hardcode a different parallel task limit
+
 ## Completion criteria
 
 This todo is complete when:
 - worker-facing TDD enforcement is meaningfully stronger than the current condensed block
 - `execute-plan` Step 9b no longer uses the blunt full-wave retry strategy
 - Step 9b user choices follow the suite-wide `(a)/(b)/(c)` convention
+- the execute-plan wave size limit matches the pi-subagent extension's `MAX_PARALLEL_TASKS` (currently 8)
 - the implementation is internally consistent across prompts, skills, and orchestration flow
