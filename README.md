@@ -64,9 +64,10 @@ Three external packages are loaded via `settings.json`:
 The skills, extensions, subagents, and artifacts in this repo combine into a repeatable development cycle. A typical end-to-end flow looks like this:
 
 ```text
-┌─────────────┐     ┌───────────────┐     ┌──────────────┐
-│ Create todo  │────▶│  Refine todo  │────▶│ Generate plan│
-└─────────────┘     └───────────────┘     └──────┬───────┘
+┌─────────────┐     ┌───────────────┐     ┌──────────────┐     ┌──────────────┐
+│ Create todo  │────▶│  Refine todo  │────▶│ Define spec  │────▶│ Generate plan│
+└─────────────┘     └───────────────┘     │  (optional)  │     └──────┬───────┘
+                                          └──────────────┘
                                                  │
                                                  ▼
                                           ┌──────────────┐
@@ -129,27 +130,30 @@ The skills, extensions, subagents, and artifacts in this repo combine into a rep
 
 1. **Create & refine a todo.** Todos live as markdown files in `.pi/todos/` and are tracked in git. Refinement is collaborative — the agent asks clarifying questions before writing a structured description.
 
-2. **Generate a plan.** The `generate-plan` skill dispatches the `planner` subagent with a fully assembled prompt (from `generate-plan-prompt.md`), which deeply reads the codebase and writes a structured plan to `.pi/plans/`. The plan contains numbered tasks, file lists, acceptance criteria, dependencies, and per-task model tier recommendations.
+2. **Define a spec (optional).** The `define-spec` skill takes a todo (or freeform description) and interactively explores the codebase, asks clarifying questions, and writes a structured spec to `.pi/specs/`. The spec captures intent, scope, constraints, and acceptance criteria in a format optimized for plan generation. This step is optional — `generate-plan` can work directly from a todo — but produces better plans for complex or ambiguous work.
 
-3. **Review the plan.** A `plan-reviewer` subagent checks the plan against the original spec (using `review-plan-prompt.md`) for coverage gaps, dependency errors, sizing issues, and vague acceptance criteria. Errors trigger a surgical plan edit via `edit-plan-prompt.md`; warnings/suggestions are appended as review notes.
+3. **Generate a plan.** The `generate-plan` skill dispatches the `planner` subagent with a fully assembled prompt (from `generate-plan-prompt.md`), which deeply reads the codebase and writes a structured plan to `.pi/plans/`. The plan contains numbered tasks, file lists, acceptance criteria, dependencies, and per-task model tier recommendations. When a spec exists, it is used as the primary input.
 
-4. **Execute in waves.** The `execute-plan` skill decomposes tasks into dependency-ordered waves and dispatches `coder` subagents **in parallel** — up to 7 tasks per wave. Each worker gets a self-contained prompt (filled from `execute-task-prompt.md`) with the task spec, plan context, and TDD instructions. Workers report structured status codes (`DONE`, `DONE_WITH_CONCERNS`, `NEEDS_CONTEXT`, `BLOCKED`).
+4. **Review the plan.** A `plan-reviewer` subagent checks the plan against the original spec (using `review-plan-prompt.md`) for coverage gaps, dependency errors, sizing issues, and vague acceptance criteria. Errors trigger a surgical plan edit via `edit-plan-prompt.md`; warnings/suggestions are appended as review notes.
 
-5. **Verify and commit each wave.** After a wave completes, the orchestrator verifies outputs against acceptance criteria. A checkpoint commit is made, then integration tests run against a pre-recorded baseline (captured before the first wave). New test failures are flagged as regressions with retry/skip/stop options.
+5. **Execute in waves.** The `execute-plan` skill decomposes tasks into dependency-ordered waves and dispatches `coder` subagents **in parallel** — up to 7 tasks per wave. Each worker gets a self-contained prompt (filled from `execute-task-prompt.md`) with the task spec, plan context, and TDD instructions. Workers report structured status codes (`DONE`, `DONE_WITH_CONCERNS`, `NEEDS_CONTEXT`, `BLOCKED`).
 
-6. **Refine code.** After all waves pass, the `refine-code` skill dispatches a `code-refiner` subagent that orchestrates an iterative review-remediate loop. The refiner dispatches `code-reviewer` subagents for cross-provider review, triages and batches findings by severity, dispatches `coder` subagents to fix batched issues, and commits remediation changes. This loop iterates until the review comes back clean or the iteration budget (default 3) is exhausted. Versioned review files are written to `.pi/reviews/`.
+6. **Verify and commit each wave.** After a wave completes, the orchestrator verifies outputs against acceptance criteria. A checkpoint commit is made, then integration tests run against a pre-recorded baseline (captured before the first wave). New test failures are flagged as regressions with retry/skip/stop options.
 
-7. **Close out.** The plan moves to `.pi/plans/done/`, the linked todo is closed, and the `finishing-a-development-branch` skill offers merge, PR, keep, or discard options.
+7. **Refine code.** After all waves pass, the `refine-code` skill dispatches a `code-refiner` subagent that orchestrates an iterative review-remediate loop. The refiner dispatches `code-reviewer` subagents for cross-provider review, triages and batches findings by severity, dispatches `coder` subagents to fix batched issues, and commits remediation changes. This loop iterates until the review comes back clean or the iteration budget (default 3) is exhausted. Versioned review files are written to `.pi/reviews/`.
+
+8. **Close out.** The plan moves to `.pi/plans/done/`, the linked todo is closed, and the `finishing-a-development-branch` skill offers merge, PR, keep, or discard options.
 
 ### Subagent architecture
 
 The workflow uses five specialized subagents, each starting with **fresh context** — no session forking, no shared conversational history. Information flows through **file artifacts**:
 
-- **Plans** (`.pi/plans/`) carry the spec from generation through execution
+- **Todos** (`.pi/todos/`) track lifecycle state
+- **Specs** (`.pi/specs/`) carry structured requirements from define-spec to generate-plan
+- **Plans** (`.pi/plans/`) carry the task breakdown from generation through execution
 - **Prompt templates** (`generate-plan-prompt.md`, `execute-task-prompt.md`, `review-code-prompt.md`, `refine-code-prompt.md`, etc.) are filled per-dispatch with exactly the context each worker needs
 - **Reviews** (`.pi/reviews/`) carry versioned review findings and remediation logs
 - **Git diffs** carry code changes between review iterations
-- **Todos** (`.pi/todos/`) track lifecycle state
 
 This is deliberate. Fresh-context subagents are more focused, more independent (reviewers can't be biased by watching generation), more resumable (re-run with the same artifact), and more debuggable (every artifact is a readable file).
 
@@ -549,6 +553,6 @@ The overall direction of this setup is:
 - keep pi itself minimal
 - make the TUI more informative and more interactive where it helps
 - support a simple but opinionated workflow
-- prefer explicit artifacts (todos, plans, reviews) over hidden state
+- prefer explicit artifacts (todos, specs, plans, reviews) over hidden state
 - use subagents with self-contained prompts rather than shared context
 - iterate toward quality with automated review-remediate loops rather than single-pass generation
