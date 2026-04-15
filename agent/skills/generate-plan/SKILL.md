@@ -60,7 +60,9 @@ If `model-tiers.json` doesn't exist or is unreadable, stop with: "generate-plan 
    - `{TASK_DESCRIPTION}` — resolved text from Step 1
    - `{WORKING_DIR}` — absolute path to cwd
    - `{OUTPUT_PATH}` — `.pi/plans/yyyy-MM-dd-<short-description>.md` (derive short description from task)
-   - `{SOURCE_TODO}` — `Source todo: TODO-<id>` if input was a todo, empty string otherwise
+   - `{SOURCE_TODO}` — `Source todo: TODO-<id>` when a source todo ID is available — either directly (input was a todo ID) or indirectly (extracted from a spec file's preamble `Source: TODO-<id>` line during provenance extraction in Step 1). Empty string otherwise.
+   - `{SOURCE_SPEC}` — `Source spec: .pi/specs/<filename>` if the input file path is under `.pi/specs/`, empty string otherwise
+   - `{SOURCE_BRIEF}` — `Scout brief: .pi/briefs/<filename>` if a scout brief was consumed, empty string otherwise
 3. Dispatch `planner` agent synchronously:
    ```
    subagent { agent: "planner", task: "<filled template>", model: "<capable from model-tiers.json>", dispatch: "<dispatch for capable>" }
