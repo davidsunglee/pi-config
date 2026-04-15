@@ -207,11 +207,35 @@ New behavior: ask the user whether to continue:
 
 If yes, invoke execute-plan with the plan path. This makes stage transitions consistent across the pipeline — each stage writes its artifact, then offers to continue.
 
-### generate-plan Step 1: scout brief passthrough
+### generate-plan Step 1: provenance extraction and scout brief passthrough
 
-When generate-plan receives a spec file as input that contains a `Scout brief:` reference, it should include the brief contents in the planner's `{TASK_DESCRIPTION}` alongside the spec. This way the planner gets both the spec (what to build) and the scout brief (codebase context) without re-doing reconnaissance.
+When generate-plan receives a spec file as input, it should extract provenance references from the file header:
 
-Addition to generate-plan Step 1 input resolution: if the input is a file and it references a scout brief path, read both files and include both in the prompt.
+- `Source: TODO-<id>` — capture for `{SOURCE_TODO}` (pass through to planner)
+- `Scout brief: .pi/briefs/<name>` — read the referenced brief file and append its contents to `{TASK_DESCRIPTION}` under a `## Codebase Brief` heading
+
+Additionally, capture the spec file path itself for `{SOURCE_SPEC}`.
+
+This gives the planner both the spec (what to build) and the scout brief (codebase context) without re-doing reconnaissance, and ensures provenance flows through to the plan.
+
+### generate-plan-prompt.md: new provenance placeholders
+
+Add two new placeholders alongside the existing `{SOURCE_TODO}`:
+
+- `{SOURCE_SPEC}` — `Source spec: .pi/specs/<filename>` if the input was a spec file, empty string otherwise
+- `{SOURCE_BRIEF}` — `Scout brief: .pi/briefs/<filename>` if a scout brief was consumed, empty string otherwise
+
+### planner.md: plan header provenance fields
+
+Update the Source field instructions to include the full provenance chain:
+
+```markdown
+**Source:** `TODO-<id>` — include when a source todo ID is provided
+**Spec:** `.pi/specs/<filename>` — include when a source spec path is provided
+**Scout brief:** `.pi/briefs/<filename>` — include when a scout brief path is provided
+```
+
+All three fields are optional; include each only when the corresponding value is provided in the task prompt.
 
 ---
 
@@ -221,5 +245,7 @@ Addition to generate-plan Step 1 input resolution: if the input is a file and it
 |------|--------|---------|
 | `agent/skills/define-spec/SKILL.md` | Create | Skill definition — steps 1-6 |
 | `.pi/specs/` | Create directory | Spec output location |
-| `agent/skills/generate-plan/SKILL.md` | Modify | Step 5: offer continuation; Step 1: scout brief passthrough |
+| `agent/skills/generate-plan/SKILL.md` | Modify | Step 5: offer continuation; Step 1: provenance extraction + scout brief passthrough |
+| `agent/skills/generate-plan/generate-plan-prompt.md` | Modify | Add `{SOURCE_SPEC}` and `{SOURCE_BRIEF}` placeholders |
+| `agent/agents/planner.md` | Modify | Update plan header to include Spec and Scout brief provenance fields |
 | `.pi/todos/bbe89373.md` | Modify | Brief naming convention + model note (already done) |
