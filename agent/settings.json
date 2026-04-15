@@ -7,7 +7,7 @@
     "enabled": true
   },
   "hideThinkingBlock": false,
-  "theme": "nord-dark",
+  "theme": "nord",
   "packages": [
     "~/Code/pi-subagent",
     "npm:pi-web-access",
