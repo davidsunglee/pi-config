@@ -188,7 +188,7 @@ If `model-tiers.json` has no `dispatch` key, or the provider prefix has no entry
 
 Always pass `dispatch` explicitly on every subagent call, even when it resolves to `"pi"`.
 
-## Step 6b: Baseline test capture
+## Step 7: Baseline test capture
 
 **Skip if:** Integration test is disabled (Step 3 settings) or no test command is available.
 
@@ -217,7 +217,7 @@ Record the test output (failing test names/count). Proceed with execution — pr
 - If new test names appear in the failures that were not in the baseline, treat it as a fail — regressions introduced.
 - A simple heuristic: if the exit code is non-zero and the count of failing tests increased, or if any new test name appears in the output that wasn't in the baseline output, flag it as a regression.
 
-## Step 7: Execute waves
+## Step 8: Execute waves
 
 Before dispatching the first wave, record the current HEAD SHA for the post-completion review:
 ```bash
@@ -283,11 +283,11 @@ Read [execute-task-prompt.md](execute-task-prompt.md) in this directory once (be
 
 The filled template becomes the task prompt for the `coder` subagent. The template already includes self-review instructions, escalation guidance, code organization guidance, and the report format — do not add these separately.
 
-## Step 8: Handle worker status codes
+## Step 9: Handle worker status codes
 
 After each wave completes, process each worker response:
 
-- **DONE** → proceed to verification (Step 9).
+- **DONE** → proceed to verification (Step 10).
 - **DONE_WITH_CONCERNS** → read the concerns. Correctness/scope concerns must be addressed before verification; observations can be noted and execution continues.
 - **NEEDS_CONTEXT** → provide the missing context and re-dispatch the task immediately.
 - **BLOCKED** → assess the blocker:
@@ -298,17 +298,17 @@ After each wave completes, process each worker response:
 
 **Never ignore an escalation or re-dispatch the same task to the same model without changes.**
 
-## Step 9: Verify wave output
+## Step 10: Verify wave output
 
-After each wave, read each output file and verify its content against the plan's acceptance criteria point-by-point. Checking file existence or non-emptiness is **not sufficient** — review actual content. If content doesn't match the acceptance criteria, treat it as a failure and apply Step 10 retry logic.
+After each wave, read each output file and verify its content against the plan's acceptance criteria point-by-point. Checking file existence or non-emptiness is **not sufficient** — review actual content. If content doesn't match the acceptance criteria, treat it as a failure and apply Step 12 retry logic.
 
 ### Task verification
 
-After verifying outputs yourself (above), the orchestrator's own acceptance criteria check is the per-wave verification. No subagent is dispatched for this step — the orchestrator reads the code and checks criteria directly. If any acceptance criterion is not met, treat it as a failure and apply Step 10 retry logic.
+After verifying outputs yourself (above), the orchestrator's own acceptance criteria check is the per-wave verification. No subagent is dispatched for this step — the orchestrator reads the code and checks criteria directly. If any acceptance criterion is not met, treat it as a failure and apply Step 12 retry logic.
 
-## Step 9b: Post-wave commit and integration tests
+## Step 11: Post-wave commit and integration tests
 
-After wave verification (Step 9) completes successfully for a wave, perform the following steps in order.
+After wave verification (Step 10) completes successfully for a wave, perform the following steps in order.
 
 ### 1. Commit wave changes
 
@@ -332,7 +332,7 @@ git commit -m "feat(plan): wave <N> - <plan_goal_summary>
 feat(plan): wave 2 - Add execution checkpoints to execute-plan
 
 - Task 3: Add baseline test capture step to execute-plan SKILL.md
-- Task 4: Add main-branch confirmation guard to Step 7 of execute-plan SKILL.md
+- Task 4: Add main-branch confirmation guard to Step 8 of execute-plan SKILL.md
 ```
 
 **If `git add -A` stages nothing** (wave produced no file changes): skip the commit silently. This can happen if a wave's tasks were verification-only.
@@ -348,14 +348,14 @@ TEST_OUTPUT=$(<test_command> 2>&1)
 TEST_EXIT=$?
 ```
 
-**Compare against baseline** (from Step 6b):
+**Compare against baseline** (from Step 7):
 - If the baseline was clean (exit 0) and the current run exits 0 → **pass**. Proceed to next wave.
 - If the baseline was clean (exit 0) and the current run exits non-0 → **fail**. Regressions introduced.
 - If the baseline had pre-existing failures: compare the current failing tests against the baseline failures. If only the same tests fail → **pass** (no regressions). If new failures appear → **fail** (regressions introduced).
 
 **On pass:** Report briefly ("✅ Integration tests pass after wave N") and proceed to the next wave.
 
-**On fail:** Present the user with choices, following the same interaction pattern as Step 10's retry/skip/stop:
+**On fail:** Present the user with choices, following the same interaction pattern as Step 12's retry/skip/stop:
 
 ```
 ❌ Integration tests failed after wave <N>.
@@ -369,11 +369,11 @@ Options:
 (x) Stop — halt plan execution (committed waves are preserved as checkpoints)
 ```
 
-- **Retry:** First, undo the wave's commit if one was made: `git reset --soft HEAD~1` to undo the commit while keeping changes staged, then `git reset HEAD` to unstage so workers start from a clean state. Re-dispatch all tasks from the current wave, appending the test output to each task's prompt so the workers know what broke. This counts as a retry toward the 3-retry limit in Step 10.
+- **Retry:** First, undo the wave's commit if one was made: `git reset --soft HEAD~1` to undo the commit while keeping changes staged, then `git reset HEAD` to unstage so workers start from a clean state. Re-dispatch all tasks from the current wave, appending the test output to each task's prompt so the workers know what broke. This counts as a retry toward the 3-retry limit in Step 12.
 - **Skip:** Proceed to the next wave. The failing commit remains (if committed). Warn: "⚠️ Proceeding with known test regressions."
-- **Stop:** Halt execution. All prior wave commits are preserved as checkpoints. Report partial progress (Step 11). The user can resume or fix manually.
+- **Stop:** Halt execution. All prior wave commits are preserved as checkpoints. Report partial progress (Step 13). The user can resume or fix manually.
 
-## Step 10: Handle failures and retries
+## Step 12: Handle failures and retries
 
 If a worker produces empty, missing, or incorrect output:
 1. Retry automatically up to **3 times** (with improvements to the task prompt if possible).
@@ -387,18 +387,18 @@ Apply wave pacing from Step 3:
 - **(b)** Never pause; collect all failures and report at the very end
 - **(c)** Pause only when a wave produced failures; otherwise auto-continue
 
-## Step 11: Report partial progress
+## Step 13: Report partial progress
 
 **Execution stopped early (user request or unrecoverable failure):**
 - Leave the plan file in `.pi/plans/` so it can be resumed.
 - Report which tasks completed, which failed, and which remain.
 
-## Step 12: Request code review
+## Step 14: Request code review
 
 After all waves complete successfully (and if the user chose review in Step 3):
 
 1. **Gather inputs:**
-   - `BASE_SHA` = `PRE_EXECUTION_SHA` (recorded in Step 7)
+   - `BASE_SHA` = `PRE_EXECUTION_SHA` (recorded in Step 8)
    - `HEAD_SHA` = `git rev-parse HEAD`
    - Description = the plan's Goal section
    - Requirements = full plan file contents
@@ -410,16 +410,16 @@ After all waves complete successfully (and if the user chose review in Step 3):
 
 3. **Handle the result:**
 
-   **`clean`:** Include the review summary (iteration count, review file path) in the Step 13 completion report. Proceed to Step 13.
+   **`clean`:** Include the review summary (iteration count, review file path) in the Step 15 completion report. Proceed to Step 15.
 
    **`max_iterations_reached`:** Present remaining findings to the user. Offer:
    - **(a) Keep iterating** — re-invoke refine-code, budget resets
    - **(b) Proceed with issues** — continue to completion with findings noted
    - **(c) Stop execution** — skip completion, report partial progress
 
-   **Review disabled** (user chose to disable in Step 3): Skip directly to Step 13.
+   **Review disabled** (user chose to disable in Step 3): Skip directly to Step 15.
 
-## Step 13: Complete
+## Step 15: Complete
 
 ### 1. Move plan to done
 
