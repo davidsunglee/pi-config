@@ -126,7 +126,7 @@ No fixed question count. Use judgment about when there is enough information to 
 
 ### Step 5: Write spec
 
-Write the spec to `.pi/specs/<date>-<topic>.md` using the format defined in the Spec Output Format section below. Commit to git.
+Write the spec to `.pi/specs/<date>-<topic>.md` using the format defined in the Spec Output Format section below. Commit to git using the `commit` skill.
 
 ### Step 6: Report and offer continuation
 
