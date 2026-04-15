@@ -281,12 +281,12 @@ After the line "The resolved text becomes `{TASK_DESCRIPTION}`..." add:
 
 ```markdown
 
-**Provenance extraction (file-path inputs only):** When the input is a file, scan its header for provenance references:
+**Provenance extraction (file-path inputs only):** When the input is a file, parse provenance references from the file preamble — the lines between the `# Title` and the first `## ` heading. Ignore any matching lines later in the document (including inside fenced code blocks or examples). Require exact prefix matches:
 
 - `Source: TODO-<id>` — capture the todo ID for `{SOURCE_TODO}`. This allows provenance to flow through from define-spec: the spec references the original todo, and generate-plan passes it to the planner.
-- `Scout brief: .pi/briefs/<filename>` — read the referenced brief file and append its contents to `{TASK_DESCRIPTION}` under a `## Codebase Brief` heading. This gives the planner scout reconnaissance context alongside the spec.
+- `Scout brief: .pi/briefs/<filename>` — read the referenced brief file and append its contents to `{TASK_DESCRIPTION}` under a `## Codebase Brief` heading. Also capture the brief file path for `{SOURCE_BRIEF}`.
 
-Also capture the spec file path itself for `{SOURCE_SPEC}`.
+Set `{SOURCE_SPEC}` only when the input file path is under `.pi/specs/`. For other file inputs (RFCs, design docs at arbitrary paths), leave `{SOURCE_SPEC}` as an empty string.
 ```
 
 - [ ] **Step 3: Verify the edit**
@@ -301,9 +301,10 @@ git commit -m "feat(generate-plan): extract provenance and pass scout brief from
 ```
 
 **Acceptance criteria:**
+- generate-plan Step 1 parses provenance only from the file preamble (before the first `## ` heading), ignoring matches in later content or code blocks
 - generate-plan Step 1 extracts `Source: TODO-<id>` from spec file inputs and captures it for `{SOURCE_TODO}`
-- generate-plan Step 1 extracts `Scout brief:` references, reads the brief, and appends to `{TASK_DESCRIPTION}`
-- generate-plan Step 1 captures the spec file path for `{SOURCE_SPEC}`
+- generate-plan Step 1 extracts `Scout brief:` references, reads the brief, appends to `{TASK_DESCRIPTION}`, and captures the brief path for `{SOURCE_BRIEF}`
+- `{SOURCE_SPEC}` is set only when the input path is under `.pi/specs/`; empty string otherwise
 - When no provenance references are found, behavior is unchanged
 
 **Model recommendation:** cheap
