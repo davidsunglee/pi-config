@@ -186,7 +186,7 @@ Orchestrates plan creation from a todo, spec file, or freeform description.
 - Dispatches the `planner` subagent with a fully assembled prompt from `generate-plan-prompt.md`
 - Dispatches a `plan-reviewer` subagent using `review-plan-prompt.md`
 - Handles review findings: errors trigger a surgical plan edit via `edit-plan-prompt.md` (once), warnings/suggestions are appended as review notes
-- Reports the plan path and suggests execution
+- Reports the plan path and offers to invoke execute-plan with the generated plan
 
 **Files:** `SKILL.md`, `generate-plan-prompt.md`, `review-plan-prompt.md`, `edit-plan-prompt.md`
 

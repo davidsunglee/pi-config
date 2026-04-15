@@ -61,7 +61,7 @@ Write the spec to `.pi/specs/<date>-<topic>.md` using this format:
 # <Title>
 
 Source: TODO-<id>                    <- if input was a todo, omit otherwise
-Scout brief: .pi/briefs/<name>      <- if scout was consumed, omit otherwise
+Scout brief: .pi/briefs/TODO-<id>-brief.md   <- if scout was consumed, omit otherwise
 
 ## Goal
 
@@ -102,9 +102,11 @@ should be aware of. These should be rare — most questions should be resolved
 during the conversation.
 ~~~
 
+The `Scout brief:` line must contain the exact file path read in Step 2 — copy the literal path, do not paraphrase or abbreviate it.
+
 Create the `.pi/specs/` directory if it does not exist.
 
-Commit the spec to git using the `commit` skill.
+Commit the spec file to git using the `commit` skill. Specify the spec file path (`.pi/specs/<date>-<topic>.md`) so only the spec is committed.
 
 ## Step 6: Report and offer continuation
 
