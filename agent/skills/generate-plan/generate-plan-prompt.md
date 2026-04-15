@@ -8,6 +8,10 @@ Analyze the codebase at `{WORKING_DIR}` and produce a structured implementation 
 
 {SOURCE_TODO}
 
+{SOURCE_SPEC}
+
+{SOURCE_BRIEF}
+
 ## Output
 
 Write the plan to `{OUTPUT_PATH}`.
