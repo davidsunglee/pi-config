@@ -141,7 +141,11 @@ If **(b):** proceed to Step 5 with outstanding findings noted.
   - **Clean:** "Plan reviewed — no issues found."
   - **Clean with notes:** "Plan reviewed — N warnings/suggestions appended as Review Notes."
   - **Proceeded with issues:** "Plan reviewed — N outstanding issues noted. Review: `<review-path>`"
-- Suggest running it with the `execute-plan` skill.
+- Offer to continue:
+
+  > Plan written to `.pi/plans/...`. Want me to run execute-plan with this plan?
+
+  If yes, invoke execute-plan with the plan file path.
 
 ## Edge cases
 
