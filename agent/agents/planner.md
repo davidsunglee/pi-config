@@ -52,7 +52,9 @@ Design principles:
 - Files that change together should live together
 - Follow established patterns in existing codebases
 
-**Source:** `TODO-<id>` — Only include this field when the plan originates from a todo. The todo ID will be provided in the task prompt as `Source todo: TODO-<id>`. If the input is a file path or freeform description (no source todo ID provided), omit this field entirely.
+**Source:** `TODO-<id>` — Include when a `Source todo: TODO-<id>` line is provided in the task prompt. Omit otherwise.
+**Spec:** `.pi/specs/<filename>` — Include when a `Source spec: .pi/specs/<filename>` line is provided in the task prompt. Omit otherwise.
+**Scout brief:** `.pi/briefs/<filename>` — Include when a `Scout brief: .pi/briefs/<filename>` line is provided in the task prompt. Omit otherwise.
 
 #### 3. Tasks
 Numbered tasks, each with:
