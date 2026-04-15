@@ -2,45 +2,61 @@
 
 Personal configuration for [pi](https://github.com/badlogic/pi-mono)'s coding agent.
 
-This repo is the checked-in part of my pi setup: local extensions, local subagents, themes, settings, and workflow artifacts such as tracked todos. The emphasis is on a more opinionated, workflow-oriented pi environment without forking pi itself.
+This repo is the checked-in part of my pi setup: local extensions, local subagents, themes, settings, installed packages, and workflow artifacts such as tracked todos and plans. The emphasis is on a more opinionated, workflow-oriented pi environment without forking pi itself.
 
 ## What this repo contains
 
-At a high level, this config adds five things on top of stock pi:
+At a high level, this config adds six things on top of stock pi:
 
 1. **Skills** that encode the end-to-end development workflow
-2. **Custom extensions** for better TUI ergonomics and workflow support
-3. **Local subagents** for plan generation and plan execution
+2. **Custom extensions** for TUI ergonomics, safety guardrails, and workflow support
+3. **Local subagents** for planning, coding, reviewing, and refining
 4. **Custom themes** including a theme-aware footer
-5. **Tracked workflow state** in `.pi/todos/`
+5. **Installed packages** for subagent dispatch, web access, and token burden tracking
+6. **Tracked workflow state** in `.pi/` (todos, plans, reviews)
 
 Repository layout:
 
 ```text
 agent/
-  agents/        Local subagent definitions
-  extensions/    Custom pi extensions
-  skills/        Workflow and discipline skills (the bulk of the config)
-  themes/        Custom themes
-  settings.json  Main pi settings for this setup
+  agents/          Local subagent definitions (5 agents)
+  extensions/      Custom pi extensions (11 files)
+  skills/          Workflow and discipline skills (14 skills)
+  themes/          Custom themes
+  model-tiers.json Model tier definitions and dispatch map
+  settings.json    Main pi settings for this setup
 .pi/
-  todos/         File-based todos tracked in git
+  plans/           Generated plans (active, done, archived, reviews)
+  reviews/         Code review artifacts
+  todos/           File-based todos tracked in git
+docs/
+  superpowers/     Plans and specs for the superpowers skill system
 README.md
 ```
 
 ### Model tiers
 
-This current config defines explicit model tiers used by the workflow:
+The config defines explicit model tiers in `agent/model-tiers.json`, used throughout the workflow so that skills refer to tiers rather than hard-coding models:
 
 - **capable:** `anthropic/claude-opus-4-6`
 - **standard:** `anthropic/claude-sonnet-4-6`
 - **cheap:** `anthropic/claude-haiku-4-5`
 - **cross-provider capable:** `openai-codex/gpt-5.4`
-- **cross-provider standard:** `openai-codex/gpt-5.4-mini`
+- **cross-provider standard:** `openai-codex/gpt-5.4`
 
-These tier names are important because the plan-generation / execution workflow refers to tiers rather than hard-coding models in every step.
+A `dispatch` map routes providers to CLI targets (`anthropic` → `claude`, `openai-codex` → `pi`).
 
-The workflow includes cross-provider reviews to discourage model bias.
+The default session model is `openai-codex/gpt-5.4`. Google Gemini models (`gemini-3.1-pro-preview`, `gemini-3-flash-preview`) are also enabled but not yet integrated into the tier system.
+
+Cross-provider reviews (e.g., OpenAI reviewing Anthropic-generated code) are used throughout to reduce model bias.
+
+### Installed packages
+
+Three external packages are loaded via `settings.json`:
+
+- **`pi-subagent`** — subagent dispatch infrastructure (local fork at `~/Code/pi-subagent`)
+- **`pi-web-access`** — web access tools
+- **`pi-token-burden`** — token burden tracking and visibility
 
 ## Typical workflow
 
@@ -67,34 +83,39 @@ The skills, extensions, subagents, and artifacts in this repo combine into a rep
               ┌───────────────┼───────────────┐
               ▼               ▼               ▼
         ┌──────────┐   ┌──────────┐   ┌──────────┐
-        │ Task A   │   │ Task B   │   │ Task C   │   ← parallel subagents
+        │ Task A   │   │ Task B   │   │ Task C   │   ← parallel coder subagents
         └────┬─────┘   └────┬─────┘   └────┬─────┘
              └───────────────┼───────────────┘
                              ▼
                      ┌───────────────┐
-                     │ Spec check    │   ← per-wave verification
-                     │ + integration │
-                     │   tests       │
+                     │ Verify wave   │   ← acceptance criteria check
                      └───────┬───────┘
                              │
                              ▼
                      ┌───────────────┐
                      │ Commit wave   │   ← checkpoint commit
+                     │ + run tests   │   ← integration tests vs. baseline
                      └───────┬───────┘
                              │
                       (next wave...)
                              │
                              ▼
                      ┌───────────────┐
-                     │ Final review  │   ← cross-provider code review
-                     │ (full diff)   │
+                     │ Refine code   │   ← review-remediate loop
+                     │ (iterative)   │
                      └───────┬───────┘
                              │
-                             ▼
-                     ┌───────────────┐
-                     │ Address any   │
-                     │ findings      │
-                     └───────┬───────┘
+              ┌──────────────┼──────────────┐
+              ▼              ▼              ▼
+        ┌──────────┐  ┌──────────┐  ┌──────────┐
+        │ Review   │  │ Batch &  │  │ Fix      │   ← code-refiner orchestrates
+        │ (cross-  │  │ triage   │  │ findings │     code-reviewer + coder
+        │  prov.)  │  │ findings │  │          │
+        └──────────┘  └──────────┘  └──────────┘
+                             │
+                      (iterate until
+                       clean or budget
+                       exhausted)
                              │
                              ▼
                      ┌───────────────┐
@@ -107,25 +128,26 @@ The skills, extensions, subagents, and artifacts in this repo combine into a rep
 
 1. **Create & refine a todo.** Todos live as markdown files in `.pi/todos/` and are tracked in git. Refinement is collaborative — the agent asks clarifying questions before writing a structured description.
 
-2. **Generate a plan.** The `generate-plan` skill dispatches the `plan-generator` subagent, which deeply reads the codebase and writes a structured plan to `.pi/plans/`. The plan contains numbered tasks, file lists, acceptance criteria, dependencies, and per-task model tier recommendations.
+2. **Generate a plan.** The `generate-plan` skill dispatches the `planner` subagent with a fully assembled prompt (from `generate-plan-prompt.md`), which deeply reads the codebase and writes a structured plan to `.pi/plans/`. The plan contains numbered tasks, file lists, acceptance criteria, dependencies, and per-task model tier recommendations.
 
-3. **Review the plan.** A cross-provider reviewer checks the plan against the original spec for coverage gaps, dependency errors, sizing issues, and vague acceptance criteria. Errors block execution; warnings are appended as review notes.
+3. **Review the plan.** A `plan-reviewer` subagent checks the plan against the original spec (using `review-plan-prompt.md`) for coverage gaps, dependency errors, sizing issues, and vague acceptance criteria. Errors trigger a surgical plan edit via `edit-plan-prompt.md`; warnings/suggestions are appended as review notes.
 
-4. **Execute in waves.** The `execute-plan` skill decomposes tasks into dependency-ordered waves and dispatches `plan-executor` subagents **in parallel** — up to 7 tasks per wave. Each worker gets a self-contained prompt (filled from `implementer-prompt.md`) with the task spec, plan context, and TDD instructions. Workers report structured status codes (`DONE`, `DONE_WITH_CONCERNS`, `NEEDS_CONTEXT`, `BLOCKED`).
+4. **Execute in waves.** The `execute-plan` skill decomposes tasks into dependency-ordered waves and dispatches `coder` subagents **in parallel** — up to 7 tasks per wave. Each worker gets a self-contained prompt (filled from `execute-task-prompt.md`) with the task spec, plan context, and TDD instructions. Workers report structured status codes (`DONE`, `DONE_WITH_CONCERNS`, `NEEDS_CONTEXT`, `BLOCKED`).
 
-5. **Verify each wave.** After a wave completes, the orchestrator verifies outputs against acceptance criteria, then dispatches **parallel spec reviews** (from `spec-reviewer.md`) to independently confirm compliance. Integration tests run against a pre-recorded baseline. A checkpoint commit is made per wave.
+5. **Verify and commit each wave.** After a wave completes, the orchestrator verifies outputs against acceptance criteria. A checkpoint commit is made, then integration tests run against a pre-recorded baseline (captured before the first wave). New test failures are flagged as regressions with retry/skip/stop options.
 
-6. **Final code review.** After all waves pass, a cross-provider review covers the full git diff (from `code-reviewer.md`). Critical/important issues are presented for resolution before completion.
+6. **Refine code.** After all waves pass, the `refine-code` skill dispatches a `code-refiner` subagent that orchestrates an iterative review-remediate loop. The refiner dispatches `code-reviewer` subagents for cross-provider review, triages and batches findings by severity, dispatches `coder` subagents to fix batched issues, and commits remediation changes. This loop iterates until the review comes back clean or the iteration budget (default 3) is exhausted. Versioned review files are written to `.pi/reviews/`.
 
 7. **Close out.** The plan moves to `.pi/plans/done/`, the linked todo is closed, and the `finishing-a-development-branch` skill offers merge, PR, keep, or discard options.
 
 ### Subagent architecture
 
-Every subagent in the workflow starts with **fresh context** — no session forking, no shared conversational history. Information flows through **file artifacts**:
+The workflow uses five specialized subagents, each starting with **fresh context** — no session forking, no shared conversational history. Information flows through **file artifacts**:
 
 - **Plans** (`.pi/plans/`) carry the spec from generation through execution
-- **Prompt templates** (`implementer-prompt.md`, `spec-reviewer.md`, `code-reviewer.md`, `plan-reviewer.md`) are filled per-dispatch with exactly the context each worker needs
-- **Git diffs** carry code changes to the final reviewer
+- **Prompt templates** (`generate-plan-prompt.md`, `execute-task-prompt.md`, `review-code-prompt.md`, `refine-code-prompt.md`, etc.) are filled per-dispatch with exactly the context each worker needs
+- **Reviews** (`.pi/reviews/`) carry versioned review findings and remediation logs
+- **Git diffs** carry code changes between review iterations
 - **Todos** (`.pi/todos/`) track lifecycle state
 
 This is deliberate. Fresh-context subagents are more focused, more independent (reviewers can't be biased by watching generation), more resumable (re-run with the same artifact), and more debuggable (every artifact is a readable file).
@@ -136,7 +158,7 @@ When executing a plan on `main`, the workflow defaults to creating a **git workt
 
 ### Model tier routing
 
-Not every task needs the most capable model. The plan generator assigns per-task model recommendations (`cheap`, `standard`, `capable`), and the executor resolves them against the tiers configured in `agent/model-tiers.json`. A `dispatch` map in the same file routes each provider to its CLI target (e.g., `anthropic` → `claude`, `openai` → `pi`). Reviews use cross-provider models (e.g., OpenAI reviewing Anthropic-generated code) to reduce model bias.
+Not every task needs the most capable model. The plan generator assigns per-task model recommendations (`cheap`, `standard`, `capable`), and the executor resolves them against the tiers configured in `agent/model-tiers.json`. The `dispatch` map in the same file routes each provider to its CLI target (e.g., `anthropic` → `claude`, `openai-codex` → `pi`). Reviews use cross-provider models to reduce model bias. The `code-refiner` subagent (`maxSubagentDepth: 1`) itself dispatches reviewers and coders at appropriate tiers.
 
 ## Skills
 
@@ -147,53 +169,65 @@ Skills are the largest and most important part of this config. They live in `age
 Orchestrates plan creation from a todo, spec file, or freeform description.
 
 - Reads the input source (todo body, file contents, or freeform text)
-- Dispatches the `plan-generator` subagent with a fully assembled prompt
-- Dispatches a **cross-provider plan review** using `plan-reviewer.md`
-- Handles review findings: errors trigger re-generation (once), warnings/suggestions are appended as review notes
+- Dispatches the `planner` subagent with a fully assembled prompt from `generate-plan-prompt.md`
+- Dispatches a `plan-reviewer` subagent using `review-plan-prompt.md`
+- Handles review findings: errors trigger a surgical plan edit via `edit-plan-prompt.md` (once), warnings/suggestions are appended as review notes
 - Reports the plan path and suggests execution
 
-**Files:** `SKILL.md`, `plan-reviewer.md`
+**Files:** `SKILL.md`, `generate-plan-prompt.md`, `review-plan-prompt.md`, `edit-plan-prompt.md`
 
 ### `agent/skills/execute-plan/`
 
-The most complex skill. Orchestrates multi-wave parallel plan execution with verification, testing, commits, and review.
+Orchestrates multi-wave parallel plan execution with verification, integration testing, commits, and refinement.
 
 - Validates the plan structure
-- Presents configurable execution settings (worktree, parallelism, TDD, review, spec check, commits, integration tests)
+- Presents configurable execution settings (worktree, parallelism, TDD, integration tests, review, commits)
 - Builds a dependency graph and groups tasks into waves
 - Resolves model tiers from `agent/model-tiers.json`
-- Captures a baseline test snapshot
-- Dispatches workers in parallel per wave using filled `implementer-prompt.md` templates
+- Captures a baseline test snapshot before the first wave
+- Dispatches `coder` subagents in parallel per wave using filled `execute-task-prompt.md` templates
 - Handles worker status codes and retries (up to 3, then escalates)
-- Runs per-wave spec compliance reviews using `spec-reviewer.md`
-- Commits each wave as a checkpoint
-- Runs integration tests after each wave, comparing against baseline
-- Dispatches a cross-provider final code review using `code-reviewer.md`
+- Verifies wave output against acceptance criteria
+- Commits each wave as a checkpoint, then runs integration tests against baseline (new failures flagged as regressions)
+- Invokes `refine-code` for the post-execution review-remediate loop
 - Moves completed plans to `done/`, closes linked todos, invokes branch completion
 
-**Files:** `SKILL.md`, `implementer-prompt.md`, `spec-reviewer.md`
+**Files:** `SKILL.md`, `execute-task-prompt.md`
+
+### `agent/skills/refine-code/`
+
+Automated iterative review-remediate cycle. Dispatches a `code-refiner` subagent that drives the inner loop.
+
+- Gathers git range (`BASE_SHA..HEAD_SHA`), description, and optional plan/requirements
+- Reads model tiers and resolves dispatch targets
+- Dispatches the `code-refiner` with a fully assembled prompt from `refine-code-prompt.md`
+- The refiner alternates between cross-provider reviews and batched remediation
+- Iterates until the review is clean or the iteration budget is exhausted
+- Writes versioned review files to `.pi/reviews/`
+- Used standalone or invoked automatically by `execute-plan`
+
+**Files:** `SKILL.md`, `refine-code-prompt.md`, `review-fix-block.md`
 
 ### `agent/skills/requesting-code-review/`
 
 Dispatches an independent code reviewer with precisely crafted context.
 
 - Determines the git range to review
-- Fills the `code-reviewer.md` template with what was implemented, the plan/requirements, and the diff range
+- Fills the `review-code-prompt.md` template with what was implemented, the plan/requirements, and the diff range
 - Dispatches in fresh context with a capable-tier model
 - Categorizes findings by severity (critical, important, minor)
-- Used standalone (execute-plan invokes `refine-code` for its post-execution review)
 
-**Files:** `SKILL.md`, `code-reviewer.md`
+**Files:** `SKILL.md`, `review-code-prompt.md`
 
 ### `agent/skills/receiving-code-review/`
 
 Guides how the agent handles incoming review feedback.
 
 - Requires verifying every suggestion against the actual codebase before implementing
-- Forbids performative agreement ("Great point!") — demands technical acknowledgment or reasoned pushback
+- Forbids performative agreement (“Great point!”) — demands technical acknowledgment or reasoned pushback
 - Requires clarifying all unclear items before implementing any
 - Defines handling for user feedback vs. external reviewer feedback
-- Includes a YAGNI check for suggested "professional" features
+- Includes a YAGNI check for suggested “professional” features
 
 **Files:** `SKILL.md`
 
@@ -237,7 +271,7 @@ Prevents premature success claims.
 
 - No completion claims without fresh verification evidence
 - Requires running the actual verification command, reading full output, and confirming it supports the claim
-- Blocks optimistic language ("should work", "looks correct") without evidence
+- Blocks optimistic language (“should work”, “looks correct”) without evidence
 - Applies to tests, builds, linting, requirements checks, and agent delegation
 
 **Files:** `SKILL.md`
@@ -265,6 +299,27 @@ Structured branch completion after implementation is done.
 - Invoked automatically at the end of `execute-plan`
 
 **Files:** `SKILL.md`
+
+### `agent/skills/web-browser/`
+
+CDP-based browser automation for interactive web exploration.
+
+- Remote controls Google Chrome / Chromium via the Chrome DevTools Protocol on `:9222`
+- Supports fresh or profile-based sessions (carries over cookies/logins)
+- Provides scripts for navigation, clicking, form filling, screenshots, and DOM inspection
+- Used when the agent needs to interact with web pages during development
+
+**Files:** `SKILL.md`, `scripts/` (11 JavaScript files + `package.json`)
+
+### `agent/skills/xcode-build/`
+
+Build and run Xcode projects.
+
+- Handles `xcodegen` project generation, `xcodebuild` compilation, and simulator management
+- Supports running apps on iOS/macOS simulators or natively
+- Provides scripts for generate, build, run, list-simulators, and boot-simulator
+
+**Files:** `SKILL.md`, `scripts/` (5 shell scripts)
 
 ## Extensions
 
@@ -331,6 +386,27 @@ It shows:
 
 It also supports per-theme footer color overrides, which is how the Everblush/Nord/Carbonfox footer styling is implemented.
 
+### `agent/extensions/guardrails.ts`
+
+Pragmatic **safety guardrails** for common unsafe or dubious tool calls.
+
+- Intercepts `bash`, `write`, and `edit` tool calls
+- Hard-blocks writes to sensitive paths (`.env`, `.git/config`, `.ssh/`, `node_modules/`, etc.)
+- Confirmation-gates dangerous shell commands (`rm -rf`, `sudo`, `git push --force`, `git reset --hard`, etc.)
+- Blocks `file://` URLs in browser navigation
+- Soft-protects lockfiles and generated artifacts
+- Not a security sandbox — meant to catch high-signal mistakes and add friction around risky actions
+
+**Tests:** `guardrails.test.ts`
+
+### `agent/extensions/usage-bar.ts`
+
+Adds `/usage`, a **provider usage dashboard** showing rate limits and status across AI providers.
+
+- Displays usage stats with progress bars for Claude, Copilot, Gemini, and Codex
+- Shows provider operational status (outages/incidents)
+- Shows reset countdowns for rate-limited windows
+
 ### `agent/extensions/session-breakdown.ts`
 
 Adds `/session-breakdown`, an interactive analytics view over `~/.pi/agent/sessions`.
@@ -347,6 +423,8 @@ It visualizes the last 7 / 30 / 90 days of usage, including:
 - time-of-day breakdown
 
 This is more of an introspection / observability tool than a workflow tool.
+
+**Tests:** `session-breakdown.test.ts`
 
 ### `agent/extensions/todos.ts`
 
@@ -373,45 +451,56 @@ Purely cosmetic, but fun.
 
 ## Local subagents
 
-This repo currently includes two local agent definitions in `agent/agents/`.
+This repo includes five local agent definitions in `agent/agents/`. Each operates with fresh context and no shared conversational history.
 
-### `agent/agents/plan-generator.md`
+### `agent/agents/planner.md`
 
 A **read-only planning agent** that deeply analyzes the codebase and writes structured plans to `.pi/plans/`.
 
-Its responsibilities include:
+- Understands the task from a todo, spec, or freeform prompt
+- Reads the relevant codebase deeply rather than doing a superficial tree scan
+- Produces a plan with: goal, architecture summary, tech stack, file structure, numbered tasks, dependencies, risk assessment, and optional test command
+- Also performs **surgical plan edits** when dispatched with the `edit-plan-prompt` after review findings
+- Runs on `claude-opus-4-6` with high thinking
 
-- understanding the task from a todo, spec, or freeform prompt
-- reading the relevant codebase deeply rather than doing a superficial tree scan
-- producing a plan with:
-  - goal
-  - architecture summary
-  - tech stack
-  - file structure
-  - numbered tasks
-  - dependencies
-  - risk assessment
-  - optional test command
+### `agent/agents/coder.md`
 
-This agent is designed to produce self-contained implementation plans for later execution.
+A **task execution agent** for carrying out a single task from a structured plan or fixing code based on review findings.
 
-### `agent/agents/plan-executor.md`
+- Assumes **no parent-session context** — expects a fully self-contained task prompt
+- Reads listed source files, executes the task, writes output to specified paths
+- Reports a structured status: `DONE`, `DONE_WITH_CONCERNS`, `NEEDS_CONTEXT`, `BLOCKED`
+- Runs on `claude-sonnet-4-6` with medium thinking
 
-A **task execution agent** for carrying out one task from a structured plan.
+### `agent/agents/code-reviewer.md`
 
-Its key properties:
+An **independent code reviewer** for production readiness.
 
-- assumes **no parent-session context**
-- expects a fully self-contained task prompt
-- reads listed source files
-- executes only the requested task
-- reports a structured status:
-  - `STATUS: DONE`
-  - `STATUS: DONE_WITH_CONCERNS`
-  - `STATUS: NEEDS_CONTEXT`
-  - `STATUS: BLOCKED`
+- Supports two modes: **full review** (entire diff) and **hybrid re-review** (remediation diff only)
+- Checks quality, architecture, testing, and requirements compliance
+- Calibrates severity accurately (Critical through Minor)
+- Gives a clear verdict: `[Approved]` or `[Issues Found]`
+- Runs with high thinking
 
-This is the worker used by higher-level planning/execution workflows.
+### `agent/agents/code-refiner.md`
+
+An **orchestrator for the review-remediate loop** (`maxSubagentDepth: 1`).
+
+- Dispatches `code-reviewer` subagents for review passes
+- Assesses findings, batches them by file proximity and logical coupling
+- Dispatches `coder` subagents to fix batched findings
+- Commits remediation changes and tracks iteration budget and convergence
+- Writes versioned review files with remediation logs
+- Runs on `claude-sonnet-4-6` with medium thinking
+
+### `agent/agents/plan-reviewer.md`
+
+A **plan reviewer** that checks generated plans for structural correctness, spec coverage, and buildability.
+
+- Reviews every task for dependency accuracy, acceptance criteria quality, and sizing
+- Gives a clear verdict: `[Approved]` or `[Issues Found]`
+- Uses severity levels: Error (blocks execution), Warning, Suggestion
+- Runs on `claude-sonnet-4-6` with high thinking
 
 ## Themes
 
@@ -425,17 +514,18 @@ Everblush-inspired palette with theme-aware footer.
 
 Carbonfox variant with theme-aware footer.
 
-### `agent/themes/nord-dark.json`
+### `agent/themes/nord.json`
 
-Nord-inspired dark theme with theme-aware footer.
+Nord-inspired theme with theme-aware footer. Currently the active theme.
 
 ## What is *not* in this repo
 
 This repo contains the **project-local config**, but not necessarily every part of the full personal pi environment.
 
-In particular, some workflow logic may live outside this repo in user-level pi directories such as:
+In particular, some workflow logic may live outside this repo in:
 
 - globally installed pi packages
+- the `pi-subagent` local fork (at `~/Code/pi-subagent`)
 - user-level keybindings or context files
 
 ## How I think about this config
@@ -447,3 +537,4 @@ The overall direction of this setup is:
 - support a simple but opinionated workflow
 - prefer explicit artifacts (todos, plans, reviews) over hidden state
 - use subagents with self-contained prompts rather than shared context
+- iterate toward quality with automated review-remediate loops rather than single-pass generation
