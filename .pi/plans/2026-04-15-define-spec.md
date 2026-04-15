@@ -370,7 +370,7 @@ Read `agent/skills/generate-plan/SKILL.md` Step 3. First, revise the existing `{
 Then add the new placeholders after the updated `{SOURCE_TODO}` entry:
 
 ```markdown
-   - `{SOURCE_SPEC}` — `Source spec: .pi/specs/<filename>` if the input was a spec file, empty string otherwise
+   - `{SOURCE_SPEC}` — `Source spec: .pi/specs/<filename>` if the input file path is under `.pi/specs/`, empty string otherwise
    - `{SOURCE_BRIEF}` — `Scout brief: .pi/briefs/<filename>` if a scout brief was consumed, empty string otherwise
 ```
 
@@ -450,7 +450,7 @@ Read `README.md` and locate the `## Skills` section. Skill subsections are order
 
 - [ ] **Step 2: Add the define-spec entry**
 
-Add a new subsection for define-spec **before** the `### \`agent/skills/generate-plan/\`` entry (alphabetical order). Use the same format as existing skill entries:
+Add a new subsection for define-spec **after** the `### \`agent/skills/commit/\`` entry and **before** the `### \`agent/skills/execute-plan/\`` entry (alphabetical order). Use the same format as existing skill entries:
 
 ```markdown
 ### `agent/skills/define-spec/`
