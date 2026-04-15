@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Create the `define-spec` skill that interactively produces structured specs from todos or freeform descriptions, plus two cross-suite updates to generate-plan.
+**Goal:** Create the `define-spec` skill that interactively produces structured specs from todos or freeform descriptions, plus cross-suite updates to generate-plan and planner.
 
-**Architecture:** One new skill (`agent/skills/define-spec/SKILL.md`) and two targeted modifications to the existing generate-plan skill. No new agents, subagents, or TypeScript code — define-spec runs inline in the host session.
+**Architecture:** One new skill (`agent/skills/define-spec/SKILL.md`) and targeted modifications to the existing generate-plan skill and planner agent. No new agents, subagents, or TypeScript code — define-spec runs inline in the host session.
 
 **Tech Stack:** Markdown skill definitions (SKILL.md files)
 
@@ -50,7 +50,7 @@ Collaboratively produce a structured spec from a rough todo or freeform descript
 
 The user will provide one of two input sources:
 
-1. **Todo ID** (e.g., `TODO-ccbbedd6`) — use the `todo` tool to read the todo and extract its full body. Capture the ID for provenance tracking.
+1. **Todo ID** (e.g., `TODO-ccbbedd6`) — use the `todo` tool to read the todo and extract its title and full body. Capture the ID for provenance tracking.
 2. **Freeform description** — use the text as-is.
 
 The resolved text becomes the seed for exploration and questions.
@@ -193,6 +193,7 @@ git commit -m "feat: add define-spec skill for interactive spec writing"
 - Skill has 6 steps matching the spec: determine input, check scout brief, explore context, ask questions, write spec, report and offer continuation
 - Spec output format includes all required sections: Goal, Context, Requirements, Constraints, Acceptance Criteria, Non-Goals, Open Questions (optional)
 - Edge cases section handles: todo not found, scout brief missing, `.pi/specs/` missing, user skipping questions
+- Todo input resolves both title and body from the todo file
 
 **Model recommendation:** standard
 
@@ -436,14 +437,12 @@ git commit -m "feat(planner): add spec and scout brief provenance fields to plan
 ## Dependencies
 
 - Task 1 is independent of all other tasks
-- Task 2 is independent of all other tasks
-- Task 3 and Task 4 both modify `generate-plan/SKILL.md` — execute Task 3 before Task 4, or combine into one commit
-- Task 5 is independent of Tasks 1 and 2, but should follow Task 4 (the planner needs to know about placeholders that generate-plan fills)
+- Tasks 2, 3, and 4 all modify `generate-plan/SKILL.md` (Steps 5, 1, and 3 respectively) — execute them sequentially to avoid conflicts: Task 2 → Task 3 → Task 4
+- Task 5 is independent of all other tasks, but should logically follow Task 4 (the planner needs to know about placeholders that generate-plan fills)
 
 ```
 Task 1 ─────────────────────────────────────── (independent)
-Task 2 ─────────────────────────────────────── (independent)
-Task 3 → Task 4 ───────────────────────────── (sequential, both touch generate-plan)
+Task 2 → Task 3 → Task 4 ─────────────────── (sequential, all touch generate-plan/SKILL.md)
 Task 5 ─────────────────────────────────────── (independent, but logically after Task 4)
 ```
 
