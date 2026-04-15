@@ -242,6 +242,19 @@ Structured git commit creation using Conventional Commits format.
 
 **Files:** `SKILL.md`
 
+### `agent/skills/define-spec/`
+
+Interactive spec writing from a todo or freeform description.
+
+- Resolves input from a todo ID or freeform text
+- Checks for and consumes scout briefs when available
+- Explores the codebase for informed questioning
+- Asks clarifying questions to externalize user intent, scope, constraints, and acceptance criteria
+- Writes a structured spec to `.pi/specs/` optimized for generate-plan consumption
+- Offers to invoke generate-plan with the resulting spec
+
+**Files:** `SKILL.md`
+
 ### `agent/skills/test-driven-development/`
 
 Enforces the red-green-refactor cycle for all implementation work.
