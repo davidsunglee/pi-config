@@ -13,7 +13,7 @@ At a high level, this config adds six things on top of stock pi:
 3. **Local subagents** for planning, coding, reviewing, and refining
 4. **Custom themes** including a theme-aware footer
 5. **Installed packages** for subagent dispatch, web access, and token burden tracking
-6. **Tracked workflow state** in `.pi/` (todos, plans, reviews)
+6. **Tracked workflow state** in `.pi/` (todos, plans, specs, reviews)
 
 Repository layout:
 
@@ -28,6 +28,7 @@ agent/
 .pi/
   plans/           Generated plans (active, done, archived, reviews)
   reviews/         Code review artifacts
+  specs/           Structured specs from define-spec
   todos/           File-based todos tracked in git
 docs/
   superpowers/     Plans and specs for the superpowers skill system
@@ -164,6 +165,19 @@ Not every task needs the most capable model. The plan generator assigns per-task
 
 Skills are the largest and most important part of this config. They live in `agent/skills/` and encode structured processes that the agent follows when the user invokes them. Each skill includes a `SKILL.md` and may include prompt templates for subagent dispatch.
 
+### `agent/skills/define-spec/`
+
+Interactive spec writing from a todo or freeform description.
+
+- Resolves input from a todo ID or freeform text
+- Checks for and consumes scout briefs when available
+- Explores the codebase for informed questioning
+- Asks clarifying questions to externalize user intent, scope, constraints, and acceptance criteria
+- Writes a structured spec to `.pi/specs/` optimized for generate-plan consumption
+- Offers to invoke generate-plan with the resulting spec
+
+**Files:** `SKILL.md`
+
 ### `agent/skills/generate-plan/`
 
 Orchestrates plan creation from a todo, spec file, or freeform description.
@@ -239,19 +253,6 @@ Structured git commit creation using Conventional Commits format.
 - Respects caller-provided file paths or instructions
 - Reviews `git status` and `git diff` before committing
 - Asks for clarification on ambiguous files rather than guessing
-
-**Files:** `SKILL.md`
-
-### `agent/skills/define-spec/`
-
-Interactive spec writing from a todo or freeform description.
-
-- Resolves input from a todo ID or freeform text
-- Checks for and consumes scout briefs when available
-- Explores the codebase for informed questioning
-- Asks clarifying questions to externalize user intent, scope, constraints, and acceptance criteria
-- Writes a structured spec to `.pi/specs/` optimized for generate-plan consumption
-- Offers to invoke generate-plan with the resulting spec
 
 **Files:** `SKILL.md`
 

@@ -39,6 +39,10 @@ Write the plan to the output path specified in your task prompt (create the dire
 - **Architecture summary**: How the pieces fit together
 - **Tech stack**: Languages, frameworks, key dependencies
 
+**Source:** `TODO-<id>` — Include when a `Source todo: TODO-<id>` line is provided in the task prompt. Omit otherwise.
+**Spec:** `.pi/specs/<filename>` — Include when a `Source spec: .pi/specs/<filename>` line is provided in the task prompt. Omit otherwise.
+**Scout brief:** `.pi/briefs/<filename>` — Include when a `Scout brief: .pi/briefs/<filename>` line is provided in the task prompt. Omit otherwise.
+
 #### 2. File Structure
 List every file to create or modify with its responsibility:
 ```
@@ -51,10 +55,6 @@ Design principles:
 - Smaller, focused files over large ones
 - Files that change together should live together
 - Follow established patterns in existing codebases
-
-**Source:** `TODO-<id>` — Include when a `Source todo: TODO-<id>` line is provided in the task prompt. Omit otherwise.
-**Spec:** `.pi/specs/<filename>` — Include when a `Source spec: .pi/specs/<filename>` line is provided in the task prompt. Omit otherwise.
-**Scout brief:** `.pi/briefs/<filename>` — Include when a `Scout brief: .pi/briefs/<filename>` line is provided in the task prompt. Omit otherwise.
 
 #### 3. Tasks
 Numbered tasks, each with:
