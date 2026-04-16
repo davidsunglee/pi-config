@@ -88,8 +88,8 @@ test("priority order: cost drops first", () => {
 		hasProvider: true, hasTokens: true, hasCost: true,
 	};
 	// Row 2 full need with all flags on:
-	//   14 + 12 + 12 + 2 + (6 + 8) + 14 + 8 + 2 spaces = 78
-	const fullRow2 = 78;
+	//   14 + 12 + 12 + 2 + (6 + 8) + 14 + 8 + 2 separators = 82
+	const fullRow2 = 82;
 	const flags = computeVisibility(fw(fullRow2 - 1, fields));
 
 	assert.ok(!flags.showCost, "cost should drop first");
@@ -105,8 +105,8 @@ test("tokens drop as a single unit (both arrows + values)", () => {
 		hasBranch: false, hasSessionName: false, hasThinking: false,
 		hasProvider: true, hasTokens: true, hasCost: false,
 	};
-	// With tokens: 14 + 12 + 2 + (6 + 8) + 14 + 1 space = 57
-	const withTokens = 57;
+	// With tokens: 14 + 12 + 2 + (6 + 8) + 14 + 1 separator = 59
+	const withTokens = 59;
 
 	const flags = computeVisibility(fw(withTokens - 1, fields));
 	assert.ok(!flags.showTokens, "tokens should drop as a unit");
@@ -183,8 +183,8 @@ test("context denominator drops as a unit with / separator", () => {
 });
 
 test("cross-row priority: row-2 cost drops before row-1 session name", () => {
-	// Row 2 with cost:    14 + 2 + (6 + 8) + 14 + 8 + 2 spaces = 54
-	// Row 2 without cost: 14 + 2 + (6 + 8) + 14 + 1 space      = 45
+	// Row 2 with cost:    14 + 2 + (6 + 8) + 14 + 8 + 2 separators = 58
+	// Row 2 without cost: 14 + 2 + (6 + 8) + 14 + 1 separator     = 47
 	const fields = {
 		pwdStrWidth: 20, branchWidth: 9, sessionNameWidth: 15,
 		modelNameWidth: 14,
@@ -193,7 +193,7 @@ test("cross-row priority: row-2 cost drops before row-1 session name", () => {
 		hasBranch: true, hasSessionName: true,
 		hasTokens: true, hasCost: true,
 	};
-	const width = 53;
+	const width = 57;
 	const flags = computeVisibility(fw(width, fields));
 
 	assert.ok(!flags.showCost, "cost should drop");

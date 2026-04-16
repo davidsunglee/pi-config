@@ -6,7 +6,7 @@
  *
  * Layout:
  *   Line 1: ~/path · branch                               session-name
- *   Line 2: provider model · thinking    context%/window ↑in ↓out $cost (sub)
+ *   Line 2: provider model · thinking    context% / window · ↑in ↓out · $cost (sub)
  *   Line 3: extension statuses (optional)
  *
  * Context usage escalation is preserved:
@@ -49,6 +49,11 @@ export type FooterColors = {
   modelName: string | number;
   tokens: string | number;
   cost: string | number;
+  /**
+   * Retained for user config compatibility but not used by the built-in rendering
+   * path: `buildCostString` applies the `cost` color to the `(sub)` indicator, so
+   * this field has no effect unless a custom renderer reads it explicitly.
+   */
   subscriptionIndicator: string | number;
   contextUsage: string | number;
   contextWindow: string | number;
