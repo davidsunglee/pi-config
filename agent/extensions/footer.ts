@@ -4,9 +4,9 @@
  * Replaces the default pi footer with one where each field's color is independently
  * configurable via THEME_COLORS, with graceful fallback to theme token defaults.
  *
- * The layout faithfully reproduces the default footer:
- *   Line 1: ~/path (branch) • session-name
- *   Line 2: ↑input ↓output Rcache Wcache $cost context%/window (auto) | (provider) model • thinking
+ * Layout:
+ *   Line 1: ~/path · branch                               session-name
+ *   Line 2: (provider) model · thinking    context%/window ↑in ↓out $cost (sub) (auto)
  *   Line 3: extension statuses (optional)
  *
  * Context usage escalation is preserved:
