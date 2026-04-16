@@ -1,128 +1,61 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
+import { computeVisibility, type FieldWidths } from "./footer.ts";
+
 /**
- * Since the footer is deeply coupled to its module imports (SettingsManager, etc.),
- * we test the priority logic by extracting it into a testable form.
+ * These tests exercise the production priority dropper directly (imported
+ * from ./footer.ts) to guarantee production divergence cannot slip through.
  *
- * Instead of trying to mock the entire module system, we test the core logic
- * by reimplementing the priority dropper in isolation and verifying it matches
- * the specification.
+ * FieldWidths semantics reminder:
+ *   - branchWidth includes the " · " separator (matches production measurement).
+ *   - sessionNameWidth is the raw session label width (no padding).
+ *   - ellipsisWidth is the "..." glyph width used by the cwd truncation path.
  */
 
-// ─── Priority dropper logic (extracted for testing) ─────────────────────────
-
-interface FieldWidths {
-	pwdStr: number;
-	branch: number;       // 0 if no branch
-	sessionName: number;  // 0 if no session
-	modelName: number;
-	thinking: number;     // 0 if no thinking
-	provider: number;     // 0 if no provider
-	contextPercent: number;
-	contextDenom: number;
-	tokens: number;       // 0 if no tokens
-	cost: number;         // 0 if no cost
-	autoCompact: number;  // 0 if disabled
-}
-
-interface VisibilityFlags {
-	showAutoCompact: boolean;
-	showCost: boolean;
-	showTokens: boolean;
-	showProvider: boolean;
-	showContextDenom: boolean;
-	showSessionName: boolean;
-	showBranch: boolean;
-	showThinking: boolean;
-}
-
-const MIN_PADDING = 2;
 const ELLIPSIS_WIDTH = 3; // "..."
-const MIN_PWD_CHARS_WITH_BRANCH = 4;
-const BRANCH_SEPARATOR_WIDTH = 3; // " · "
 
-function row1CanFit(
-	fw: FieldWidths,
-	flags: VisibilityFlags,
-	width: number,
-): boolean {
-	const rightWidth = flags.showSessionName && fw.sessionName > 0
-		? MIN_PADDING + fw.sessionName
-		: 0;
-
-	const maxLeftWidth = width - rightWidth;
-	if (maxLeftWidth <= 0) return false;
-
-	const fullLeftWidth = fw.pwdStr + (flags.showBranch ? BRANCH_SEPARATOR_WIDTH + fw.branch : 0);
-	if (fullLeftWidth <= maxLeftWidth) return true;
-
-	if (flags.showBranch) {
-		const minLeftKeepingBranch =
-			ELLIPSIS_WIDTH + MIN_PWD_CHARS_WITH_BRANCH + BRANCH_SEPARATOR_WIDTH + fw.branch;
-		return maxLeftWidth >= minLeftKeepingBranch;
-	}
-
-	return maxLeftWidth >= 1;
-}
-
-function row2Needed(fw: FieldWidths, flags: VisibilityFlags): number {
-	let left = fw.modelName;
-	if (flags.showThinking) left += fw.thinking;
-	if (flags.showProvider) left += fw.provider;
-
-	const rightParts: number[] = [];
-	let ctxW = fw.contextPercent;
-	if (flags.showContextDenom) ctxW += fw.contextDenom;
-	rightParts.push(ctxW);
-	if (flags.showTokens && fw.tokens) rightParts.push(fw.tokens);
-	if (flags.showCost && fw.cost) rightParts.push(fw.cost);
-	if (flags.showAutoCompact && fw.autoCompact) rightParts.push(fw.autoCompact);
-
-	const right = rightParts.reduce((a, b) => a + b, 0) +
-		Math.max(0, rightParts.length - 1);
-
-	return left + MIN_PADDING + right;
-}
-
-function computeVisibility(fw: FieldWidths, width: number): VisibilityFlags {
-	const flags: VisibilityFlags = {
-		showAutoCompact: fw.autoCompact > 0,
-		showCost: fw.cost > 0,
-		showTokens: fw.tokens > 0,
-		showProvider: fw.provider > 0,
-		showContextDenom: true,
-		showSessionName: fw.sessionName > 0,
-		showBranch: fw.branch > 0,
-		showThinking: fw.thinking > 0,
+/**
+ * Build a FieldWidths object for a given terminal width with sensible defaults.
+ * Individual tests override only the fields they care about.
+ */
+function fw(width: number, overrides: Partial<FieldWidths> = {}): FieldWidths {
+	const base: FieldWidths = {
+		width,
+		pwdStrWidth: 0,
+		branchWidth: 0,
+		sessionNameWidth: 0,
+		ellipsisWidth: ELLIPSIS_WIDTH,
+		modelNameWidth: 0,
+		thinkingWidth: 0,
+		providerWidth: 0,
+		contextPercentWidth: 0,
+		contextDenomWidth: 0,
+		tokensWidth: 0,
+		costWidth: 0,
+		autoCompactWidth: 0,
+		hasBranch: false,
+		hasSessionName: false,
+		hasThinking: false,
+		hasProvider: false,
+		hasTokens: false,
+		hasCost: false,
+		hasAutoCompact: false,
 	};
-
-	function bothFit() {
-		return row1CanFit(fw, flags, width) && row2Needed(fw, flags) <= width;
-	}
-
-	if (!bothFit() && flags.showAutoCompact)  flags.showAutoCompact = false;
-	if (!bothFit() && flags.showCost)         flags.showCost = false;
-	if (!bothFit() && flags.showTokens)       flags.showTokens = false;
-	if (!bothFit() && flags.showProvider)     flags.showProvider = false;
-	if (!bothFit() && flags.showContextDenom) flags.showContextDenom = false;
-	if (!bothFit() && flags.showSessionName)  flags.showSessionName = false;
-	if (!bothFit() && flags.showBranch)       flags.showBranch = false;
-	if (!bothFit() && flags.showThinking)     flags.showThinking = false;
-
-	return flags;
+	return { ...base, ...overrides };
 }
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
 test("wide terminal: all fields visible", () => {
-	const fw: FieldWidths = {
-		pwdStr: 20, branch: 6, sessionName: 10,
-		modelName: 14, thinking: 12, provider: 12,
-		contextPercent: 6, contextDenom: 8,
-		tokens: 14, cost: 8, autoCompact: 6,
-	};
-	const flags = computeVisibility(fw, 200);
+	const flags = computeVisibility(fw(200, {
+		pwdStrWidth: 20, branchWidth: 9, sessionNameWidth: 10,
+		modelNameWidth: 14, thinkingWidth: 12, providerWidth: 12,
+		contextPercentWidth: 6, contextDenomWidth: 8,
+		tokensWidth: 14, costWidth: 8, autoCompactWidth: 6,
+		hasBranch: true, hasSessionName: true, hasThinking: true,
+		hasProvider: true, hasTokens: true, hasCost: true, hasAutoCompact: true,
+	}));
 
 	assert.ok(flags.showAutoCompact);
 	assert.ok(flags.showCost);
@@ -135,20 +68,19 @@ test("wide terminal: all fields visible", () => {
 });
 
 test("priority order: auto-compact drops first", () => {
-	const fw: FieldWidths = {
-		pwdStr: 20, branch: 6, sessionName: 10,
-		modelName: 14, thinking: 12, provider: 12,
-		contextPercent: 6, contextDenom: 8,
-		tokens: 14, cost: 8, autoCompact: 6,
+	const fields = {
+		pwdStrWidth: 20, branchWidth: 9, sessionNameWidth: 10,
+		modelNameWidth: 14, thinkingWidth: 12, providerWidth: 12,
+		contextPercentWidth: 6, contextDenomWidth: 8,
+		tokensWidth: 14, costWidth: 8, autoCompactWidth: 6,
+		hasBranch: true, hasSessionName: true, hasThinking: true,
+		hasProvider: true, hasTokens: true, hasCost: true, hasAutoCompact: true,
 	};
-	// Total row2 need = 14+12+12 + 2 + (6+8 + 14 + 8 + 6 + 3spaces) = 85
-	// Make width just under that to force auto-compact drop
-	const fullRow2 = row2Needed(fw, {
-		showAutoCompact: true, showCost: true, showTokens: true,
-		showProvider: true, showContextDenom: true, showSessionName: true,
-		showBranch: true, showThinking: true,
-	});
-	const flags = computeVisibility(fw, fullRow2 - 1);
+	// Row 2 full need with all flags on: modelName+thinking+provider + 2 +
+	//   (contextPercent+contextDenom) + tokens + cost + autoCompact + 3 spaces
+	//   = 38 + 2 + 14 + 14 + 8 + 6 + 3 = 85
+	const fullRow2 = 85;
+	const flags = computeVisibility(fw(fullRow2 - 1, fields));
 
 	assert.ok(!flags.showAutoCompact, "auto-compact should drop first");
 	assert.ok(flags.showCost, "cost should still be visible");
@@ -156,121 +88,95 @@ test("priority order: auto-compact drops first", () => {
 });
 
 test("priority order: cost drops before tokens", () => {
-	const fw: FieldWidths = {
-		pwdStr: 10, branch: 4, sessionName: 0,
-		modelName: 14, thinking: 0, provider: 12,
-		contextPercent: 6, contextDenom: 8,
-		tokens: 14, cost: 8, autoCompact: 0,
+	const fields = {
+		pwdStrWidth: 10, branchWidth: 7, sessionNameWidth: 0,
+		modelNameWidth: 14, thinkingWidth: 0, providerWidth: 12,
+		contextPercentWidth: 6, contextDenomWidth: 8,
+		tokensWidth: 14, costWidth: 8, autoCompactWidth: 0,
+		hasBranch: true, hasSessionName: false, hasThinking: false,
+		hasProvider: true, hasTokens: true, hasCost: true, hasAutoCompact: false,
 	};
-	// Remove cost+1 to force cost drop but not tokens
-	const withCost = row2Needed(fw, {
-		showAutoCompact: false, showCost: true, showTokens: true,
-		showProvider: true, showContextDenom: true, showSessionName: false,
-		showBranch: true, showThinking: false,
-	});
-	const withoutCost = row2Needed(fw, {
-		showAutoCompact: false, showCost: false, showTokens: true,
-		showProvider: true, showContextDenom: true, showSessionName: false,
-		showBranch: true, showThinking: false,
-	});
-
-	// Width that doesn't fit with cost but fits without
+	// With cost:    14+12 + 2 + (6+8) + 14 + 8 + 2spaces = 66
+	// Without cost: 14+12 + 2 + (6+8) + 14 + 1space       = 57
+	const withCost = 66;
+	const withoutCost = 57;
 	const width = withCost - 1;
 	assert.ok(width >= withoutCost, "test precondition: width should fit without cost");
 
-	const flags = computeVisibility(fw, width);
+	const flags = computeVisibility(fw(width, fields));
 	assert.ok(!flags.showCost, "cost should be dropped");
 	assert.ok(flags.showTokens, "tokens should remain");
 });
 
 test("tokens drop as a single unit (both arrows + values)", () => {
-	const fw: FieldWidths = {
-		pwdStr: 10, branch: 0, sessionName: 0,
-		modelName: 14, thinking: 0, provider: 12,
-		contextPercent: 6, contextDenom: 8,
-		tokens: 14, cost: 0, autoCompact: 0,
+	const fields = {
+		pwdStrWidth: 10, branchWidth: 0, sessionNameWidth: 0,
+		modelNameWidth: 14, thinkingWidth: 0, providerWidth: 12,
+		contextPercentWidth: 6, contextDenomWidth: 8,
+		tokensWidth: 14, costWidth: 0, autoCompactWidth: 0,
+		hasBranch: false, hasSessionName: false, hasThinking: false,
+		hasProvider: true, hasTokens: true, hasCost: false, hasAutoCompact: false,
 	};
+	// With tokens: 14+12 + 2 + (6+8) + 14 + 1 = 57
+	const withTokens = 57;
 
-	const withTokens = row2Needed(fw, {
-		showAutoCompact: false, showCost: false, showTokens: true,
-		showProvider: true, showContextDenom: true, showSessionName: false,
-		showBranch: false, showThinking: false,
-	});
-
-	const flags = computeVisibility(fw, withTokens - 1);
+	const flags = computeVisibility(fw(withTokens - 1, fields));
 	assert.ok(!flags.showTokens, "tokens should drop as a unit");
 	assert.ok(flags.showProvider, "provider should still be visible");
 });
 
 test("session name drops before branch on row 1", () => {
-	const fw: FieldWidths = {
-		pwdStr: 30, branch: 8, sessionName: 15,
-		modelName: 10, thinking: 0, provider: 0,
-		contextPercent: 6, contextDenom: 8,
-		tokens: 0, cost: 0, autoCompact: 0,
-	};
-
-	// With session: row1 right = 2 + 15 = 17, left max = width - 17
-	// Need: ellipsis(3) + 4 + branchSep(3) + branch(8) = 18, so left max needs >= 18
-	// i.e. width >= 35. But also row 2 = 10 + 2 + 6 + 8 = 26 fits easily.
-	// Use width = 34 so row1 can't fit with session, but can without.
-	// Without session: left max = 34, min left with branch = 18, fits.
-	const flags = computeVisibility(fw, 34);
+	// branchWidth includes " · " separator, so 3 + 8 = 11.
+	// With session: right = 2 + 15 = 17, left max = width - 17.
+	//   min left keeping branch = ellipsis(3) + 4 + 11 = 18, needs width >= 35.
+	// Without session: left max = width, needs >= 18.
+	// Row 2: 10 + 2 + 6 + 8 = 26, fits easily.
+	// Width = 34: can't fit with session, can without.
+	const flags = computeVisibility(fw(34, {
+		pwdStrWidth: 30, branchWidth: 11, sessionNameWidth: 15,
+		modelNameWidth: 10, contextPercentWidth: 6, contextDenomWidth: 8,
+		hasBranch: true, hasSessionName: true,
+	}));
 	assert.ok(!flags.showSessionName, "session name should drop");
 	assert.ok(flags.showBranch, "branch should remain");
 });
 
 test("branch drops after session name", () => {
-	const fw: FieldWidths = {
-		pwdStr: 30, branch: 8, sessionName: 0,
-		modelName: 10, thinking: 0, provider: 0,
-		contextPercent: 6, contextDenom: 0,
-		tokens: 0, cost: 0, autoCompact: 0,
-	};
-
-	// Very narrow: can't even fit truncated pwd + branch
-	// Need: ellipsis(3) + 4 chars + branch_sep(3) + branch(8) = 18
-	const flags = computeVisibility(fw, 15);
+	// Very narrow: can't even fit truncated pwd + branch.
+	// Need: ellipsis(3) + 4 chars + branchWidth(11) = 18
+	const flags = computeVisibility(fw(15, {
+		pwdStrWidth: 30, branchWidth: 11,
+		modelNameWidth: 10, contextPercentWidth: 6,
+		hasBranch: true,
+	}));
 	assert.ok(!flags.showBranch, "branch should drop when too narrow");
 });
 
 test("model name and context percent are never hidden", () => {
-	const fw: FieldWidths = {
-		pwdStr: 5, branch: 0, sessionName: 0,
-		modelName: 10, thinking: 8, provider: 10,
-		contextPercent: 6, contextDenom: 8,
-		tokens: 14, cost: 8, autoCompact: 6,
-	};
-
-	// Very narrow terminal
-	const flags = computeVisibility(fw, 20);
-	// Model name and context percent never have hide flags — they're
-	// always included in row2Needed(). We verify they're part of the
-	// minimum by checking that thinking IS hidden at this width.
+	const flags = computeVisibility(fw(20, {
+		pwdStrWidth: 5,
+		modelNameWidth: 10, thinkingWidth: 8, providerWidth: 10,
+		contextPercentWidth: 6, contextDenomWidth: 8,
+		tokensWidth: 14, costWidth: 8, autoCompactWidth: 6,
+		hasThinking: true, hasProvider: true,
+		hasTokens: true, hasCost: true, hasAutoCompact: true,
+	}));
 	assert.ok(!flags.showThinking, "thinking should be hidden");
 	assert.ok(!flags.showProvider, "provider should be hidden");
-	// Model name + context percent minimum = 10 + 2 + 6 = 18
-	assert.ok(row2Needed(fw, flags) <= 20, "row 2 should fit with just model + context%");
+	// Model name + context percent minimum = 10 + 2 + 6 = 18, fits in 20.
 });
 
 test("long cwd does NOT cause row-2 fields to drop when truncation suffices", () => {
-	const fw: FieldWidths = {
-		pwdStr: 100, // very long cwd
-		branch: 6, sessionName: 0,
-		modelName: 14, thinking: 0, provider: 12,
-		contextPercent: 6, contextDenom: 8,
-		tokens: 14, cost: 8, autoCompact: 6,
-	};
-
-	// Width where row 2 fits fine but row 1 needs truncation
-	const row2Width = row2Needed(fw, {
-		showAutoCompact: true, showCost: true, showTokens: true,
-		showProvider: true, showContextDenom: true, showSessionName: false,
-		showBranch: true, showThinking: false,
-	});
-
-	// Row 1 can always fit via truncation (cwd truncation covers it)
-	const flags = computeVisibility(fw, Math.max(row2Width, 80));
+	// Row 2 full need: 14+12 + 2 + (6+8) + 14 + 8 + 6 + 3 = 83
+	const flags = computeVisibility(fw(85, {
+		pwdStrWidth: 100, // very long cwd
+		branchWidth: 9,
+		modelNameWidth: 14, providerWidth: 12,
+		contextPercentWidth: 6, contextDenomWidth: 8,
+		tokensWidth: 14, costWidth: 8, autoCompactWidth: 6,
+		hasBranch: true, hasProvider: true,
+		hasTokens: true, hasCost: true, hasAutoCompact: true,
+	}));
 
 	assert.ok(flags.showAutoCompact, "auto-compact should survive when cwd truncation handles row 1");
 	assert.ok(flags.showCost, "cost should survive when cwd truncation handles row 1");
@@ -279,61 +185,48 @@ test("long cwd does NOT cause row-2 fields to drop when truncation suffices", ()
 });
 
 test("context denominator drops as a unit with / separator", () => {
-	const fw: FieldWidths = {
-		pwdStr: 10, branch: 0, sessionName: 0,
-		modelName: 14, thinking: 0, provider: 0,
-		contextPercent: 6, contextDenom: 8,
-		tokens: 0, cost: 0, autoCompact: 0,
-	};
-
-	// With denom: modelName(14) + 2 + contextPercent(6) + contextDenom(8) = 30
-	// Without denom: modelName(14) + 2 + contextPercent(6) = 22
-	const flags = computeVisibility(fw, 25);
+	// With denom:    14 + 2 + 6 + 8 = 30
+	// Without denom: 14 + 2 + 6     = 22
+	const flags = computeVisibility(fw(25, {
+		pwdStrWidth: 10,
+		modelNameWidth: 14,
+		contextPercentWidth: 6, contextDenomWidth: 8,
+	}));
 	assert.ok(!flags.showContextDenom, "context denom + separator should drop as unit");
 });
 
 test("cross-row priority: row-2 auto-compact drops before row-1 session name", () => {
-	// auto-compact (#11) should drop before session name (#6)
-	const fw: FieldWidths = {
-		pwdStr: 20, branch: 6, sessionName: 15,
-		modelName: 14, thinking: 0, provider: 0,
-		contextPercent: 6, contextDenom: 8,
-		tokens: 14, cost: 8, autoCompact: 6,
+	// auto-compact (#11) should drop before session name (#6).
+	// Provider is hasProvider:false to keep row 2 need manageable.
+	// Row 2 with auto-compact:    14 + 2 + (6+8) + 14 + 8 + 6 + 3 = 61
+	// Row 2 without auto-compact: 14 + 2 + (6+8) + 14 + 8 + 2 = 54
+	const fields = {
+		pwdStrWidth: 20, branchWidth: 9, sessionNameWidth: 15,
+		modelNameWidth: 14,
+		contextPercentWidth: 6, contextDenomWidth: 8,
+		tokensWidth: 14, costWidth: 8, autoCompactWidth: 6,
+		hasBranch: true, hasSessionName: true,
+		hasTokens: true, hasCost: true, hasAutoCompact: true,
 	};
+	const withAutoCompact = 61;
+	const withoutAutoCompact = 54;
+	const width = withAutoCompact - 1; // 60
 
-	// Width where things barely don't fit
-	// row2 without auto-compact should help
-	const withAutoCompact = row2Needed(fw, {
-		showAutoCompact: true, showCost: true, showTokens: true,
-		showProvider: false, showContextDenom: true, showSessionName: true,
-		showBranch: true, showThinking: false,
-	});
-	const withoutAutoCompact = row2Needed(fw, {
-		showAutoCompact: false, showCost: true, showTokens: true,
-		showProvider: false, showContextDenom: true, showSessionName: true,
-		showBranch: true, showThinking: false,
-	});
-
-	const width = withAutoCompact - 1;
 	if (width >= withoutAutoCompact) {
-		// Row 1 should still fit at this width with session name
-		const flags = computeVisibility(fw, width);
+		const flags = computeVisibility(fw(width, fields));
 		assert.ok(!flags.showAutoCompact, "auto-compact should drop");
 		assert.ok(flags.showSessionName, "session name should survive (higher priority)");
 	}
 });
 
 test("thinking drops last among visibility-droppable fields (#3)", () => {
-	const fw: FieldWidths = {
-		pwdStr: 5, branch: 0, sessionName: 0,
-		modelName: 10, thinking: 12, provider: 0,
-		contextPercent: 6, contextDenom: 0,
-		tokens: 0, cost: 0, autoCompact: 0,
-	};
-
-	// Row2 with thinking: 10+12 + 2 + 6 = 30
-	// Row2 without thinking: 10 + 2 + 6 = 18
-	const flags = computeVisibility(fw, 25);
+	// Row 2 with thinking:    10+12 + 2 + 6 = 30
+	// Row 2 without thinking: 10 + 2 + 6    = 18
+	const flags = computeVisibility(fw(25, {
+		pwdStrWidth: 5,
+		modelNameWidth: 10, thinkingWidth: 12,
+		contextPercentWidth: 6,
+		hasThinking: true,
+	}));
 	assert.ok(!flags.showThinking, "thinking should drop");
-	// Everything else is already off
 });

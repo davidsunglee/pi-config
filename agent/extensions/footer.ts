@@ -56,6 +56,110 @@ type FooterColors = {
 	symbols:                string | number;
 };
 
+/** Width measurements for every hideable field, passed to the priority dropper. */
+export interface FieldWidths {
+	width: number;           // terminal width
+	pwdStrWidth: number;
+	branchWidth: number;
+	sessionNameWidth: number;
+	ellipsisWidth: number;
+	modelNameWidth: number;
+	thinkingWidth: number;
+	providerWidth: number;
+	contextPercentWidth: number;
+	contextDenomWidth: number;
+	tokensWidth: number;
+	costWidth: number;
+	autoCompactWidth: number;
+	// Flags for which fields are initially present (non-zero width)
+	hasBranch: boolean;
+	hasSessionName: boolean;
+	hasThinking: boolean;
+	hasProvider: boolean;
+	hasTokens: boolean;
+	hasCost: boolean;
+	hasAutoCompact: boolean;
+}
+
+/** Surviving visibility flags after the priority dropper has run. */
+export interface VisibilityFlags {
+	showBranch: boolean;
+	showSessionName: boolean;
+	showThinking: boolean;
+	showProvider: boolean;
+	showContextDenom: boolean;
+	showTokens: boolean;
+	showCost: boolean;
+	showAutoCompact: boolean;
+}
+
+const MIN_PADDING = 2;
+const MIN_PWD_CHARS_WITH_BRANCH = 4;
+
+/**
+ * Pure priority dropper — given field widths and terminal width,
+ * returns the set of visibility flags after the lowest-priority fields
+ * have been dropped to fit within `width`.
+ */
+export function computeVisibility(f: FieldWidths): VisibilityFlags {
+	let showAutoCompact = f.hasAutoCompact;
+	let showCost = f.hasCost;
+	let showTokens = f.hasTokens;
+	let showProvider = f.hasProvider;
+	let showContextDenom = true;
+	let showSessionName = f.hasSessionName;
+	let showBranch = f.hasBranch;
+	let showThinking = f.hasThinking;
+
+	function row1CanFit(): boolean {
+		const rightWidth = showSessionName && f.sessionNameWidth > 0
+			? MIN_PADDING + f.sessionNameWidth
+			: 0;
+		const maxLeftWidth = f.width - rightWidth;
+		if (maxLeftWidth <= 0) return false;
+		const fullLeftWidth = f.pwdStrWidth + (showBranch ? f.branchWidth : 0);
+		if (fullLeftWidth <= maxLeftWidth) return true;
+		if (showBranch) {
+			const minLeftKeepingBranch =
+				f.ellipsisWidth + MIN_PWD_CHARS_WITH_BRANCH + f.branchWidth;
+			return maxLeftWidth >= minLeftKeepingBranch;
+		}
+		return maxLeftWidth >= 1;
+	}
+
+	function row2Needed(): number {
+		let left = f.modelNameWidth;
+		if (showThinking) left += f.thinkingWidth;
+		if (showProvider) left += f.providerWidth;
+		const rightParts: number[] = [];
+		let ctxW = f.contextPercentWidth;
+		if (showContextDenom) ctxW += f.contextDenomWidth;
+		rightParts.push(ctxW);
+		if (showTokens && f.tokensWidth) rightParts.push(f.tokensWidth);
+		if (showCost && f.costWidth) rightParts.push(f.costWidth);
+		if (showAutoCompact && f.autoCompactWidth) rightParts.push(f.autoCompactWidth);
+		const right = rightParts.reduce((a, b) => a + b, 0) +
+			Math.max(0, rightParts.length - 1);
+		return left + MIN_PADDING + right;
+	}
+
+	function bothFit(): boolean {
+		return row1CanFit() && row2Needed() <= f.width;
+	}
+
+	if (!bothFit() && showAutoCompact)  showAutoCompact = false;
+	if (!bothFit() && showCost)         showCost = false;
+	if (!bothFit() && showTokens)       showTokens = false;
+	if (!bothFit() && showProvider)     showProvider = false;
+	if (!bothFit() && showContextDenom) showContextDenom = false;
+	if (!bothFit() && showSessionName)  showSessionName = false;
+	if (!bothFit() && showBranch)       showBranch = false;
+	if (!bothFit() && showThinking)     showThinking = false;
+
+	return { showAutoCompact, showCost, showTokens, showProvider,
+	         showContextDenom, showSessionName, showBranch, showThinking };
+}
+
 const THEME_COLORS: Record<string, Partial<FooterColors>> = {
 	// Add entries here to override defaults for specific themes, e.g.:
 	// "dracula": { modelName: "magenta", cost: "#ffb86c" },
@@ -412,9 +516,7 @@ export default function (pi: ExtensionAPI) {
 						: 0;
 
 					// Row 1 truncation thresholds
-					const ellipsisStr = colorize("symbols", "...");
-					const ellipsisWidth = visibleWidth(ellipsisStr);
-					const minPwdCharsWithBranch = 4;
+					const ellipsisWidth = visibleWidth(colorize("symbols", "..."));
 
 					// Row 2 field measurements
 					const modelNameWidth = visibleWidth(colorize("modelName", modelName));
@@ -457,78 +559,42 @@ export default function (pi: ExtensionAPI) {
 					const autoCompactWidth = autoCompactStr ? visibleWidth(autoCompactStr) : 0;
 
 					// ── Global visibility flags (shared across both rows) ─────────────
-					const minPadding = 2;
+					// Delegate to the pure priority dropper so tests can exercise the
+					// same logic directly. cwd is always present (may be truncated);
+					// priorities #1-#2 (context usage %, model name) are never hidden.
+					const flags = computeVisibility({
+						width,
+						pwdStrWidth,
+						branchWidth,
+						sessionNameWidth,
+						ellipsisWidth,
+						modelNameWidth,
+						thinkingWidth,
+						providerWidth,
+						contextPercentWidth,
+						contextDenomWidth,
+						tokensWidth,
+						costWidth,
+						autoCompactWidth,
+						hasBranch: !!branch,
+						hasSessionName: !!sessionName,
+						hasThinking: !!thinkingStr,
+						hasProvider: !!providerPrefix,
+						hasTokens: !!(totalInput || totalOutput),
+						hasCost: !!(totalCost || usingSubscription),
+						hasAutoCompact: autoCompactEnabled,
+					});
 
-					let showAutoCompact = autoCompactEnabled;
-					let showCost = !!(totalCost || usingSubscription);
-					let showTokens = !!(totalInput || totalOutput);
-					let showProvider = !!providerPrefix;
-					let showContextDenom = true;
-					let showSessionName = !!sessionName;
-					let showBranch = !!branch;
-					let showThinking = !!thinkingStr;
-					// cwd is always present but may be truncated; it is never fully hidden
-
-					function row1CanFitWithCurrentFlags(): boolean {
-						const rightWidth = showSessionName && sessionNameWidth > 0
-							? minPadding + sessionNameWidth
-							: 0;
-
-						const maxLeftWidth = width - rightWidth;
-						if (maxLeftWidth <= 0) return false;
-
-						const fullLeftWidth = pwdStrWidth + (showBranch ? branchWidth : 0);
-						if (fullLeftWidth <= maxLeftWidth) return true;
-
-						if (showBranch) {
-							const minLeftKeepingBranch =
-								ellipsisWidth + minPwdCharsWithBranch + branchWidth;
-							return maxLeftWidth >= minLeftKeepingBranch;
-						}
-
-						// cwd-only row can always be reduced to the remaining width;
-						// prefer ellipsis when possible, but fitting only requires 1 column.
-						return maxLeftWidth >= 1;
-					}
-
-					function row2Needed(): number {
-						let left = modelNameWidth;
-						if (showThinking) left += thinkingWidth;
-						if (showProvider) left += providerWidth;
-
-						const rightParts: number[] = [];
-						let ctxW = contextPercentWidth;
-						if (showContextDenom) ctxW += contextDenomWidth;
-						rightParts.push(ctxW);
-						if (showTokens && tokensWidth) rightParts.push(tokensWidth);
-						if (showCost && costWidth) rightParts.push(costWidth);
-						if (showAutoCompact && autoCompactWidth) rightParts.push(autoCompactWidth);
-
-						const right = rightParts.reduce((a, b) => a + b, 0) +
-							Math.max(0, rightParts.length - 1); // 1 space between each part
-
-						return left + minPadding + right;
-					}
-
-					function bothRowsFit(): boolean {
-						return row1CanFitWithCurrentFlags() && row2Needed() <= width;
-					}
-
-					// Walk the global visibility-drop priority list from lowest to highest.
-					// Important: row1CanFitWithCurrentFlags() already accounts for allowed cwd
-					// truncation, so a long cwd does NOT trigger drops by itself when truncation
-					// can solve the overflow.
-					if (!bothRowsFit() && showAutoCompact)  showAutoCompact = false;  // #11
-					if (!bothRowsFit() && showCost)         showCost = false;         // #10
-					if (!bothRowsFit() && showTokens)       showTokens = false;       // #9
-					if (!bothRowsFit() && showProvider)     showProvider = false;     // #8
-					if (!bothRowsFit() && showContextDenom) showContextDenom = false; // #7
-					if (!bothRowsFit() && showSessionName)  showSessionName = false;  // #6
-					if (!bothRowsFit() && showBranch)       showBranch = false;       // #5
-					// #4 is cwd truncation — handled inside row1CanFitWithCurrentFlags()
-					// and later applied during row 1 composition
-					if (!bothRowsFit() && showThinking)     showThinking = false;     // #3
-					// Priorities #1-#2 (context usage %, model name) are never hidden
+					const {
+						showAutoCompact,
+						showCost,
+						showTokens,
+						showProvider,
+						showContextDenom,
+						showSessionName,
+						showBranch,
+						showThinking,
+					} = flags;
 
 					// ── Compose row 1 using surviving visibility flags ────────────────
 
@@ -544,7 +610,7 @@ export default function (pi: ExtensionAPI) {
 
 					const r1RightW = visibleWidth(r1Right);
 					const r1TargetLeftWidth = r1RightW > 0
-						? width - minPadding - r1RightW
+						? width - MIN_PADDING - r1RightW
 						: width;
 
 					// If the current row-1 flags fit only via cwd truncation, apply that now.
@@ -561,7 +627,7 @@ export default function (pi: ExtensionAPI) {
 					const r1LeftWidth = visibleWidth(r1Left);
 					const r1RightWidth = visibleWidth(r1Right);
 
-					if (r1RightWidth > 0 && r1LeftWidth + minPadding + r1RightWidth <= width) {
+					if (r1RightWidth > 0 && r1LeftWidth + MIN_PADDING + r1RightWidth <= width) {
 						const padding = " ".repeat(width - r1LeftWidth - r1RightWidth);
 						line1 = r1Left + padding + r1Right;
 					} else {
@@ -588,14 +654,14 @@ export default function (pi: ExtensionAPI) {
 					const row2RightFinalWidth = visibleWidth(row2RightFinal);
 
 					let statsLine: string;
-					if (row2LeftFinalWidth + minPadding + row2RightFinalWidth <= width) {
+					if (row2LeftFinalWidth + MIN_PADDING + row2RightFinalWidth <= width) {
 						const padding = " ".repeat(
 							width - row2LeftFinalWidth - row2RightFinalWidth,
 						);
 						statsLine = row2LeftFinal + padding + row2RightFinal;
 					} else {
 						// Last resort: truncate left to fit right side
-						const availForLeft = width - minPadding - row2RightFinalWidth;
+						const availForLeft = width - MIN_PADDING - row2RightFinalWidth;
 						if (availForLeft > 0) {
 							const tLeft = truncateToWidth(row2LeftFinal, availForLeft, "");
 							const tLeftW = visibleWidth(tLeft);
