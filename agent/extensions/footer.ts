@@ -141,6 +141,8 @@ export function computeVisibility(f: FieldWidths): VisibilityFlags {
     if (showProvider) left += f.providerWidth;
     const rightParts: number[] = [];
     let ctxW = f.contextPercentWidth;
+    // contextDenomWidth already includes the " / " separator rendered by
+    // formatContextDenominator — do NOT add the slash-separator width again here.
     if (showContextDenom) ctxW += f.contextDenomWidth;
     rightParts.push(ctxW);
     if (showTokens && f.tokensWidth) rightParts.push(f.tokensWidth);
@@ -779,6 +781,9 @@ export default function (pi: ExtensionAPI) {
           const metricsFinal: string[] = [];
           let ctxFinal = contextPercentStr;
           if (showContextDenom) ctxFinal += contextDenomStr;
+          // Invariant: contextPercentStr is never empty — it falls back to a
+          // colorized "?" when usage is unknown — so ctxFinal always carries
+          // content and joinMetrics() will not drop it as an empty entry.
           metricsFinal.push(ctxFinal);
           if (showTokens && tokensStr) metricsFinal.push(tokensStr);
           if (showCost && costStr) metricsFinal.push(costStr);
