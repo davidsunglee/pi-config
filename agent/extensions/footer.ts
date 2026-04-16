@@ -6,7 +6,7 @@
  *
  * Layout:
  *   Line 1: ~/path · branch                               session-name
- *   Line 2: (provider) model · thinking    context%/window ↑in ↓out $cost (sub) (auto)
+ *   Line 2: provider model · thinking    context%/window ↑in ↓out $cost (sub)
  *   Line 3: extension statuses (optional)
  *
  * Context usage escalation is preserved:
@@ -37,7 +37,7 @@
  */
 
 import type { AssistantMessage } from "@mariozechner/pi-ai";
-import { SettingsManager, type ExtensionAPI, type ThemeColor } from "@mariozechner/pi-coding-agent";
+import { type ExtensionAPI, type ThemeColor } from "@mariozechner/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
 
 // ─── Colour type and user-configurable map ────────────────────────────────────
@@ -70,7 +70,6 @@ export interface FieldWidths {
 	contextDenomWidth: number;
 	tokensWidth: number;
 	costWidth: number;
-	autoCompactWidth: number;
 	// Flags for which fields are initially present (non-zero width)
 	hasBranch: boolean;
 	hasSessionName: boolean;
@@ -78,7 +77,6 @@ export interface FieldWidths {
 	hasProvider: boolean;
 	hasTokens: boolean;
 	hasCost: boolean;
-	hasAutoCompact: boolean;
 }
 
 /** Surviving visibility flags after the priority dropper has run. */
@@ -90,7 +88,6 @@ export interface VisibilityFlags {
 	showContextDenom: boolean;
 	showTokens: boolean;
 	showCost: boolean;
-	showAutoCompact: boolean;
 }
 
 const MIN_PADDING = 2;
@@ -102,7 +99,6 @@ const MIN_PWD_CHARS_WITH_BRANCH = 4;
  * have been dropped to fit within `width`.
  */
 export function computeVisibility(f: FieldWidths): VisibilityFlags {
-	let showAutoCompact = f.hasAutoCompact;
 	let showCost = f.hasCost;
 	let showTokens = f.hasTokens;
 	let showProvider = f.hasProvider;
@@ -137,7 +133,6 @@ export function computeVisibility(f: FieldWidths): VisibilityFlags {
 		rightParts.push(ctxW);
 		if (showTokens && f.tokensWidth) rightParts.push(f.tokensWidth);
 		if (showCost && f.costWidth) rightParts.push(f.costWidth);
-		if (showAutoCompact && f.autoCompactWidth) rightParts.push(f.autoCompactWidth);
 		const right = rightParts.reduce((a, b) => a + b, 0) +
 			Math.max(0, rightParts.length - 1);
 		return left + MIN_PADDING + right;
@@ -147,7 +142,6 @@ export function computeVisibility(f: FieldWidths): VisibilityFlags {
 		return row1CanFit() && row2Needed() <= f.width;
 	}
 
-	if (!bothFit() && showAutoCompact)  showAutoCompact = false;
 	if (!bothFit() && showCost)         showCost = false;
 	if (!bothFit() && showTokens)       showTokens = false;
 	if (!bothFit() && showProvider)     showProvider = false;
@@ -156,8 +150,15 @@ export function computeVisibility(f: FieldWidths): VisibilityFlags {
 	if (!bothFit() && showBranch)       showBranch = false;
 	if (!bothFit() && showThinking)     showThinking = false;
 
-	return { showAutoCompact, showCost, showTokens, showProvider,
-	         showContextDenom, showSessionName, showBranch, showThinking };
+	return {
+		showCost,
+		showTokens,
+		showProvider,
+		showContextDenom,
+		showSessionName,
+		showBranch,
+		showThinking,
+	};
 }
 
 const THEME_COLORS: Record<string, Partial<FooterColors>> = {
@@ -342,6 +343,36 @@ function sanitizeStatusText(text: string): string {
 		.trim();
 }
 
+/** Filter out blank extension statuses so they don't create dead footer lines. */
+export function sanitizeStatusTexts(texts: Iterable<string>): string[] {
+	return Array.from(texts, sanitizeStatusText).filter((text) => text.length > 0);
+}
+
+/** Hide the thinking field entirely when reasoning is toggled off. */
+export function getThinkingLabel(thinkingLevel: string | null | undefined): string {
+	return thinkingLevel && thinkingLevel !== "off" ? thinkingLevel : "";
+}
+
+/** Only show the provider prefix when it adds distinguishing information. */
+export function getProviderPrefix(
+	provider: string | undefined,
+	availableProviderCount: number,
+): string {
+	return provider && availableProviderCount > 1 ? `${provider} ` : "";
+}
+
+/** Hide dead $0.000 subscription-only cost output, but keep the sub marker. */
+export function getCostDisplay(
+	totalCost: number,
+	usingSubscription: boolean,
+): { amountLabel: string; subscriptionLabel: string } {
+	const amountLabel = totalCost > 0 ? `$${totalCost.toFixed(3)}` : "";
+	const subscriptionLabel = usingSubscription
+		? amountLabel ? " (sub)" : "(sub)"
+		: "";
+	return { amountLabel, subscriptionLabel };
+}
+
 // ─── Row 1 helpers ───────────────────────────────────────────────────────────
 
 /**
@@ -453,14 +484,16 @@ export default function (pi: ExtensionAPI) {
 
 					const modelName = ctx.model?.id ?? "no-model";
 
-					// Append thinking level if model supports reasoning
+					// Append thinking level only when reasoning is actually enabled.
 					let thinkingStr = "";
 					if (ctx.model?.reasoning) {
 						const thinkingLevel = pi.getThinkingLevel() ?? "off";
-						const thinkingLabel = thinkingLevel === "off" ? "thinking off" : thinkingLevel;
-						thinkingStr =
-							colorize("symbols", " · ") +
-							theme.getThinkingBorderColor(thinkingLevel)(thinkingLabel);
+						const thinkingLabel = getThinkingLabel(thinkingLevel);
+						if (thinkingLabel) {
+							thinkingStr =
+								colorize("symbols", " · ") +
+								theme.getThinkingBorderColor(thinkingLevel)(thinkingLabel);
+						}
 					}
 
 					// Only show the provider prefix when the user has more than one
@@ -468,8 +501,12 @@ export default function (pi: ExtensionAPI) {
 					// Provider is part of the normal wide-layout execution-mode cluster
 					// and further disappears under narrow-width pressure via Task 4's
 					// priority logic.
-					const providerPrefix = ctx.model && footerData.getAvailableProviderCount() > 1
-						? theme.fg("dim", `(${ctx.model.provider}) `)
+					const providerPrefixLabel = getProviderPrefix(
+						ctx.model?.provider,
+						footerData.getAvailableProviderCount(),
+					);
+					const providerPrefix = providerPrefixLabel
+						? theme.fg("dim", providerPrefixLabel)
 						: "";
 
 					// ── Row 2 data extraction ─────────────────────────────────────────
@@ -500,9 +537,6 @@ export default function (pi: ExtensionAPI) {
 					const usingSubscription = ctx.model
 						? ctx.modelRegistry.isUsingOAuth(ctx.model)
 						: false;
-
-					// Auto-compact
-					const autoCompactEnabled = SettingsManager.create().getCompactionEnabled();
 
 					// ── Pre-compute per-field widths for the global priority dropper ──
 
@@ -547,16 +581,15 @@ export default function (pi: ExtensionAPI) {
 						: "";
 					const tokensWidth = tokensStr ? visibleWidth(tokensStr) : 0;
 
-					const costStr = (totalCost || usingSubscription)
-						? colorize("cost", `$${totalCost.toFixed(3)}`) +
-						  (usingSubscription ? colorize("subscriptionIndicator", " (sub)") : "")
+					const { amountLabel: costAmountLabel, subscriptionLabel } = getCostDisplay(
+						totalCost,
+						usingSubscription,
+					);
+					const costStr = costAmountLabel || subscriptionLabel
+						? (costAmountLabel ? colorize("cost", costAmountLabel) : "") +
+						  (subscriptionLabel ? colorize("subscriptionIndicator", subscriptionLabel) : "")
 						: "";
 					const costWidth = costStr ? visibleWidth(costStr) : 0;
-
-					const autoCompactStr = autoCompactEnabled
-						? colorize("symbols", "(auto)")
-						: "";
-					const autoCompactWidth = autoCompactStr ? visibleWidth(autoCompactStr) : 0;
 
 					// ── Global visibility flags (shared across both rows) ─────────────
 					// Delegate to the pure priority dropper so tests can exercise the
@@ -575,18 +608,15 @@ export default function (pi: ExtensionAPI) {
 						contextDenomWidth,
 						tokensWidth,
 						costWidth,
-						autoCompactWidth,
 						hasBranch: !!branch,
 						hasSessionName: !!sessionName,
 						hasThinking: !!thinkingStr,
 						hasProvider: !!providerPrefix,
 						hasTokens: !!(totalInput || totalOutput),
 						hasCost: !!(totalCost || usingSubscription),
-						hasAutoCompact: autoCompactEnabled,
 					});
 
 					const {
-						showAutoCompact,
 						showCost,
 						showTokens,
 						showProvider,
@@ -647,7 +677,6 @@ export default function (pi: ExtensionAPI) {
 					metricsFinal.push(ctxFinal);
 					if (showTokens && tokensStr) metricsFinal.push(tokensStr);
 					if (showCost && costStr) metricsFinal.push(costStr);
-					if (showAutoCompact && autoCompactStr) metricsFinal.push(autoCompactStr);
 
 					const row2RightFinal = metricsFinal.join(" ");
 					const row2LeftFinalWidth = visibleWidth(row2LeftFinal);
@@ -678,10 +707,12 @@ export default function (pi: ExtensionAPI) {
 
 					// ── Line 3 (optional): extension statuses ───────────────────────────
 					const extensionStatuses = footerData.getExtensionStatuses();
-					if (extensionStatuses.size > 0) {
-						const sortedStatuses = Array.from(extensionStatuses.entries())
+					const sortedStatuses = sanitizeStatusTexts(
+						Array.from(extensionStatuses.entries())
 							.sort(([a], [b]) => a.localeCompare(b))
-							.map(([, text]) => sanitizeStatusText(text));
+							.map(([, text]) => text),
+					);
+					if (sortedStatuses.length > 0) {
 						const statusLine = sortedStatuses.join(" ");
 						lines.push(truncateToWidth(statusLine, width));
 					}
