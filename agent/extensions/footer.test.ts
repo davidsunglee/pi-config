@@ -2,13 +2,19 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+	buildCostString,
 	computeVisibility,
+	formatContextDenominator,
 	getCostDisplay,
 	getProviderPrefix,
 	getThinkingLabel,
+	joinMetrics,
 	sanitizeStatusTexts,
 	type FieldWidths,
 } from "./footer.ts";
+
+/** Stub colorize: wraps text in a `[field:text]` marker for easy assertion. */
+const mockColorize = (field: string, text: string) => `[${field}:${text}]`;
 
 /**
  * These tests exercise the production priority dropper directly (imported
@@ -149,8 +155,8 @@ test("model name and context percent are never hidden", () => {
 });
 
 test("long cwd does NOT cause row-2 fields to drop when truncation suffices", () => {
-	// Row 2 full need: 14 + 12 + 2 + (6 + 8) + 14 + 8 + 2 spaces = 66
-	const flags = computeVisibility(fw(68, {
+	// Row 2 full need: 14 + 12 + 2 + (6 + 8) + 14 + 8 + 2*3 sep = 70
+	const flags = computeVisibility(fw(72, {
 		pwdStrWidth: 100, // very long cwd
 		branchWidth: 9,
 		modelNameWidth: 14, providerWidth: 12,
@@ -238,4 +244,64 @@ test("blank extension statuses are filtered out", () => {
 		"ok",
 		"line wrap",
 	]);
+});
+
+test("context denominator wraps ' / ' in symbols color (spaces around slash)", () => {
+	// formatTokens(200000) === "200k"
+	assert.equal(
+		formatContextDenominator(200000, mockColorize),
+		"[symbols: / ][contextWindow:200k]",
+	);
+});
+
+test("cost string colors both amount and subscription label with cost color", () => {
+	assert.equal(
+		buildCostString("$1.234", " (sub)", mockColorize),
+		"[cost:$1.234][cost: (sub)]",
+	);
+	assert.equal(
+		buildCostString("", "(sub)", mockColorize),
+		"[cost:(sub)]",
+	);
+	assert.equal(
+		buildCostString("$0.100", "", mockColorize),
+		"[cost:$0.100]",
+	);
+	assert.equal(buildCostString("", "", mockColorize), "");
+});
+
+test("joinMetrics inserts grey-dot separators only between present metrics", () => {
+	assert.equal(
+		joinMetrics(["A", "B", "C"], mockColorize),
+		"A[symbols: · ]B[symbols: · ]C",
+	);
+	assert.equal(joinMetrics(["A", "B"], mockColorize), "A[symbols: · ]B");
+	assert.equal(joinMetrics(["A"], mockColorize), "A");
+	assert.equal(joinMetrics([], mockColorize), "");
+	// Empty entries must not produce dead separators.
+	assert.equal(
+		joinMetrics(["A", "", "C"], mockColorize),
+		"A[symbols: · ]C",
+	);
+});
+
+test("row 2 width budget accounts for 3-char ' · ' metric separators", () => {
+	// With 3-char separator between 3 metrics (ctx, tokens, cost):
+	//   left: modelName=14 + provider=12 = 26
+	//   padding: 2
+	//   right: (6 + 8) + 14 + 8 + 2*3 = 42
+	//   total: 70
+	const fields = {
+		pwdStrWidth: 10,
+		modelNameWidth: 14, providerWidth: 12,
+		contextPercentWidth: 6, contextDenomWidth: 8,
+		tokensWidth: 14, costWidth: 8,
+		hasProvider: true, hasTokens: true, hasCost: true,
+	};
+	const fits = computeVisibility(fw(70, fields));
+	assert.ok(fits.showCost, "cost should fit exactly at width 70");
+	assert.ok(fits.showTokens);
+
+	const justUnder = computeVisibility(fw(69, fields));
+	assert.ok(!justUnder.showCost, "cost should drop when row 2 needs 70 but width is 69");
 });
