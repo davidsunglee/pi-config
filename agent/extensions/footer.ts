@@ -47,7 +47,6 @@ type FooterColors = {
 	tokens:                 string | number;
 	cost:                   string | number;
 	subscriptionIndicator:  string | number;
-	cache:                  string | number;
 	contextUsage:           string | number;
 	contextWindow:          string | number;
 	branch:                 string | number;
@@ -64,8 +63,7 @@ const THEME_COLORS: Record<string, Partial<FooterColors>> = {
 		modelName:              "#33b1ff",  // cyan — accent
 		tokens:                 "#8cb6ff",  // blueBright — consistent with contextUsage blue
 		cost:                   "#08bdba",  // teal — carbonfox "warning"
-		subscriptionIndicator:  "#535353",  // dimGray — matches the carbonfox dim var, same value as cache
-		cache:                  "#535353",  // dimGray — subtle
+		subscriptionIndicator:  "#535353",  // dimGray — matches the carbonfox dim var
 		contextUsage:           "#78a9ff",  // blue
 		contextWindow:          "#7b7c7e",  // gray — readable but subtler than contextUsage
 		branch:                 "#25be6a",  // green — success
@@ -79,7 +77,6 @@ const THEME_COLORS: Record<string, Partial<FooterColors>> = {
 		tokens:                 "#71baf2",  // bright blue — a touch brighter than model name
 		cost:                   "#ccb77a",  // muted gold — softer cost emphasis
 		subscriptionIndicator:  "#5c6466",  // dim gray — matches the everblush dimGray var
-		cache:                  "#5c6466",  // dim gray — subtle
 		contextUsage:           "#6cbfbf",  // cyan — readable emphasis distinct from tokens
 		contextWindow:          "#b3b9b8",  // light gray — softer denominator / window size
 		branch:                 "#8ccf7e",  // green — git branch / success
@@ -93,7 +90,6 @@ const THEME_COLORS: Record<string, Partial<FooterColors>> = {
 		tokens:                 "#81a1c1",  // nord9 — subtle/muted blue
 		cost:                   "#ebcb8b",  // nord13 — yellow/gold
 		subscriptionIndicator:  "#4c566a",  // nord3 — matches the Nord dim color token
-		cache:                  "#4c566a",  // nord3 — muted/dim
 		contextUsage:           "#88c0d0",  // nord8 — slightly brighter blue than tokens
 		contextWindow:          "#d8dee9",  // nord4 — silver/bright gray
 		branch:                 "#a3be8c",  // nord14 — green
@@ -111,7 +107,6 @@ const DEFAULT_TOKENS: Record<keyof FooterColors, ThemeColor> = {
 	tokens:                 "border",
 	cost:                   "warning",
 	subscriptionIndicator:  "dim",
-	cache:                  "muted",
 	contextUsage:           "accent",
 	contextWindow:          "dim",
 	branch:                 "success",
@@ -364,10 +359,12 @@ export default function (pi: ExtensionAPI) {
 							theme.getThinkingBorderColor(thinkingLevel)(thinkingLabel);
 					}
 
-					// Always build provider when a model exists. Provider is part of the
-					// normal wide-layout execution-mode cluster and only disappears under
-					// narrow-width pressure via Task 4's priority logic.
-					const providerPrefix = ctx.model
+					// Only show the provider prefix when the user has more than one
+					// provider available — matches the baseline single-provider behavior.
+					// Provider is part of the normal wide-layout execution-mode cluster
+					// and further disappears under narrow-width pressure via Task 4's
+					// priority logic.
+					const providerPrefix = ctx.model && footerData.getAvailableProviderCount() > 1
 						? theme.fg("dim", `(${ctx.model.provider}) `)
 						: "";
 
