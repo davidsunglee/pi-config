@@ -347,37 +347,12 @@ export default function (pi: ExtensionAPI) {
 						pwdStr = `~${pwdStr.slice(home.length)}`;
 					}
 
-					// Build row 1 left: cwd · branch
 					const branch = footerData.getGitBranch();
-					let row1Left: string;
-					if (branch) {
-						row1Left =
-							colorize("pwd", pwdStr) +
-							colorize("symbols", " · ") +
-							colorize("branch", branch);
-					} else {
-						row1Left = colorize("pwd", pwdStr);
-					}
-
-					// Build row 1 right: session name (only when set)
 					const sessionName = pi.getSessionName();
-					const row1Right = sessionName
-						? colorize("sessionName", sessionName)
-						: "";
-
-					// NOTE: Do NOT compose line1 here. The final composition of row 1
-					// (including truncation and adaptive field hiding) is handled by
-					// Task 4's global priority dropper, which coordinates visibility
-					// across both rows using a single shared priority list.
-					// Temporary placeholder — replaced by Task 4's global priority dropper:
-					const line1 = truncateToWidth(row1Left, width, colorize("symbols", "..."));
 
 					// ── Row 2 left: execution mode (provider · model · thinking) ──────
 
 					const modelName = ctx.model?.id ?? "no-model";
-
-					// Start with model name (always shown)
-					const modelNameStr = colorize("modelName", modelName);
 
 					// Append thinking level if model supports reasoning
 					let thinkingStr = "";
@@ -396,15 +371,9 @@ export default function (pi: ExtensionAPI) {
 						? theme.fg("dim", `(${ctx.model.provider}) `)
 						: "";
 
-					// NOTE: Do not pre-compose row2Left here. Task 4's global priority
-					// dropper uses the individual components (providerPrefix, modelNameStr,
-					// thinkingStr) directly, toggling each via visibility flags.
+					// ── Row 2 data extraction ─────────────────────────────────────────
 
-					// ── Row 2 right: session metrics ──────────────────────────────────
-
-					const metricsParts: string[] = [];
-
-					// 1. Context usage (always first in metrics cluster)
+					// Context usage
 					const contextUsage = ctx.getContextUsage();
 					const contextWindow =
 						contextUsage?.contextWindow ?? ctx.model?.contextWindow ?? 0;
@@ -412,38 +381,9 @@ export default function (pi: ExtensionAPI) {
 					const contextPercent =
 						contextUsage?.percent !== null ? contextPercentValue.toFixed(1) : "?";
 
-					let contextDisplay: string;
-					if (contextPercent === "?") {
-						contextDisplay =
-							colorize("symbols", "?") +
-							colorize("symbols", "/") +
-							colorize("contextWindow", formatTokens(contextWindow));
-					} else {
-						const pctColor =
-							contextPercentValue > 90
-								? "error"
-								: contextPercentValue > 70
-									? "warning"
-									: undefined;
-						const pctStr = pctColor
-							? theme.fg(pctColor, contextPercent)
-							: colorize("contextUsage", contextPercent);
-						const pctSuffix = pctColor
-							? theme.fg(pctColor, "%")
-							: colorize("contextUsage", "%");
-						contextDisplay =
-							pctStr + pctSuffix +
-							colorize("symbols", "/") +
-							colorize("contextWindow", formatTokens(contextWindow));
-					}
-					metricsParts.push(contextDisplay);
-
-					// 2. Tokens (up/down as a single unit)
-					// Accumulate from all entries (same logic as before)
+					// Token accumulation
 					let totalInput = 0;
 					let totalOutput = 0;
-					let totalCacheRead = 0;
-					let totalCacheWrite = 0;
 					let totalCost = 0;
 
 					for (const entry of ctx.sessionManager.getEntries()) {
@@ -451,56 +391,224 @@ export default function (pi: ExtensionAPI) {
 							const m = entry.message as AssistantMessage;
 							totalInput += m.usage.input;
 							totalOutput += m.usage.output;
-							totalCacheRead += m.usage.cacheRead;
-							totalCacheWrite += m.usage.cacheWrite;
 							totalCost += m.usage.cost.total;
 						}
 					}
 
-					if (totalInput || totalOutput) {
-						const tokensDisplay =
-							colorize("symbols", "↑") +
-							colorize("tokens", formatTokens(totalInput)) +
-							colorize("symbols", " ↓") +
-							colorize("tokens", formatTokens(totalOutput));
-						metricsParts.push(tokensDisplay);
-					}
-
-					// 3. Cost + subscription indicator (as a single unit)
+					// Cost + subscription
 					const usingSubscription = ctx.model
 						? ctx.modelRegistry.isUsingOAuth(ctx.model)
 						: false;
-					if (totalCost || usingSubscription) {
-						const costValue = colorize("cost", `$${totalCost.toFixed(3)}`);
-						const subIndicator = usingSubscription
-							? colorize("subscriptionIndicator", " (sub)")
-							: "";
-						metricsParts.push(costValue + subIndicator);
-					}
 
-					// 4. Auto-compact indicator (last in cluster)
+					// Auto-compact
 					const autoCompactEnabled = SettingsManager.create().getCompactionEnabled();
-					if (autoCompactEnabled) {
-						metricsParts.push(colorize("symbols", "(auto)"));
+
+					// ── Pre-compute per-field widths for the global priority dropper ──
+
+					// Row 1 field measurements
+					const pwdStrWidth = visibleWidth(colorize("pwd", pwdStr));
+					const branchWidth = branch
+						? visibleWidth(colorize("symbols", " · ") + colorize("branch", branch))
+						: 0;
+					const sessionNameWidth = sessionName
+						? visibleWidth(colorize("sessionName", sessionName))
+						: 0;
+
+					// Row 1 truncation thresholds
+					const ellipsisStr = colorize("symbols", "...");
+					const ellipsisWidth = visibleWidth(ellipsisStr);
+					const minPwdCharsWithBranch = 4;
+
+					// Row 2 field measurements
+					const modelNameWidth = visibleWidth(colorize("modelName", modelName));
+					const thinkingWidth = thinkingStr ? visibleWidth(thinkingStr) : 0;
+					const providerWidth = providerPrefix ? visibleWidth(providerPrefix) : 0;
+
+					// Context percent string (always shown — highest priority)
+					let contextPercentStr: string;
+					if (contextPercent === "?") {
+						contextPercentStr = colorize("symbols", "?");
+					} else {
+						const pctColor =
+							contextPercentValue > 90 ? "error"
+								: contextPercentValue > 70 ? "warning"
+								: undefined;
+						contextPercentStr = pctColor
+							? theme.fg(pctColor, contextPercent) + theme.fg(pctColor, "%")
+							: colorize("contextUsage", contextPercent) + colorize("contextUsage", "%");
+					}
+					const contextPercentWidth = visibleWidth(contextPercentStr);
+					const contextDenomStr = colorize("symbols", "/") +
+						colorize("contextWindow", formatTokens(contextWindow));
+					const contextDenomWidth = visibleWidth(contextDenomStr);
+
+					const tokensStr = (totalInput || totalOutput)
+						? colorize("symbols", "↑") + colorize("tokens", formatTokens(totalInput)) +
+						  colorize("symbols", " ↓") + colorize("tokens", formatTokens(totalOutput))
+						: "";
+					const tokensWidth = tokensStr ? visibleWidth(tokensStr) : 0;
+
+					const costStr = (totalCost || usingSubscription)
+						? colorize("cost", `$${totalCost.toFixed(3)}`) +
+						  (usingSubscription ? colorize("subscriptionIndicator", " (sub)") : "")
+						: "";
+					const costWidth = costStr ? visibleWidth(costStr) : 0;
+
+					const autoCompactStr = autoCompactEnabled
+						? colorize("symbols", "(auto)")
+						: "";
+					const autoCompactWidth = autoCompactStr ? visibleWidth(autoCompactStr) : 0;
+
+					// ── Global visibility flags (shared across both rows) ─────────────
+					const minPadding = 2;
+
+					let showAutoCompact = autoCompactEnabled;
+					let showCost = !!(totalCost || usingSubscription);
+					let showTokens = !!(totalInput || totalOutput);
+					let showProvider = !!providerPrefix;
+					let showContextDenom = true;
+					let showSessionName = !!sessionName;
+					let showBranch = !!branch;
+					let showThinking = !!thinkingStr;
+					// cwd is always present but may be truncated; it is never fully hidden
+
+					function row1CanFitWithCurrentFlags(): boolean {
+						const rightWidth = showSessionName && sessionNameWidth > 0
+							? minPadding + sessionNameWidth
+							: 0;
+
+						const maxLeftWidth = width - rightWidth;
+						if (maxLeftWidth <= 0) return false;
+
+						const fullLeftWidth = pwdStrWidth + (showBranch ? branchWidth : 0);
+						if (fullLeftWidth <= maxLeftWidth) return true;
+
+						if (showBranch) {
+							const minLeftKeepingBranch =
+								ellipsisWidth + minPwdCharsWithBranch + branchWidth;
+							return maxLeftWidth >= minLeftKeepingBranch;
+						}
+
+						// cwd-only row can always be reduced to the remaining width;
+						// prefer ellipsis when possible, but fitting only requires 1 column.
+						return maxLeftWidth >= 1;
 					}
 
-					// NOTE: Do NOT compose statsLine here. The final composition of row 2
-					// (including adaptive field hiding) is handled by Task 4's global
-					// priority dropper, which coordinates visibility across both rows
-					// using a single shared priority list. The individual components
-					// (providerPrefix, modelNameStr, thinkingStr, metricsParts) are
-					// consumed by Task 4's priority system.
-					// Temporary placeholder — replaced by Task 4's global priority dropper:
-					const row2Left = providerPrefix + modelNameStr + thinkingStr;
-					const row2Right = metricsParts.join(" ");
-					const row2LeftWidth = visibleWidth(row2Left);
-					const row2RightWidth = visibleWidth(row2Right);
-					let statsLine: string;
-					if (row2LeftWidth + 2 + row2RightWidth <= width) {
-						const padding = " ".repeat(width - row2LeftWidth - row2RightWidth);
-						statsLine = row2Left + padding + row2Right;
+					function row2Needed(): number {
+						let left = modelNameWidth;
+						if (showThinking) left += thinkingWidth;
+						if (showProvider) left += providerWidth;
+
+						const rightParts: number[] = [];
+						let ctxW = contextPercentWidth;
+						if (showContextDenom) ctxW += contextDenomWidth;
+						rightParts.push(ctxW);
+						if (showTokens && tokensWidth) rightParts.push(tokensWidth);
+						if (showCost && costWidth) rightParts.push(costWidth);
+						if (showAutoCompact && autoCompactWidth) rightParts.push(autoCompactWidth);
+
+						const right = rightParts.reduce((a, b) => a + b, 0) +
+							Math.max(0, rightParts.length - 1); // 1 space between each part
+
+						return left + minPadding + right;
+					}
+
+					function bothRowsFit(): boolean {
+						return row1CanFitWithCurrentFlags() && row2Needed() <= width;
+					}
+
+					// Walk the global visibility-drop priority list from lowest to highest.
+					// Important: row1CanFitWithCurrentFlags() already accounts for allowed cwd
+					// truncation, so a long cwd does NOT trigger drops by itself when truncation
+					// can solve the overflow.
+					if (!bothRowsFit() && showAutoCompact)  showAutoCompact = false;  // #11
+					if (!bothRowsFit() && showCost)         showCost = false;         // #10
+					if (!bothRowsFit() && showTokens)       showTokens = false;       // #9
+					if (!bothRowsFit() && showProvider)     showProvider = false;     // #8
+					if (!bothRowsFit() && showContextDenom) showContextDenom = false; // #7
+					if (!bothRowsFit() && showSessionName)  showSessionName = false;  // #6
+					if (!bothRowsFit() && showBranch)       showBranch = false;       // #5
+					// #4 is cwd truncation — handled inside row1CanFitWithCurrentFlags()
+					// and later applied during row 1 composition
+					if (!bothRowsFit() && showThinking)     showThinking = false;     // #3
+					// Priorities #1-#2 (context usage %, model name) are never hidden
+
+					// ── Compose row 1 using surviving visibility flags ────────────────
+
+					let r1Left = showBranch && branch
+						? colorize("pwd", pwdStr) +
+						  colorize("symbols", " · ") +
+						  colorize("branch", branch)
+						: colorize("pwd", pwdStr);
+
+					const r1Right = showSessionName && sessionName
+						? colorize("sessionName", sessionName)
+						: "";
+
+					const r1RightW = visibleWidth(r1Right);
+					const r1TargetLeftWidth = r1RightW > 0
+						? width - minPadding - r1RightW
+						: width;
+
+					// If the current row-1 flags fit only via cwd truncation, apply that now.
+					if (r1TargetLeftWidth > 0 && visibleWidth(r1Left) > r1TargetLeftWidth) {
+						r1Left = truncatePwdTail(
+							pwdStr,
+							showBranch && branch ? branch : undefined,
+							r1TargetLeftWidth,
+							colorize,
+						);
+					}
+
+					let line1: string;
+					const r1LeftWidth = visibleWidth(r1Left);
+					const r1RightWidth = visibleWidth(r1Right);
+
+					if (r1RightWidth > 0 && r1LeftWidth + minPadding + r1RightWidth <= width) {
+						const padding = " ".repeat(width - r1LeftWidth - r1RightWidth);
+						line1 = r1Left + padding + r1Right;
 					} else {
-						statsLine = truncateToWidth(row2Left, width, "");
+						line1 = r1Left;
+					}
+
+					// ── Compose row 2 using surviving visibility flags ────────────────
+
+					let row2LeftFinal = "";
+					if (showProvider) row2LeftFinal += providerPrefix;
+					row2LeftFinal += colorize("modelName", modelName);
+					if (showThinking && thinkingStr) row2LeftFinal += thinkingStr;
+
+					const metricsFinal: string[] = [];
+					let ctxFinal = contextPercentStr;
+					if (showContextDenom) ctxFinal += contextDenomStr;
+					metricsFinal.push(ctxFinal);
+					if (showTokens && tokensStr) metricsFinal.push(tokensStr);
+					if (showCost && costStr) metricsFinal.push(costStr);
+					if (showAutoCompact && autoCompactStr) metricsFinal.push(autoCompactStr);
+
+					const row2RightFinal = metricsFinal.join(" ");
+					const row2LeftFinalWidth = visibleWidth(row2LeftFinal);
+					const row2RightFinalWidth = visibleWidth(row2RightFinal);
+
+					let statsLine: string;
+					if (row2LeftFinalWidth + minPadding + row2RightFinalWidth <= width) {
+						const padding = " ".repeat(
+							width - row2LeftFinalWidth - row2RightFinalWidth,
+						);
+						statsLine = row2LeftFinal + padding + row2RightFinal;
+					} else {
+						// Last resort: truncate left to fit right side
+						const availForLeft = width - minPadding - row2RightFinalWidth;
+						if (availForLeft > 0) {
+							const tLeft = truncateToWidth(row2LeftFinal, availForLeft, "");
+							const tLeftW = visibleWidth(tLeft);
+							const padding = " ".repeat(
+								Math.max(0, width - tLeftW - row2RightFinalWidth),
+							);
+							statsLine = tLeft + padding + row2RightFinal;
+						} else {
+							statsLine = truncateToWidth(row2RightFinal, width);
+						}
 					}
 
 					const lines = [line1, statsLine];
