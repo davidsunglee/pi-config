@@ -43,77 +43,82 @@ import { truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
 // ─── Colour type and user-configurable map ────────────────────────────────────
 
 type FooterColors = {
-	modelName:     string | number;
-	tokens:        string | number;
-	cost:          string | number;
-	cache:         string | number;
-	contextUsage:  string | number;
-	contextWindow: string | number;
-	branch:        string | number;
-	pwd:           string | number;
-	sessionName:   string | number;
-	statuses:      string | number;
-	symbols:       string | number;
+	modelName:              string | number;
+	tokens:                 string | number;
+	cost:                   string | number;
+	subscriptionIndicator:  string | number;
+	cache:                  string | number;
+	contextUsage:           string | number;
+	contextWindow:          string | number;
+	branch:                 string | number;
+	pwd:                    string | number;
+	sessionName:            string | number;
+	statuses:               string | number;
+	symbols:                string | number;
 };
 
 const THEME_COLORS: Record<string, Partial<FooterColors>> = {
 	// Add entries here to override defaults for specific themes, e.g.:
 	// "dracula": { modelName: "magenta", cost: "#ffb86c" },
 	carbonfox: {
-		modelName:     "#33b1ff",  // cyan — accent
-		tokens:        "#8cb6ff",  // blueBright — consistent with contextUsage blue
-		cost:          "#08bdba",  // teal — carbonfox "warning"
-		cache:         "#535353",  // dimGray — subtle
-		contextUsage:  "#78a9ff",  // blue
-		contextWindow: "#7b7c7e",  // gray — readable but subtler than contextUsage
-		branch:        "#25be6a",  // green — success
-		pwd:           "#ee5396",  // red — pink-red
-		sessionName:   "#be95ff",  // magenta — soft lavender accent
-		statuses:      "#535353",  // dimGray — dim
-		symbols:       "#484848",  // darkGray — borderMuted
+		modelName:              "#33b1ff",  // cyan — accent
+		tokens:                 "#8cb6ff",  // blueBright — consistent with contextUsage blue
+		cost:                   "#08bdba",  // teal — carbonfox "warning"
+		subscriptionIndicator:  "#535353",  // dimGray — matches the carbonfox dim var, same value as cache
+		cache:                  "#535353",  // dimGray — subtle
+		contextUsage:           "#78a9ff",  // blue
+		contextWindow:          "#7b7c7e",  // gray — readable but subtler than contextUsage
+		branch:                 "#25be6a",  // green — success
+		pwd:                    "#ee5396",  // red — pink-red
+		sessionName:            "#be95ff",  // magenta — soft lavender accent
+		statuses:               "#535353",  // dimGray — dim
+		symbols:                "#484848",  // darkGray — borderMuted
 	},
 	everblush: {
-		modelName:     "#67b0e8",  // blue — primary accent
-		tokens:        "#71baf2",  // bright blue — a touch brighter than model name
-		cost:          "#ccb77a",  // muted gold — softer cost emphasis
-		cache:         "#5c6466",  // dim gray — subtle
-		contextUsage:  "#6cbfbf",  // cyan — readable emphasis distinct from tokens
-		contextWindow: "#b3b9b8",  // light gray — softer denominator / window size
-		branch:        "#8ccf7e",  // green — git branch / success
-		pwd:           "#e57474",  // red — directory path accent from Everblush palette
-		sessionName:   "#c47fd5",  // magenta — violet accent
-		statuses:      "#5c6466",  // dim gray — subdued status line
-		symbols:       "#5c6466",  // dim gray — slightly brighter separators and punctuation
+		modelName:              "#67b0e8",  // blue — primary accent
+		tokens:                 "#71baf2",  // bright blue — a touch brighter than model name
+		cost:                   "#ccb77a",  // muted gold — softer cost emphasis
+		subscriptionIndicator:  "#5c6466",  // dim gray — matches the everblush dimGray var
+		cache:                  "#5c6466",  // dim gray — subtle
+		contextUsage:           "#6cbfbf",  // cyan — readable emphasis distinct from tokens
+		contextWindow:          "#b3b9b8",  // light gray — softer denominator / window size
+		branch:                 "#8ccf7e",  // green — git branch / success
+		pwd:                    "#e57474",  // red — directory path accent from Everblush palette
+		sessionName:            "#c47fd5",  // magenta — violet accent
+		statuses:               "#5c6466",  // dim gray — subdued status line
+		symbols:                "#5c6466",  // dim gray — slightly brighter separators and punctuation
 	},
 	"nord-dark": {
-		modelName:     "#88c0d0",  // nord8 — accent blue
-		tokens:        "#81a1c1",  // nord9 — subtle/muted blue
-		cost:          "#ebcb8b",  // nord13 — yellow/gold
-		cache:         "#4c566a",  // nord3 — muted/dim
-		contextUsage:  "#88c0d0",  // nord8 — slightly brighter blue than tokens
-		contextWindow: "#d8dee9",  // nord4 — silver/bright gray
-		branch:        "#a3be8c",  // nord14 — green
-		pwd:           "#d08770",  // nord12 — orange
-		sessionName:   "#b48ead",  // nord15 — mauve accent
-		statuses:      "#4c566a",  // nord3 — muted
-		symbols:       "#4c566a",  // nord3 — muted
+		modelName:              "#88c0d0",  // nord8 — accent blue
+		tokens:                 "#81a1c1",  // nord9 — subtle/muted blue
+		cost:                   "#ebcb8b",  // nord13 — yellow/gold
+		subscriptionIndicator:  "#4c566a",  // nord3 — matches the Nord dim color token
+		cache:                  "#4c566a",  // nord3 — muted/dim
+		contextUsage:           "#88c0d0",  // nord8 — slightly brighter blue than tokens
+		contextWindow:          "#d8dee9",  // nord4 — silver/bright gray
+		branch:                 "#a3be8c",  // nord14 — green
+		pwd:                    "#d08770",  // nord12 — orange
+		sessionName:            "#b48ead",  // nord15 — mauve accent
+		statuses:               "#4c566a",  // nord3 — muted
+		symbols:                "#4c566a",  // nord3 — muted
 	},
 };
 
 // ─── Default theme-token fallbacks ───────────────────────────────────────────
 
 const DEFAULT_TOKENS: Record<keyof FooterColors, ThemeColor> = {
-	modelName:     "accent",
-	tokens:        "border",
-	cost:          "warning",
-	cache:         "muted",
-	contextUsage:  "accent",
-	contextWindow: "dim",
-	branch:        "success",
-	pwd:           "error",
-	sessionName:   "warning",
-	statuses:      "dim",
-	symbols:       "borderMuted",
+	modelName:              "accent",
+	tokens:                 "border",
+	cost:                   "warning",
+	subscriptionIndicator:  "dim",
+	cache:                  "muted",
+	contextUsage:           "accent",
+	contextWindow:          "dim",
+	branch:                 "success",
+	pwd:                    "error",
+	sessionName:            "warning",
+	statuses:               "dim",
+	symbols:                "borderMuted",
 };
 
 // ─── Colour helpers ───────────────────────────────────────────────────────────
