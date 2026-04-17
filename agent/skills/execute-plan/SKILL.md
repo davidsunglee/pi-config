@@ -404,7 +404,7 @@ TEST_EXIT=$?
 
 **On pass:** Report briefly ("✅ Integration tests pass after wave N") and proceed to the next wave.
 
-**On fail:** Present the user with choices, following the same interaction pattern as Step 12's retry/skip/stop:
+**On fail:** Present the user with the suite-standard choices:
 
 ```
 ❌ Integration tests failed after wave <N>.
@@ -413,14 +413,36 @@ New failures:
 <list of new failing tests or diff from baseline>
 
 Options:
-(r) Retry — re-dispatch this wave's tasks with test failures appended to prompts
-(s) Skip — proceed to wave <N+1> despite test failures
-(x) Stop — halt plan execution (committed waves are preserved as checkpoints)
+(a) Debug failures — dispatch a systematic-debugging pass, then remediate
+(b) Skip tests     — proceed to wave <N+1> despite failures
+(c) Stop execution — halt plan execution; committed waves are preserved as checkpoints
 ```
 
-- **Retry:** First, undo the wave's commit if one was made: `git reset --soft HEAD~1` to undo the commit while keeping changes staged, then `git reset HEAD` to unstage so workers start from a clean state. Re-dispatch all tasks from the current wave, appending the test output to each task's prompt so the workers know what broke. This counts as a retry toward the 3-retry limit in Step 12.
-- **Skip:** Proceed to the next wave. The failing commit remains (if committed). Warn: "⚠️ Proceeding with known test regressions."
-- **Stop:** Halt execution. All prior wave commits are preserved as checkpoints. Report partial progress (Step 13). The user can resume or fix manually.
+- **(a) Debug failures:** Run the debugger-first flow described in "Debugger-first flow" below. Do NOT undo the wave commit up front; the debugging dispatch inspects the committed state. This path counts as a retry toward the 3-retry limit in Step 12.
+- **(b) Skip tests:** Proceed to the next wave. The failing commit remains. Warn: "⚠️ Proceeding with known test regressions."
+- **(c) Stop execution:** Halt execution. All prior wave commits are preserved as checkpoints. Report partial progress (Step 13). The user can resume or fix manually.
+
+### Debugger-first flow
+
+When the user chooses **(a) Debug failures**, do NOT re-dispatch every task in the wave. Instead:
+
+1. **Identify suspect tasks from the failure output.** Inspect the new failing test names, file paths in stack traces, and the diff introduced by the wave (`git show HEAD --stat` and `git show HEAD` for the wave commit). Build a short list of wave tasks whose modified files appear in the failing stack traces or whose behavior the failing tests cover. If the mapping is ambiguous, include every wave task in the suspect list.
+
+2. **Dispatch a single debugging pass** using the `coder` agent with a prompt that follows the `systematic-debugging` skill. The prompt MUST include:
+   - The failing test output (full, not truncated).
+   - The wave commit SHA and the list of files it changed.
+   - The suspect task list from step 1, with each task's title.
+   - An explicit instruction: "Follow the `systematic-debugging` skill. Complete Phase 1 (root cause investigation) before proposing any fix. If the root cause is a clear, localized defect in one or two files, you MAY apply the fix in this same dispatch — follow TDD (write a failing test reproducing the regression, then fix). If the root cause spans multiple tasks or requires design judgment, return a diagnosis only and do NOT modify code."
+   - The required report shape: either `STATUS: DONE` with the fix applied and RED/GREEN evidence for the regression test, or `STATUS: DONE_WITH_CONCERNS` containing a `## Diagnosis` section naming the implicated task(s), the root cause, and the minimal change needed.
+
+3. **Handle the debugging pass result:**
+   - **Diagnosed and fixed (`STATUS: DONE`):** Re-run the test command. If it now matches the baseline (pass), amend or add a follow-up commit (`git commit -m "fix(plan): wave <N> regression — <short summary>"`) and proceed to the next wave. If tests still fail, treat it as a failed debugging pass (below).
+   - **Diagnosis only (`STATUS: DONE_WITH_CONCERNS` with `## Diagnosis`):** Use the diagnosis to dispatch a **targeted remediation** — a second `coder` dispatch scoped to only the implicated task(s)/files from the diagnosis. Include the diagnosis text, the failing test output, and the original task spec(s) for the implicated task(s). After that dispatch returns, re-run the test command and handle pass/fail the same way.
+   - **Failed debugging pass** (blocker, or fix did not resolve failures): re-present the `(a)/(b)/(c)` choices to the user. Count this attempt toward the Step 12 retry limit.
+
+4. **Do NOT re-dispatch unaffected wave tasks** unless the diagnosis explicitly implicates them. Avoiding blanket re-runs is the point of this flow.
+
+5. **Commit undo is only used as a fallback.** If the targeted remediation also fails and the user chooses to retry again, at that point — and only then — offer to undo the wave commit with `git reset --soft HEAD~1 && git reset HEAD` before a broader retry. Do not undo proactively.
 
 ## Step 12: Handle failures and retries
 
