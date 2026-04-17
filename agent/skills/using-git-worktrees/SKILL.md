@@ -88,7 +88,8 @@ case $LOCATION in
     path="$LOCATION/$BRANCH_NAME"
     ;;
   ~/.config/pi/worktrees/*)
-    path="~/.config/pi/worktrees/$project/$BRANCH_NAME"
+    # Use $HOME explicitly — `~` does not expand inside double quotes.
+    path="$HOME/.config/pi/worktrees/$project/$BRANCH_NAME"
     ;;
 esac
 
@@ -96,6 +97,13 @@ esac
 git worktree add "$path" -b "$BRANCH_NAME"
 cd "$path"
 ```
+
+**Expected path shape.** To keep worktree paths flat — one directory per worktree directly under the chosen root — prefer branch names without slashes (e.g. `execute-plan-enhancements` rather than `plan/execute-plan-enhancements`):
+
+- Project-local: `.worktrees/<branch>` (e.g. `.worktrees/execute-plan-enhancements`)
+- Global: `$HOME/.config/pi/worktrees/<project>/<branch>` (e.g. `$HOME/.config/pi/worktrees/pi-config/execute-plan-enhancements`)
+
+If a branch name contains a `/`, `git worktree add` will create nested subdirectories matching the slashes, which complicates cleanup and path handling. A non-slash prefix (e.g. `feat-foo`) is fine; the thing to avoid is the `/` character itself.
 
 ### 3. Run Project Setup
 
