@@ -1,7 +1,6 @@
 ---
 name: coder
 description: Executes a single task from a structured plan or fixes code based on review findings. Reports structured status for orchestration.
-model: claude-sonnet-4-6
 thinking: medium
 maxSubagentDepth: 0
 ---

@@ -1,7 +1,6 @@
 ---
 name: plan-reviewer
 description: Reviews generated implementation plans for structural correctness, spec coverage, and buildability
-model: claude-sonnet-4-6
 thinking: high
 maxSubagentDepth: 0
 ---

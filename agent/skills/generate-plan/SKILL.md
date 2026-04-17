@@ -7,20 +7,47 @@ Dispatch the `planner` subagent to analyze the codebase and produce a structured
 
 ## Step 1: Determine the input source
 
-The user will provide one of three input sources:
+The user will provide one of three input sources. **Todo and freeform inputs are inlined into the planner prompt as before. File inputs are passed by path** — the orchestrator must not read and embed the full file body into the planner prompt, because that pollutes the orchestrator's own context window on large specs, RFCs, and design docs.
 
-1. **Todo ID** (e.g., `TODO-7ef7d441`) — use the `todo` tool to read the todo and extract its full body. Do NOT pass just the ID; the subagent does not have the `todo` tool.
-2. **File path** (e.g., a spec, RFC, or design doc) — use the `read` tool to load the file contents. Do NOT pass just the path; include the actual file contents in the prompt.
-3. **Freeform description** — use the text as-is.
+### 1a. Todo ID (e.g., `TODO-7ef7d441`)
 
-The resolved text becomes `{TASK_DESCRIPTION}`. If the input is a todo, also capture the ID for `{SOURCE_TODO}`.
+Use the `todo` tool to read the todo and extract its full body. The planner subagent does not have the `todo` tool, so you must inline the body.
 
-**Provenance extraction (file-path inputs only):** When the input is a file, parse provenance references from the file preamble — the lines between the `# Title` and the first `## ` heading. Ignore any matching lines later in the document (including inside fenced code blocks or examples). Require exact prefix matches:
+- Set `{TASK_DESCRIPTION}` to the todo body text.
+- Set `{TASK_ARTIFACT}` to an empty string.
+- Set `{SOURCE_TODO}` to `Source todo: TODO-<id>`.
+- Leave `{SOURCE_SPEC}` and `{SOURCE_BRIEF}` empty.
 
-- `Source: TODO-<id>` — capture the todo ID for `{SOURCE_TODO}`. This allows provenance to flow through from define-spec: the spec references the original todo, and generate-plan passes it to the planner.
-- `Scout brief: .pi/briefs/<filename>` — read the referenced brief file and append its contents to `{TASK_DESCRIPTION}` under a `## Codebase Brief` heading. Also capture the brief file path for `{SOURCE_BRIEF}`. If the referenced file does not exist, warn the user ("Scout brief referenced in spec not found at `<path>` — proceeding without it."), leave `{SOURCE_BRIEF}` as an empty string, and continue without appending brief content.
+### 1b. File path (spec, RFC, design doc, etc.)
 
-Set `{SOURCE_SPEC}` only when the input file path is under `.pi/specs/`. For other file inputs (RFCs, design docs at arbitrary paths), leave `{SOURCE_SPEC}` as an empty string.
+Pass the file by path. **Do NOT load the full file contents into `{TASK_DESCRIPTION}`.** The planner will read the file from disk.
+
+Do a **bounded preamble read** of the file for provenance extraction only — for example `head -n 40 <path>`, or the `read` tool with a small line limit. Do not read the entire file into the orchestrator context.
+
+From that bounded preamble, extract provenance using strict exact-match rules:
+
+- Inspect only the preamble area at the top of the file (everything above the first `## ` heading, or the bounded first ~40 lines, whichever comes first).
+- Only exact supported lines count:
+  - `Source: TODO-<id>` → set `{SOURCE_TODO}` to `Source todo: TODO-<id>`.
+  - `Scout brief: .pi/briefs/<filename>` → set `{SOURCE_BRIEF}` to `Scout brief: .pi/briefs/<filename>`, **then verify the referenced file exists on disk**:
+    - If the brief file does not exist, warn the user (`Scout brief referenced in spec not found at <path> — proceeding without it.`), leave `{SOURCE_BRIEF}` empty, and continue without failing.
+    - **Do NOT read the brief contents into the orchestrator prompt.** The planner reads the brief from disk itself — this is the whole point of path-based handoff.
+- Lines that don't match one of the supported forms exactly are ignored.
+- Matching lines that appear later in the document (outside the preamble, including inside fenced code blocks or examples) are ignored.
+
+Then populate the remaining fields:
+
+- Set `{TASK_ARTIFACT}` to `Task artifact: <input path>`.
+- Set `{TASK_DESCRIPTION}` to an empty string (the artifact on disk IS the task description).
+- If the input path is under `.pi/specs/`, set `{SOURCE_SPEC}` to `Source spec: .pi/specs/<filename>`. For other file inputs (RFCs, design docs at arbitrary paths), leave `{SOURCE_SPEC}` empty.
+
+### 1c. Freeform description
+
+Use the text as-is.
+
+- Set `{TASK_DESCRIPTION}` to the freeform text.
+- Set `{TASK_ARTIFACT}` to an empty string.
+- Leave `{SOURCE_TODO}`, `{SOURCE_SPEC}`, and `{SOURCE_BRIEF}` empty.
 
 ## Step 2: Resolve model tiers
 
@@ -57,12 +84,16 @@ If `model-tiers.json` doesn't exist or is unreadable, stop with: "generate-plan 
 
 1. Read [generate-plan-prompt.md](generate-plan-prompt.md) in this directory.
 2. Fill placeholders:
-   - `{TASK_DESCRIPTION}` — resolved text from Step 1
+   - `{TASK_DESCRIPTION}` — for todo and freeform inputs, the inlined text from Step 1. For file inputs, an empty string (the artifact on disk is the task description).
+   - `{TASK_ARTIFACT}` — for file inputs, `Task artifact: <input path>`. For todo and freeform inputs, an empty string.
    - `{WORKING_DIR}` — absolute path to cwd
-   - `{OUTPUT_PATH}` — `.pi/plans/yyyy-MM-dd-<short-description>.md` (derive short description from task)
-   - `{SOURCE_TODO}` — `Source todo: TODO-<id>` when a source todo ID is available — either directly (input was a todo ID) or indirectly (extracted from a spec file's preamble `Source: TODO-<id>` line during provenance extraction in Step 1). Empty string otherwise.
-   - `{SOURCE_SPEC}` — `Source spec: .pi/specs/<filename>` if the input file path is under `.pi/specs/`, empty string otherwise
-   - `{SOURCE_BRIEF}` — `Scout brief: .pi/briefs/<filename>` if a scout brief was consumed, empty string otherwise
+   - `{OUTPUT_PATH}` — `.pi/plans/yyyy-MM-dd-<short-description>.md`
+     - For **file inputs**, derive `<short-description>` from the **input filename** (basename without extension, e.g., `.pi/specs/reduce-context.md` → `reduce-context`). Do NOT derive it from the document body — the body is not loaded into the orchestrator prompt.
+     - For **todo inputs**, derive from the todo title.
+     - For **freeform inputs**, derive from the task text.
+   - `{SOURCE_TODO}` — `Source todo: TODO-<id>` when a source todo ID is available — either directly (input was a todo ID) or indirectly (extracted from a file's preamble `Source: TODO-<id>` line during provenance extraction in Step 1). Empty string otherwise.
+   - `{SOURCE_SPEC}` — `Source spec: .pi/specs/<filename>` if the input file path is under `.pi/specs/`, empty string otherwise.
+   - `{SOURCE_BRIEF}` — `Scout brief: .pi/briefs/<filename>` if a scout brief was extracted from the file preamble and the brief file exists on disk, empty string otherwise.
 3. Dispatch `planner` agent synchronously:
    ```
    subagent { agent: "planner", task: "<filled template>", model: "<capable from model-tiers.json>", dispatch: "<dispatch for capable>" }
@@ -76,7 +107,19 @@ If `model-tiers.json` doesn't exist or is unreadable, stop with: "generate-plan 
 2. Read [review-plan-prompt.md](review-plan-prompt.md) in this directory.
 3. Fill placeholders:
    - `{PLAN_CONTENTS}` — full plan file contents
-   - `{ORIGINAL_SPEC}` — original task description from Step 1
+   - `{ORIGINAL_SPEC}` — original task description. The review/edit loop's inline-handoff behavior is intentionally unchanged by this change — only the initial planner dispatch is path-based. Reconstruct `{ORIGINAL_SPEC}` so the reviewer sees the same effective context the planner had:
+     - **Todo / freeform inputs:** reuse the inline text from Step 1.
+     - **File inputs:** read the artifact file from disk and use its full contents. If a valid scout brief was extracted in Step 1 (i.e., `{SOURCE_BRIEF}` is non-empty and the brief file exists on disk), also read the brief from disk and append it after the artifact body, separated by a clear marker, e.g.:
+       ```
+       <artifact contents>
+
+       ---
+
+       Scout brief (.pi/briefs/<filename>):
+
+       <brief contents>
+       ```
+       This restores the prior effective behavior in which scout brief context was carried into the review/edit loop. If the scout brief was already determined missing in Step 1, `{SOURCE_BRIEF}` will be empty — the warning was already emitted; do not warn again and do not fail.
 4. Determine review output path from the plan filename. For a plan at `.pi/plans/2026-04-13-my-feature.md`, the review path is `.pi/plans/reviews/2026-04-13-my-feature-plan-review-v1.md`.
 5. Dispatch `plan-reviewer`:
    ```
@@ -119,7 +162,7 @@ Read the review output file. Parse for the Status line (`**[Approved]**` or `**[
 2. Fill placeholders:
    - `{PLAN_CONTENTS}` — current plan file contents
    - `{REVIEW_FINDINGS}` — full text of all error-severity findings from the review
-   - `{ORIGINAL_SPEC}` — original task description from Step 1
+   - `{ORIGINAL_SPEC}` — original task description (same resolution rule as Step 4.1: inline text for todo/freeform; for file inputs, the artifact contents from disk plus the scout brief contents appended when a valid scout brief was extracted in Step 1)
    - `{OUTPUT_PATH}` — path to the current plan file (same path used in Step 3)
 3. Dispatch `planner` with the filled template:
    ```
@@ -158,7 +201,12 @@ If **(b):** proceed to Step 5 with outstanding findings noted.
 
 ## Edge cases
 
-- **Todo ID provided:** Read the todo body first with the `todo` tool, include the full body text in the prompt — do not pass only the ID.
-- **File path provided:** Read the file first with the `read` tool, include its full contents in the prompt — do not pass only the path.
+- **Todo ID provided:** Read the todo body first with the `todo` tool and inline the full body in `{TASK_DESCRIPTION}`. The planner subagent does not have the `todo` tool, so the ID alone is not enough.
+- **File path provided:** Pass by path via `{TASK_ARTIFACT}`. Do NOT inline the file body into `{TASK_DESCRIPTION}`. Only do a bounded preamble read (e.g., `head -n 40`) for provenance extraction. The planner reads the full artifact from disk.
+- **Scout brief referenced but missing on disk:** Warn the user and continue planning without it. Do not block.
 - **`.pi/plans/` missing:** The subagent handles creating the directory; no action needed from the main agent.
 - **`.pi/plans/reviews/` missing:** Create it before writing the review file.
+
+## Scope note on path-based handoff
+
+Path-based handoff in this skill applies **only to the initial `generate-plan -> planner` dispatch** (Step 3). The review/edit loop (Step 4) continues to inline plan contents and review findings as before. That loop is out of scope for this change and tracked separately (see `TODO-58b1648b`).

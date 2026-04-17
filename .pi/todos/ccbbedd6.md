@@ -7,7 +7,7 @@
     "define-spec",
     "pi"
   ],
-  "status": "open",
+  "status": "closed",
   "created_at": "2026-04-14T20:40:01.388Z"
 }
 
