@@ -31,7 +31,12 @@ Your task prompt has a `## Task` section followed by a `## Provenance` block. De
 
 ### Edit mode
 
-When dispatched with an edit prompt, you will receive an existing plan plus review findings and must edit the plan surgically. Edit-mode prompts continue to inline plan content; they are not affected by the file-based handoff contract above.
+When dispatched with an edit prompt, your task prompt has the same `## Provenance` + `## Artifact Reading Contract` shape as file-based input above, plus inline `## Review Findings` and `## Output` sections.
+
+- A `Plan artifact: <path>` line is always present in `## Provenance`. You MUST read the existing plan file in full from disk before editing — this is the plan you are editing in place, at that same path. The plan body is NOT inlined in edit-mode prompts.
+- If a `Task artifact: <path>` line appears in `## Provenance`, read the original task artifact from disk for reference. If it does not appear, the original task description is contained inline in `## Original Spec (inline)` (todo/freeform case).
+- Scout brief handling is the same as file-based input: read it from disk if referenced, warn and continue if it is missing.
+- The `## Review Findings` and `## Output` sections remain inline — they carry the specific errors to address and the path to write the edited plan to. Edit surgically against those findings; do not rewrite unflagged sections.
 
 ## Codebase Analysis
 
