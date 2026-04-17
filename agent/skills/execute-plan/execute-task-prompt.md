@@ -74,6 +74,10 @@ Before reporting, review your work with fresh eyes:
 
 If you find issues during self-review, fix them now before reporting.
 
+## Required Skills
+
+If this task involves diagnosing a failing test, regression, or unexpected behavior, you MUST consult the `systematic-debugging` skill at `agent/skills/systematic-debugging/SKILL.md` before proposing a fix. Find the root cause before changing code.
+
 {TDD_BLOCK}
 
 ## Report Format
@@ -88,6 +92,12 @@ What was implemented.
 
 ## Tests
 What was tested and results.
+
+When TDD was enabled for this task AND you changed production code, include brief RED/GREEN evidence:
+- **RED:** the failing test you added or ran first, and the expected failure reason (what error or assertion).
+- **GREEN:** what passed after implementation (the specific test(s) now passing, and confirmation the rest of the suite still passes).
+
+Keep each line to one or two sentences. If TDD was disabled, or you only modified docs/config/comments, write "TDD not applicable — <one-line reason>" and skip RED/GREEN.
 
 ## Files Changed
 - `path/to/file` — what changed
