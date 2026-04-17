@@ -33,7 +33,7 @@ Do not ask — proceed to Step 1.
 **If on main/master/develop and NOT in a worktree:** The settings summary (Step 3) will show `new worktree (branch: <suggested-branch>)` as the default.
 
 If the user accepts the worktree default (or selects it during customization):
-1. Suggest a branch name derived from the plan filename. For example, plan `2026-04-06-execute-plan-enhancements.md` → branch `plan/execute-plan-enhancements`.
+1. Suggest a branch name derived from the plan filename — a slash-free slug produced by stripping the leading date and the `.md` extension. For example, plan `2026-04-06-execute-plan-enhancements.md` → branch `execute-plan-enhancements`. Prefer the bare slug; avoid prefixes that introduce a `/` (e.g. `plan/...`) since slashes produce nested worktree directories.
 2. Follow the `using-git-worktrees` skill to create the isolated workspace:
    - Directory selection (existing `.worktrees/` > project config > ask)
    - Safety verification (git check-ignore for project-local directories)
