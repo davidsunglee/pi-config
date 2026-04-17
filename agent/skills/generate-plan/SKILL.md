@@ -103,25 +103,30 @@ If `model-tiers.json` doesn't exist or is unreadable, stop with: "generate-plan 
 
 ### 4.1: Review the plan
 
-1. Read the generated plan file (path from planner's output).
-2. Read [review-plan-prompt.md](review-plan-prompt.md) in this directory.
-3. Fill placeholders:
-   - `{PLAN_CONTENTS}` — full plan file contents
-   - `{ORIGINAL_SPEC}` — original task description. The review/edit loop's inline-handoff behavior is intentionally unchanged by this change — only the initial planner dispatch is path-based. Reconstruct `{ORIGINAL_SPEC}` so the reviewer sees the same effective context the planner had:
-     - **Todo / freeform inputs:** reuse the inline text from Step 1.
-     - **File inputs:** read the artifact file from disk and use its full contents. If a valid scout brief was extracted in Step 1 (i.e., `{SOURCE_BRIEF}` is non-empty and the brief file exists on disk), also read the brief from disk and append it after the artifact body, separated by a clear marker, e.g.:
-       ```
-       <artifact contents>
+The reviewer reads the generated plan, the task artifact, and the scout brief (if any) directly from disk. The orchestrator does NOT load those files into its own context here.
 
-       ---
+1. Read [review-plan-prompt.md](review-plan-prompt.md) in this directory.
+2. Fill placeholders as follows:
 
-       Scout brief (.pi/briefs/<filename>):
+   | Placeholder | File-based input | Todo / freeform input |
+   |---|---|---|
+   | `{PLAN_ARTIFACT}` | `Plan artifact: <plan path from Step 3>` | `Plan artifact: <plan path from Step 3>` |
+   | `{TASK_ARTIFACT}` | `Task artifact: <input path>` (same path used in Step 3) | empty string |
+   | `{SOURCE_TODO}` | same value used in Step 3 | same value used in Step 3 |
+   | `{SOURCE_SPEC}` | same value used in Step 3 | empty string |
+   | `{SCOUT_BRIEF}` | `Scout brief: .pi/briefs/<filename>` if a valid scout brief was extracted in Step 1 **and the brief file still exists on disk** at review time; empty string otherwise | empty string |
+   | `{ORIGINAL_SPEC_INLINE}` | empty string | the inline text from Step 1 |
 
-       <brief contents>
-       ```
-       This restores the prior effective behavior in which scout brief context was carried into the review/edit loop. If the scout brief was already determined missing in Step 1, `{SOURCE_BRIEF}` will be empty — the warning was already emitted; do not warn again and do not fail.
-4. Determine review output path from the plan filename. For a plan at `.pi/plans/2026-04-13-my-feature.md`, the review path is `.pi/plans/reviews/2026-04-13-my-feature-plan-review-v1.md`.
-5. Dispatch `plan-reviewer`:
+   Freshness / existence checks before filling:
+
+   - Verify the plan file produced by Step 3 exists and is non-empty. If it does not exist, fail with: `Plan file <path> missing — cannot dispatch plan review.` This is consistent with the planner slice: missing required artifacts fail the workflow.
+   - For file-based inputs, verify the task artifact path still exists. If not, fail with: `Task artifact <path> missing — cannot dispatch plan review.`
+   - For scout briefs, re-check existence at review time. If the brief file was present in Step 1 but is gone now, warn (`Scout brief <path> no longer exists at review time — proceeding without it.`), set `{SCOUT_BRIEF}` to empty, and continue. Do not fail.
+
+   **Do NOT read the plan, task artifact, or scout brief contents into the orchestrator prompt.** The `plan-reviewer` agent reads them from disk per its Input Contract.
+
+3. Determine review output path from the plan filename. For a plan at `.pi/plans/2026-04-13-my-feature.md`, the review path is `.pi/plans/reviews/2026-04-13-my-feature-plan-review-v1.md`.
+4. Dispatch `plan-reviewer`:
    ```
    subagent {
      agent: "plan-reviewer",
@@ -131,7 +136,7 @@ If `model-tiers.json` doesn't exist or is unreadable, stop with: "generate-plan 
    }
    ```
    If the cross-provider dispatch fails, retry with `capable` from model-tiers.json (re-resolving dispatch for the fallback model) and notify the user (see Step 2 fallback message).
-6. Write review output to the versioned path. Create `.pi/plans/reviews/` if it doesn't exist.
+5. Write review output to the versioned path. Create `.pi/plans/reviews/` if it doesn't exist.
 
 ### 4.2: Assess review
 
@@ -158,12 +163,30 @@ Read the review output file. Parse for the Status line (`**[Approved]**` or `**[
 
 ### 4.3: Edit the plan
 
+The planner edit pass reads the existing plan from disk (it will overwrite it at the same path), plus the task artifact and scout brief from disk for reference. Review findings and the output path remain inline control data.
+
 1. Read [edit-plan-prompt.md](edit-plan-prompt.md) in this directory.
-2. Fill placeholders:
-   - `{PLAN_CONTENTS}` — current plan file contents
-   - `{REVIEW_FINDINGS}` — full text of all error-severity findings from the review
-   - `{ORIGINAL_SPEC}` — original task description (same resolution rule as Step 4.1: inline text for todo/freeform; for file inputs, the artifact contents from disk plus the scout brief contents appended when a valid scout brief was extracted in Step 1)
-   - `{OUTPUT_PATH}` — path to the current plan file (same path used in Step 3)
+2. Fill placeholders as follows:
+
+   | Placeholder | File-based input | Todo / freeform input |
+   |---|---|---|
+   | `{REVIEW_FINDINGS}` | full text of all error-severity findings from the review (inline) | same |
+   | `{PLAN_ARTIFACT}` | `Plan artifact: <plan path from Step 3>` | same |
+   | `{TASK_ARTIFACT}` | `Task artifact: <input path>` (same path used in Step 3) | empty string |
+   | `{SOURCE_TODO}` | same value used in Step 3 | same value used in Step 3 |
+   | `{SOURCE_SPEC}` | same value used in Step 3 | empty string |
+   | `{SCOUT_BRIEF}` | `Scout brief: .pi/briefs/<filename>` if a valid scout brief was extracted in Step 1 **and the brief file still exists on disk** at edit time; empty string otherwise | empty string |
+   | `{ORIGINAL_SPEC_INLINE}` | empty string | the inline text from Step 1 |
+   | `{OUTPUT_PATH}` | plan path from Step 3 (same path — the planner overwrites in place) | same |
+
+   Freshness / existence checks before filling:
+
+   - Verify the plan file exists and is non-empty. If not, fail with: `Plan file <path> missing — cannot dispatch plan edit.`
+   - For file-based inputs, verify the task artifact path still exists. If not, fail with: `Task artifact <path> missing — cannot dispatch plan edit.`
+   - For scout briefs, re-check existence at edit time. If missing, warn (`Scout brief <path> no longer exists at edit time — proceeding without it.`), set `{SCOUT_BRIEF}` to empty, and continue.
+
+   **Do NOT read the plan, task artifact, or scout brief contents into the orchestrator prompt.** The planner reads them from disk per its Edit mode contract.
+
 3. Dispatch `planner` with the filled template:
    ```
    subagent { agent: "planner", task: "<filled edit-plan-prompt.md>", model: "<capable from model-tiers.json>", dispatch: "<dispatch for capable>" }
