@@ -1,5 +1,5 @@
 {
-    "capable": "anthropic/claude-opus-4-6",
+    "capable": "anthropic/claude-opus-4-7",
     "standard": "anthropic/claude-sonnet-4-6",
     "cheap": "anthropic/claude-haiku-4-5",
     "crossProvider": {
