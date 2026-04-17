@@ -14,7 +14,7 @@ Analyze the codebase at `{WORKING_DIR}` and produce a structured implementation 
 
 {SOURCE_SPEC}
 
-{SOURCE_BRIEF}
+{SCOUT_BRIEF}
 
 ## Artifact Reading Contract
 

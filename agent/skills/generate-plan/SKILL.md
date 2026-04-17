@@ -16,7 +16,7 @@ Use the `todo` tool to read the todo and extract its full body. The planner suba
 - Set `{TASK_DESCRIPTION}` to the todo body text.
 - Set `{TASK_ARTIFACT}` to an empty string.
 - Set `{SOURCE_TODO}` to `Source todo: TODO-<id>`.
-- Leave `{SOURCE_SPEC}` and `{SOURCE_BRIEF}` empty.
+- Leave `{SOURCE_SPEC}` and `{SCOUT_BRIEF}` empty.
 
 ### 1b. File path (spec, RFC, design doc, etc.)
 
@@ -29,8 +29,8 @@ From that bounded preamble, extract provenance using strict exact-match rules:
 - Inspect only the preamble area at the top of the file (everything above the first `## ` heading, or the bounded first ~40 lines, whichever comes first).
 - Only exact supported lines count:
   - `Source: TODO-<id>` → set `{SOURCE_TODO}` to `Source todo: TODO-<id>`.
-  - `Scout brief: .pi/briefs/<filename>` → set `{SOURCE_BRIEF}` to `Scout brief: .pi/briefs/<filename>`, **then verify the referenced file exists on disk**:
-    - If the brief file does not exist, warn the user (`Scout brief referenced in spec not found at <path> — proceeding without it.`), leave `{SOURCE_BRIEF}` empty, and continue without failing.
+  - `Scout brief: .pi/briefs/<filename>` → set `{SCOUT_BRIEF}` to `Scout brief: .pi/briefs/<filename>`, **then verify the referenced file exists on disk**:
+    - If the brief file does not exist, warn the user (`Scout brief referenced in spec not found at <path> — proceeding without it.`), leave `{SCOUT_BRIEF}` empty, and continue without failing.
     - **Do NOT read the brief contents into the orchestrator prompt.** The planner reads the brief from disk itself — this is the whole point of path-based handoff.
 - Lines that don't match one of the supported forms exactly are ignored.
 - Matching lines that appear later in the document (outside the preamble, including inside fenced code blocks or examples) are ignored.
@@ -47,7 +47,7 @@ Use the text as-is.
 
 - Set `{TASK_DESCRIPTION}` to the freeform text.
 - Set `{TASK_ARTIFACT}` to an empty string.
-- Leave `{SOURCE_TODO}`, `{SOURCE_SPEC}`, and `{SOURCE_BRIEF}` empty.
+- Leave `{SOURCE_TODO}`, `{SOURCE_SPEC}`, and `{SCOUT_BRIEF}` empty.
 
 ## Step 2: Resolve model tiers
 
@@ -93,7 +93,7 @@ If `model-tiers.json` doesn't exist or is unreadable, stop with: "generate-plan 
      - For **freeform inputs**, derive from the task text.
    - `{SOURCE_TODO}` — `Source todo: TODO-<id>` when a source todo ID is available — either directly (input was a todo ID) or indirectly (extracted from a file's preamble `Source: TODO-<id>` line during provenance extraction in Step 1). Empty string otherwise.
    - `{SOURCE_SPEC}` — `Source spec: .pi/specs/<filename>` if the input file path is under `.pi/specs/`, empty string otherwise.
-   - `{SOURCE_BRIEF}` — `Scout brief: .pi/briefs/<filename>` if a scout brief was extracted from the file preamble and the brief file exists on disk, empty string otherwise.
+   - `{SCOUT_BRIEF}` — `Scout brief: .pi/briefs/<filename>` if a scout brief was extracted from the file preamble and the brief file exists on disk, empty string otherwise.
 3. Dispatch `planner` agent synchronously:
    ```
    subagent { agent: "planner", task: "<filled template>", model: "<capable from model-tiers.json>", dispatch: "<dispatch for capable>" }
