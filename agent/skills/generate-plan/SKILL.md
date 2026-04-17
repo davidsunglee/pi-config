@@ -227,9 +227,20 @@ If **(b):** proceed to Step 5 with outstanding findings noted.
 - **Todo ID provided:** Read the todo body first with the `todo` tool and inline the full body in `{TASK_DESCRIPTION}`. The planner subagent does not have the `todo` tool, so the ID alone is not enough.
 - **File path provided:** Pass by path via `{TASK_ARTIFACT}`. Do NOT inline the file body into `{TASK_DESCRIPTION}`. Only do a bounded preamble read (e.g., `head -n 40`) for provenance extraction. The planner reads the full artifact from disk.
 - **Scout brief referenced but missing on disk:** Warn the user and continue planning without it. Do not block.
+- **Plan file missing between generation and review/edit:** Fail with a clear error (`Plan file <path> missing — cannot dispatch plan review.` or `... plan edit.`). This should not normally happen — the planner writes the plan in Step 3 at a known path — but a clear failure is preferable to dispatching with no plan.
+- **Task artifact moved or deleted during the review/edit loop:** Fail with `Task artifact <path> missing — cannot dispatch plan review.` (or `... plan edit.`). File-based planning runs require the artifact to remain on disk throughout the loop.
+- **Scout brief deleted between generation and review/edit:** Warn (`Scout brief <path> no longer exists at review time — proceeding without it.`) and continue. Consistent with the planner-slice warn-and-continue policy.
 - **`.pi/plans/` missing:** The subagent handles creating the directory; no action needed from the main agent.
 - **`.pi/plans/reviews/` missing:** Create it before writing the review file.
 
 ## Scope note on path-based handoff
 
-Path-based handoff in this skill applies **only to the initial `generate-plan -> planner` dispatch** (Step 3). The review/edit loop (Step 4) continues to inline plan contents and review findings as before. That loop is out of scope for this change and tracked separately (see `TODO-58b1648b`).
+Path-based handoff in this skill applies to the initial `generate-plan -> planner` dispatch (Step 3), the `generate-plan -> plan-reviewer` dispatch (Step 4.1), and the planner edit-pass dispatch (Step 4.3). For these three dispatches, large durable artifacts — the generated plan file, the original task artifact, and any scout brief — are passed by filesystem path rather than inlined into the prompt. The worker agents read them from disk per their input contracts.
+
+What remains inline:
+
+- For todo and freeform runs, the original task description itself is inline in `{TASK_DESCRIPTION}` (Step 3) and `{ORIGINAL_SPEC_INLINE}` (Steps 4.1 and 4.3). No temp artifact files are created just to force path-based handoff — todo/freeform inputs are not durable artifacts.
+- For the edit pass, review findings (`{REVIEW_FINDINGS}`) and the output path (`{OUTPUT_PATH}`) are small, ephemeral control data and remain inline.
+- Minimal provenance / safety metadata (`{SOURCE_TODO}`, `{SOURCE_SPEC}`, `{SCOUT_BRIEF}`) stays inline.
+
+`execute-plan` and `execute-plan -> coder` are out of scope for this handoff contract.
