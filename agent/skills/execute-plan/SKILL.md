@@ -151,7 +151,7 @@ Wave 2: [Task 3, Task 4]
 Wave 3: [Task 5]
 ```
 
-If a wave has more than 7 tasks, split it into sequential sub-waves of ≤7 tasks each.
+If a wave has more than 8 tasks, split it into sequential sub-waves of ≤8 tasks each. The cap of 8 is the pi-subagent extension's `MAX_PARALLEL_TASKS` (see `/Users/david/Code/pi-subagent/index.ts`) — do not exceed it, because the extension rejects dispatches above this limit. If that constant changes, update this cap to match.
 
 ## Step 6: Resolve model tiers
 
