@@ -8,15 +8,15 @@
     "integration-tests",
     "ux-consistency"
   ],
-  "status": "open",
+  "status": "done",
   "created_at": "2026-04-13T20:00:00.000Z"
 }
 
 ## Summary
 
 Strengthen the execution pipeline in three related areas:
-1. Give worker agents much stronger TDD guidance or direct access to the TDD skill.
-2. Improve post-wave integration test failure handling in `execute-plan` Step 9b so failures are debugged systematically and user choices match suite conventions.
+1. Give worker agents much stronger TDD guidance by using a **hybrid approach**: embed a substantially stronger TDD block in the worker prompt, instruct workers to consult the full `test-driven-development` skill when implementing or fixing code, and require brief RED/GREEN evidence in worker reports when TDD is enabled and production code changes.
+2. Improve post-wave integration test failure handling in `execute-plan` **Step 11** so failures are debugged systematically and user choices match suite conventions.
 3. Align the execute-plan wave size limit with the pi-subagent extension's `MAX_PARALLEL_TASKS` constant (currently 8) instead of hardcoding a separate value.
 
 This todo now absorbs `TODO-845e6978` as an internal task rather than tracking it separately.
@@ -25,7 +25,7 @@ This todo now absorbs `TODO-845e6978` as an internal task rather than tracking i
 
 All three tasks improve the reliability of plan execution after worker dispatch:
 - stronger TDD discipline should reduce regressions introduced by workers
-- better Step 9b handling should make regressions easier to diagnose and resolve when they still happen
+- better Step 11 handling should make regressions easier to diagnose and resolve when they still happen
 - respecting the subagent extension's own limits prevents the skill from either under-utilizing capacity or exceeding the extension's enforced maximum
 
 ## Tasks
@@ -44,19 +44,49 @@ The condensed version drops:
 
 The workers — the agents that actually need TDD discipline — get the weakest version. The orchestrator, who doesn't write code, has access to the full skill.
 
+#### Design decision
+
+Use a **hybrid approach**:
+- strengthen `{TDD_BLOCK}` substantially so the worker prompt itself carries the most behavior-shaping TDD guidance
+- also instruct workers to consult the full `test-driven-development/SKILL.md` when doing implementation or bug-fix work
+- require workers to include compact **RED/GREEN evidence** in their report when TDD is enabled and they changed production code
+
+Rationale:
+- the worker prompt is the highest-salience instruction surface and should carry the core discipline directly
+- the full skill remains available as supporting depth and reference material
+- RED/GREEN evidence makes TDD behavior observable rather than purely aspirational
+- this is stronger than merely pointing workers at the full skill, but less brittle than relying on a tiny summary alone
+
 #### Goal
 
-Either inject the full TDD skill content (or a substantial subset including at minimum the rationalization prevention and verification checklist) into the worker prompt via `{TDD_BLOCK}`, or have the worker invoke the TDD skill directly.
+Replace the current minimal `{TDD_BLOCK}` with a much stronger excerpt from the TDD skill, update the worker instructions so coders are explicitly told to read or consult the full TDD skill when implementing or fixing code, and make the worker report format require concise RED/GREEN evidence when TDD is enabled and production code changed.
 
-Evaluate token cost tradeoffs — the full skill is ~306 lines, but the rationalization prevention section is what gives it teeth.
+At minimum, the strengthened prompt block should preserve the TDD skill sections that give it teeth:
+- Iron Law / no production code without a failing test first
+- red/green verification steps
+- rationalization prevention guidance
+- red-flag stop conditions
+- verification checklist
+- debugging / when-stuck guidance
 
-### Task 2: Improve Step 9b integration test failure handling
+Evaluate prompt-size tradeoffs, but prioritize preserving the anti-rationalization and verification content over keeping the block short.
+
+#### Expected changes
+
+- Expand `{TDD_BLOCK}` in `agent/skills/execute-plan/SKILL.md` so it contains a substantially richer TDD excerpt than the current 8-line summary
+- Update `agent/skills/execute-plan/execute-task-prompt.md` so workers are told that when they are implementing or fixing code, they must consult the full `test-driven-development` skill in addition to following the embedded TDD block
+- Update the worker report instructions so that when TDD is enabled and production code changed, `## Tests` includes brief RED/GREEN evidence:
+  - **RED:** what failing test was added or run first, and the expected failure reason
+  - **GREEN:** what passed after implementation
+- Keep the worker-facing guidance internally consistent between the skill assembly instructions, the dispatched prompt template, and the expected report format
+
+### Task 2: Improve Step 11 integration test failure handling
 
 _Absorbed from `TODO-845e6978`._
 
 #### Problem
 
-`execute-plan` Step 9b (post-wave integration test failure) has two issues:
+`execute-plan` **Step 11** (post-wave integration test failure handling) has two issues:
 
 ##### 2.1 Blunt retry strategy
 
@@ -69,20 +99,37 @@ This does not analyze which task caused the failure, does not do targeted debugg
 
 ##### 2.2 Inconsistent user choice presentation
 
-Step 9b uses `(r)/(s)/(x)` mnemonic letters, while other choice points in the suite use `(a)/(b)/(c)` with imperative verb phrases:
+The Step 11 integration-test failure branch uses `(r)/(s)/(x)` mnemonic letters, while other choice points in the suite use `(a)/(b)/(c)` with imperative verb phrases:
 
 - generate-plan Step 4: `(a) Keep iterating` / `(b) Proceed with issues`
 - execute-plan Step 12: `(a) Keep iterating` / `(b) Proceed with issues` / `(c) Stop execution`
 
+#### Design decision
+
+Use a **debugger-first flow** without introducing a new agent type in this iteration:
+- on post-wave integration test failure, dispatch a **debugging-oriented pass first** rather than immediately re-running the whole wave
+- the debugging pass should use the existing worker agent shape with a prompt that explicitly follows the `systematic-debugging` skill
+- if the debugging pass identifies a clear, localized fix with high confidence, it may both diagnose and remediate in the same dispatch
+- if the issue is not clearly localized, the debugging pass should return a diagnosis that drives a follow-up **targeted** remediation dispatch for only the implicated task(s) or files
+- do **not** add a new `debugger` agent as part of this todo unless the implementation work uncovers a compelling need that should be split into a separate follow-up
+
+Rationale:
+- this preserves root-cause-first discipline without forcing two additional subagent dispatches for every test failure
+- it avoids the scope increase of defining, validating, and integrating a brand-new agent type
+- it still replaces blunt full-wave redispatch with a more surgical debugging/remediation flow
+
 #### Goal
 
-Replace the blunt retry path with a more systematic debugging flow and align the Step 9b user choices with the suite's standard wording.
+Replace the blunt retry path in Step 11 with a more systematic debugging flow and align the Step 11 user choices with the suite's standard wording.
 
 #### Expected changes
 
 - Invoke the `systematic-debugging` skill (or an equivalent targeted debugging flow) instead of blindly re-dispatching all wave tasks
 - Analyze test failure output to identify the likely regression source
-- Attempt targeted fixes and re-run tests to verify
+- Start with a debugging-oriented dispatch that can either:
+  - diagnose **and** remediate when the root cause is clear and localized, or
+  - return a diagnosis that triggers targeted follow-up remediation for only the implicated task(s)
+- Avoid re-running unaffected tasks from the wave unless the diagnosis genuinely implicates them
 - Replace `(r)/(s)/(x)` with:
   - **(a) Debug failures** — kick off systematic debugging for the failing tests
   - **(b) Skip tests** — proceed to the next wave despite failures
@@ -109,8 +156,12 @@ The execute-plan skill should never dispatch more parallel agents than the pi-su
 ## Completion criteria
 
 This todo is complete when:
-- worker-facing TDD enforcement is meaningfully stronger than the current condensed block
-- `execute-plan` Step 9b no longer uses the blunt full-wave retry strategy
-- Step 9b user choices follow the suite-wide `(a)/(b)/(c)` convention
+- worker-facing TDD enforcement follows the hybrid approach: a substantially stronger embedded TDD block, explicit worker instruction to consult the full TDD skill, and RED/GREEN report evidence when TDD is enabled and production code changed
+- the strengthened worker-facing TDD guidance is meaningfully stronger than the current condensed block
+- `execute-plan` Step 11 no longer uses the blunt full-wave retry strategy
+- post-wave test failure handling follows the debugger-first flow: diagnose first, remediate in the same dispatch when localized, otherwise target only the implicated follow-up work
+- Step 11 user choices follow the suite-wide `(a)/(b)/(c)` convention
 - the execute-plan wave size limit matches the pi-subagent extension's `MAX_PARALLEL_TASKS` (currently 8)
 - the implementation is internally consistent across prompts, skills, and orchestration flow
+
+Completed via plan: .pi/plans/done/2026-04-17-strengthen-execute-plan-worker-discipline-test-failure-handling-and-subagent-limits.md
