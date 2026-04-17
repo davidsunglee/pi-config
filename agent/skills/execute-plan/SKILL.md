@@ -436,13 +436,13 @@ When the user chooses **(a) Debug failures**, do NOT re-dispatch every task in t
    - The required report shape: either `STATUS: DONE` with the fix applied and RED/GREEN evidence for the regression test, or `STATUS: DONE_WITH_CONCERNS` containing a `## Diagnosis` section naming the implicated task(s), the root cause, and the minimal change needed.
 
 3. **Handle the debugging pass result:**
-   - **Diagnosed and fixed (`STATUS: DONE`):** Re-run the test command. If it now matches the baseline (pass), amend or add a follow-up commit (`git commit -m "fix(plan): wave <N> regression — <short summary>"`) and proceed to the next wave. If tests still fail, treat it as a failed debugging pass (below).
-   - **Diagnosis only (`STATUS: DONE_WITH_CONCERNS` with `## Diagnosis`):** Use the diagnosis to dispatch a **targeted remediation** — a second `coder` dispatch scoped to only the implicated task(s)/files from the diagnosis. Include the diagnosis text, the failing test output, and the original task spec(s) for the implicated task(s). After that dispatch returns, re-run the test command and handle pass/fail the same way.
+   - **Diagnosed and fixed (`STATUS: DONE`):** Re-run the test command. If it now matches the baseline (pass), add a follow-up commit (`git commit -m "fix(plan): wave <N> regression — <short summary>"`) and proceed to the next wave. If tests still fail, treat it as a failed debugging pass (below).
+   - **Diagnosis only (`STATUS: DONE_WITH_CONCERNS` with `## Diagnosis`):** Use the diagnosis to dispatch a **targeted remediation** — a second `coder` dispatch scoped to only the implicated task(s)/files from the diagnosis. Include the diagnosis text, the failing test output, and the original task spec(s) for the implicated task(s). After that dispatch returns, re-run the test command. If it now passes, add a follow-up commit (`git commit -m "fix(plan): wave <N> regression — <short summary>"`) and proceed to the next wave. If tests still fail, treat it as a failed debugging pass.
    - **Failed debugging pass** (blocker, or fix did not resolve failures): re-present the `(a)/(b)/(c)` choices to the user. Count this attempt toward the Step 12 retry limit.
 
 4. **Do NOT re-dispatch unaffected wave tasks** unless the diagnosis explicitly implicates them. Avoiding blanket re-runs is the point of this flow.
 
-5. **Commit undo is only used as a fallback.** If the targeted remediation also fails and the user chooses to retry again, at that point — and only then — offer to undo the wave commit with `git reset --soft HEAD~1 && git reset HEAD` before a broader retry. Do not undo proactively.
+5. **Commit undo is only used as a fallback.** If the targeted remediation also fails and the user chooses to retry again, at that point — and only then — offer to undo the wave commit with `git reset HEAD~1` (working-tree changes from the wave are preserved unstaged for the retry) before a broader retry. Do not undo proactively.
 
 ## Step 12: Handle failures and retries
 

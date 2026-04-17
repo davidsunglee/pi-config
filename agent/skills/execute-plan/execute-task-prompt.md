@@ -76,7 +76,7 @@ If you find issues during self-review, fix them now before reporting.
 
 ## Required Skills
 
-If this task involves diagnosing a failing test, regression, or unexpected behavior, you MUST consult the `systematic-debugging` skill at `agent/skills/systematic-debugging/SKILL.md` before proposing a fix. Find the root cause before changing code.
+If this task involves diagnosing a failing test, regression, or unexpected behavior, you MUST consult the `systematic-debugging` skill before proposing a fix. Find the root cause before changing code.
 
 {TDD_BLOCK}
 
