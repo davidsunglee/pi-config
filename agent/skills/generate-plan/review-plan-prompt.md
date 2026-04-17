@@ -9,13 +9,30 @@ You are reviewing a generated implementation plan for structural correctness bef
 4. Evaluate acceptance criteria quality
 5. Confirm the plan is buildable — an agent can follow it without getting stuck
 
-## Original Spec / Task Description
+## Provenance
 
-{ORIGINAL_SPEC}
+{PLAN_ARTIFACT}
 
-## Generated Plan
+{TASK_ARTIFACT}
 
-{PLAN_CONTENTS}
+{SOURCE_TODO}
+
+{SOURCE_SPEC}
+
+{SCOUT_BRIEF}
+
+## Original Spec (inline)
+
+{ORIGINAL_SPEC_INLINE}
+
+## Artifact Reading Contract
+
+- A `Plan artifact: <path>` line in `## Provenance` is always present. Read that plan file in full from disk before reviewing. It is the authoritative plan under review — the orchestrator has NOT inlined plan contents in this prompt.
+- If a `Task artifact: <path>` line appears in `## Provenance`, the original task specification lives on disk at that path. Read it in full before reviewing. Do not assume its body is quoted anywhere in this prompt.
+- If a `Scout brief: .pi/briefs/<filename>` line appears in `## Provenance`, read that brief file from disk as well and treat it as primary context alongside the task artifact.
+- If a referenced scout brief file is missing on disk, note it in your review and continue — do not abort.
+- If no `Task artifact:` line is present, the original task description is contained inline in the `## Original Spec (inline)` section above and is self-contained (this is the todo/freeform case).
+- If both `Task artifact:` is present and `## Original Spec (inline)` is non-empty, prefer the on-disk artifact as authoritative. The inline section must be empty in that case; if it is not, report an inconsistency in your review but continue using the on-disk artifact.
 
 ## Review Checklist
 
