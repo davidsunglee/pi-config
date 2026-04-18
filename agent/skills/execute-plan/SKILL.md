@@ -16,21 +16,93 @@ git rev-parse --git-dir 2>/dev/null || { echo "execute-plan requires a git repos
 
 If the check fails, stop with: "execute-plan requires a git repository."
 
-**Auto-detect:** Check if already on a feature branch or in a worktree:
+**Auto-detect:** Determine whether the current workspace is a worktree and whether it is on a feature branch. Use these exact checks:
+
 ```bash
-# Check if in a worktree (git-common-dir differs from .git only in worktrees)
-IS_WORKTREE=$(git rev-parse --git-common-dir 2>/dev/null)
-# Check current branch
+# Worktree detection: `git rev-parse --git-dir` returns the per-worktree git dir;
+# `--git-common-dir` returns the shared repo dir. In the main working tree these
+# resolve to the same absolute path; inside a linked worktree they differ.
+GIT_DIR_ABS=$(cd "$(git rev-parse --git-dir)" && pwd)
+GIT_COMMON_DIR_ABS=$(cd "$(git rev-parse --git-common-dir)" && pwd)
+if [ "$GIT_DIR_ABS" != "$GIT_COMMON_DIR_ABS" ]; then
+  IS_WORKTREE=1
+else
+  IS_WORKTREE=0
+fi
+
+# Current branch (empty string if detached HEAD)
 CURRENT_BRANCH=$(git branch --show-current)
+
+# Branch label used in reuse logs and Step 3 summary. When CURRENT_BRANCH is
+# empty (detached HEAD), substitute the short SHA so `<branch-name>` is always
+# a concrete, printable identifier.
+if [ -n "$CURRENT_BRANCH" ]; then
+  BRANCH_LABEL="$CURRENT_BRANCH"
+else
+  BRANCH_LABEL="detached HEAD at $(git rev-parse --short HEAD)"
+fi
+
+# Feature-branch detection: any non-empty branch that is not main/master/develop
+case "$CURRENT_BRANCH" in
+  ""|main|master|develop) IS_FEATURE_BRANCH=0 ;;
+  *)                      IS_FEATURE_BRANCH=1 ;;
+esac
 ```
 
-**If already on a feature branch** (not main/master/develop) **or in a worktree:** Use the existing workspace. This is reflected in the settings summary (Step 3) as:
-```
-    Workspace:          current workspace (on <branch-name>)
-```
-Do not ask — proceed to Step 1.
+**If `IS_WORKTREE=1` or `IS_FEATURE_BRANCH=1`:** Reuse the existing workspace, but log and safety-check it first.
 
-**If on main/master/develop and NOT in a worktree:** The settings summary (Step 3) will show `new worktree (branch: <suggested-branch>)` as the default.
+1. **Log the reused workspace explicitly.** Print the concrete path and the reason reuse was selected:
+   ```bash
+   WORKSPACE_PATH=$(git rev-parse --show-toplevel)
+   ```
+
+   **Reuse-reason precedence (pick exactly one message):**
+   - If `IS_WORKTREE=1` — emit the worktree message, regardless of whether `IS_FEATURE_BRANCH` is also 1. A linked worktree is the more specific condition and takes priority:
+     `Reusing current workspace: <WORKSPACE_PATH> (reason: already inside worktree for branch '<BRANCH_LABEL>')`
+   - Else (`IS_WORKTREE=0` and `IS_FEATURE_BRANCH=1`) — emit the feature-branch message:
+     `Reusing current workspace: <WORKSPACE_PATH> (reason: already on feature branch '<BRANCH_LABEL>')`
+
+   `<BRANCH_LABEL>` is the value computed above: the branch name when on a branch, or `detached HEAD at <short-sha>` when `CURRENT_BRANCH` is empty. Note that `IS_FEATURE_BRANCH=0` when detached, so the feature-branch message only fires with a real branch name; the worktree message may fire with either form.
+
+   This log is mandatory for every reuse, including both feature-branch reuse and worktree reuse.
+
+2. **Check whether the reused workspace is dirty.** Treat the workspace as dirty if git reports any of the following:
+   - Modified tracked files
+   - Staged (index) changes
+   - Untracked files
+
+   A single `git status --porcelain` check covers all three:
+   ```bash
+   DIRTY_STATUS=$(git status --porcelain)
+   ```
+   If `DIRTY_STATUS` is empty, the workspace is clean. If it contains any lines, the workspace is dirty.
+
+3. **If the reused workspace is clean:** auto-proceed to Step 1 after the reuse log. Do not add any extra confirmation prompt.
+
+4. **If the reused workspace is dirty:** warn the user before continuing and offer three choices:
+   ```
+   ⚠️ Reused workspace <WORKSPACE_PATH> has uncommitted changes:
+   <DIRTY_STATUS>
+
+   Options:
+   (c) Continue in this workspace — proceed as-is, mixing plan work with existing changes
+   (q) Quit — cancel execution
+   (n) Create a new worktree instead — abandon reuse and fall back to the normal new-worktree flow
+   ```
+
+   - **(c) Continue:** proceed to Step 1 in the current workspace.
+   - **(q) Quit:** stop with `Plan execution cancelled.`
+   - **(n) New worktree instead:** fall through to the new-worktree flow below (the same flow used when starting from main/master/develop), including the usual suggested branch name derived from the plan filename. The settings summary (Step 3) will then show `new worktree (branch: <suggested-branch>)`.
+
+This reuse logging and dirty-check behavior is identical for feature-branch reuse and worktree reuse.
+
+Once reuse is accepted (clean, or dirty with `(c) Continue`), the settings summary (Step 3) reflects it as:
+```
+    Workspace:          current workspace (on <BRANCH_LABEL>)
+```
+where `<BRANCH_LABEL>` is the value computed in the auto-detect block above (branch name, or `detached HEAD at <short-sha>`).
+
+**If on main/master/develop and NOT in a worktree, or the user chose `(n) Create a new worktree instead` above:** The settings summary (Step 3) will show `new worktree (branch: <suggested-branch>)` as the default.
 
 If the user accepts the worktree default (or selects it during customization):
 1. Suggest a branch name derived from the plan filename — a slash-free slug produced by stripping the leading date and the `.md` extension. For example, plan `2026-04-06-execute-plan-enhancements.md` → branch `execute-plan-enhancements`. Prefer the bare slug; avoid prefixes that introduce a `/` (e.g. `plan/...`) since slashes produce nested worktree directories.
@@ -82,8 +154,9 @@ Ready to execute: (s)tart / (c)ustomize / (q)uit
 ```
 
 **Workspace values:**
-- Already on a feature branch or in a worktree: `current workspace (on <branch-name>)`
-- On main in a git repo (default): `new worktree (branch: <suggested-branch>)`
+- Already on a feature branch or in a worktree, and reuse was accepted in Step 0 (clean workspace, or dirty with `(c) Continue`): `current workspace (on <BRANCH_LABEL>)`
+- On main/master/develop and not in a worktree (default): `new worktree (branch: <suggested-branch>)`
+- Already on a feature branch or in a worktree, but the user declined reuse in Step 0 by choosing `(n) Create a new worktree instead`: `new worktree (branch: <suggested-branch>)` — identical to the main-branch default. Step 0's detected reuse state is discarded for the remainder of execution; for Step 3 and everything that follows, treat this case exactly like the main-branch new-worktree path, including customization rules (see below).
 
 **Integration test value:** When enabled and a test command is available, include the command: `enabled (<command>)`. When no test command is available: `disabled (no test command)`.
 
@@ -91,7 +164,7 @@ Ready to execute: (s)tart / (c)ustomize / (q)uit
 
 | Setting | Default | Notes |
 |---------|---------|-------|
-| Workspace | new worktree | Auto-detected if already on branch/worktree — shows current state, not a choice |
+| Workspace | new worktree | If Step 0 auto-detected reuse and the user accepted it (clean, or dirty with `(c) Continue`), the line shows the reused workspace and is not a customizable option. If the user chose `(n) Create a new worktree instead` in Step 0, or reuse never applied, the line shows `new worktree (branch: <suggested-branch>)` and IS customizable just like the main-branch default. |
 | TDD | enabled | Can disable for non-code plans (docs, config, content) |
 | Execution | parallel, pause on failure | Can customize to sequential, or change pacing |
 | Integration test | enabled | If a test command is available, show `enabled (<command>)`. If no test command, show `disabled (no test command)` |
@@ -110,7 +183,7 @@ Ready to execute: (s)tart / (c)ustomize / (q)uit
 **If `s`:** Accept all defaults and proceed to Step 4.
 
 **If `c`:** Ask each setting individually:
-1. Workspace — New worktree / Current workspace (only if not auto-detected)
+1. Workspace — New worktree / Current workspace. Skip this question only when Step 0 auto-detected reuse AND the user accepted it (clean, or dirty with `(c) Continue`); in that case the reused workspace is fixed. In all other cases — including when the user chose `(n) Create a new worktree instead` in Step 0 — ask this question normally.
 2. TDD — Enabled / Disabled
 3. Execution mode — Sequential / Parallel
 4. Wave pacing (if parallel) — Pause between waves / Auto-continue / Auto-continue unless failures
@@ -121,7 +194,7 @@ After customization, show the final settings summary for confirmation.
 
 **If `q`:** Cancel execution and stop with: `Plan execution cancelled.`
 
-If workspace was auto-detected (already on feature branch or in worktree), that line shows the detected state and is not a customizable option.
+If Step 0 auto-detected reuse AND the user accepted it (clean workspace, or dirty with `(c) Continue`), the workspace line shows the reused state and is not a customizable option. If the user chose `(n) Create a new worktree instead` in Step 0, the auto-detected reuse state is discarded and the workspace line behaves like the main-branch default — shown as `new worktree (branch: <suggested-branch>)` and fully customizable.
 
 After settings are confirmed, if Worktree was selected and Step 0 hasn't executed worktree setup yet, execute it now.
 
