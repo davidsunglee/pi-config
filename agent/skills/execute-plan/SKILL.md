@@ -412,7 +412,7 @@ After each wave completes, process each worker response:
 - **DONE** → proceed to verification (Step 10).
 - **DONE_WITH_CONCERNS** → read the concerns. Correctness/scope concerns must be addressed before verification; observations can be noted and execution continues.
 - **NEEDS_CONTEXT** → provide the missing context and re-dispatch the task immediately.
-- **BLOCKED** → do NOT recover inline. Record the worker's blocker details with the task, leave the task marked `BLOCKED`, and let the wave drain. The combined escalation is handled in Step 9.5, which surfaces every blocked task in the wave to the user before Step 10 runs. The four canonical interventions (more context, better model, split into sub-tasks, stop execution) live in Step 9.5.
+- **BLOCKED** → do NOT recover inline. Record the worker's blocker details with the task, leave the task marked `BLOCKED`, and let the wave drain. The combined escalation is handled in Step 9.5, which surfaces every blocked task in the wave to the user before Step 10, Step 11, or any subsequent wave runs. The four canonical interventions (more context, better model, split into sub-tasks, stop execution) live in Step 9.5.
 
 **Never ignore an escalation or re-dispatch the same task to the same model without changes.**
 
@@ -424,7 +424,7 @@ Run this gate once per wave after every dispatched worker in the wave has return
 
 ### 1. Drain the current wave
 
-Do not cancel or interrupt any worker that is still running in the current wave. `execute-plan` already waits for all dispatched workers in a wave to return before proceeding; rely on that. Once every worker response has been received and Step 9 has been applied, the wave is "drained."
+Do not cancel or interrupt any worker that is still running in the current wave. Wait for every dispatched worker in the wave to return and for Step 9 to classify each response before proceeding. Do not advance until all workers have returned. Once every worker response has been received and Step 9 has been applied, the wave is "drained."
 
 Do not start the next wave. Do not run Step 10 or Step 11 for this wave yet.
 
@@ -502,7 +502,7 @@ After collecting a non-stop intervention for every task in `BLOCKED_TASKS`, re-d
 
 Apply Step 9 to the new responses. Then re-enter this gate (Step 9.5) with the new set of responses. The gate repeats until `BLOCKED_TASKS` is empty or the user picks `(x) Stop execution`.
 
-Each pass through the gate counts toward the per-task retry budget defined in Step 12 (3 retries per task). When a task exhausts its retry budget while still reporting `BLOCKED`, the gate does NOT defer to Step 12's generic "skip the failed task" branch — "skip" is not a valid exit from a `BLOCKED` state, because skipping would leave the wave with a permanently-unresolved blocker, and the spec forbids treating such a wave as successfully completed. The only ways out of this gate for a `BLOCKED` task are: (a) the user selects a non-stop intervention and re-dispatch eventually yields `DONE` or `DONE_WITH_CONCERNS` for that task, or (b) the user selects `(x) Stop execution`, which halts the entire plan via Step 13. If Step 12's automatic retry logic would otherwise offer "skip" for a task that is `BLOCKED` (as opposed to generically failing), present the user with only "retry with different model/context" (which re-enters this gate's §4 intervention menu) and "stop the entire plan" — never a silent skip. The gate does not exit successfully to Step 10/11 until every `BLOCKED` task is actually resolved.
+Each pass through the gate counts toward the per-task retry budget defined in Step 12 (3 retries per task). This cap is shared across both `BLOCKED` re-dispatch passes through this gate and `DONE`-verification retries through Step 12's verification loop for the same task — e.g., if a task has been re-dispatched twice through this gate and once via Step 12's verification retry, the combined count of 3 exhausts the budget. When a task exhausts its retry budget while still reporting `BLOCKED`, the gate does NOT defer to Step 12's generic "skip the failed task" branch — "skip" is not a valid exit from a `BLOCKED` state, because skipping would leave the wave with a permanently-unresolved blocker, and the spec forbids treating such a wave as successfully completed. The only ways out of this gate for a `BLOCKED` task are: (a) the user selects a non-stop intervention and re-dispatch eventually yields `DONE` or `DONE_WITH_CONCERNS` for that task, or (b) the user selects `(x) Stop execution`, which halts the entire plan via Step 13. If Step 12's automatic retry logic would otherwise offer "skip" for a task that is `BLOCKED` (as opposed to generically failing), present the user with only "retry with different model/context" (which re-enters this gate's §4 intervention menu) and "stop the entire plan" — never a silent skip. The gate does not exit successfully to Step 10/11 until every `BLOCKED` task is actually resolved.
 
 ### 6. Gate exit
 
