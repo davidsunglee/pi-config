@@ -491,7 +491,7 @@ These options mirror the recovery paths previously inlined in Step 9's `BLOCKED`
 
 - **(c) More context:** prompt the user for the additional context (free-form text). Re-dispatch this single task to a `coder` worker with the original task spec plus the supplied context appended under a `## Additional Context` section in the worker prompt. Keep the task's existing model tier unless the user also picks (m) for the same task on a subsequent pass.
 - **(m) Better model:** only offered when the task's current tier is `cheap` or `standard`. Re-dispatch this single task to a `coder` worker using the next tier up from the task's current tier (`cheap` → `standard`, `standard` → `capable`). Resolve the concrete model string via `~/.pi/agent/model-tiers.json` as described in Step 6. If the task's current tier is `capable`, do NOT offer this option and do NOT re-dispatch to `capable` again under the guise of a "better model" — that would re-dispatch the same task to the same model with no change, which the Step 9 rule forbids. The user must instead pick `(c)` (which adds new context, satisfying the "with changes" requirement) or `(s)` (which restructures the task itself), or `(x)`.
-- **(s) Split into sub-tasks:** decompose the task into smaller sub-tasks in-session. Each sub-task must keep the same output file(s) and acceptance criteria coverage between them (no criterion may be dropped). Dispatch the sub-tasks as a mini-wave bounded by the pi-subagent `MAX_PARALLEL_TASKS` cap (see Step 5). If there is a natural ordering between sub-tasks, run them sequentially instead.
+- **(s) Split into sub-tasks:** decompose the task into smaller sub-tasks in-session. Each sub-task must keep the same output file(s) and acceptance criteria coverage between them (no criterion may be dropped). Dispatch the sub-tasks as a mini-wave bounded by the pi-subagent `MAX_PARALLEL_TASKS` cap (see Step 5). If there is a natural ordering between sub-tasks, run them sequentially instead. The parent task's slot is replaced by the sub-tasks for all subsequent tracking; each sub-task is treated as an independent task in this wave for Step 9 classification and gate re-entry.
 - **(x) Stop execution:** halt execution immediately. Do NOT perform Step 10 or Step 11 for this wave. Report partial progress via Step 13. All prior wave commits are preserved as checkpoints.
 
 If the user picks `(x) Stop execution` for any blocked task, stop the whole plan regardless of outstanding choices for other blocked tasks. Do not continue asking about the remaining blocked tasks.
@@ -500,7 +500,7 @@ If the user picks `(x) Stop execution` for any blocked task, stop the whole plan
 
 After collecting a non-stop intervention for every task in `BLOCKED_TASKS`, re-dispatch all of them together (in parallel, subject to `MAX_PARALLEL_TASKS`). Use the same dispatch shape as Step 8. Wait for all re-dispatched workers to return.
 
-Apply Step 9 to the new responses. Then re-enter this gate (Step 9.5) with the new set of responses. The gate repeats until `BLOCKED_TASKS` is empty or the user picks `(x) Stop execution`.
+Apply Step 9 to the new responses. Then re-enter this gate (Step 9.5) with the new set of responses. The gate repeats until `BLOCKED_TASKS` is empty or the user picks `(x) Stop execution`. For tasks where `(s) Split into sub-tasks` was chosen, the sub-tasks' responses replace the original task's slot; if any sub-task returns `BLOCKED`, it appears in `BLOCKED_TASKS` on the next gate pass.
 
 Each pass through the gate counts toward the per-task retry budget defined in Step 12 (3 retries per task). This cap is shared across both `BLOCKED` re-dispatch passes through this gate and `DONE`-verification retries through Step 12's verification loop for the same task — e.g., if a task has been re-dispatched twice through this gate and once via Step 12's verification retry, the combined count of 3 exhausts the budget. When a task exhausts its retry budget while still reporting `BLOCKED`, the gate does NOT defer to Step 12's generic "skip the failed task" branch — "skip" is not a valid exit from a `BLOCKED` state, because skipping would leave the wave with a permanently-unresolved blocker, and the spec forbids treating such a wave as successfully completed. The only ways out of this gate for a `BLOCKED` task are: (a) the user selects a non-stop intervention and re-dispatch eventually yields `DONE` or `DONE_WITH_CONCERNS` for that task, or (b) the user selects `(x) Stop execution`, which halts the entire plan via Step 13. If Step 12's automatic retry logic would otherwise offer "skip" for a task that is `BLOCKED` (as opposed to generically failing), present the user with only "retry with different model/context" (which re-enters this gate's §4 intervention menu) and "stop the entire plan" — never a silent skip. The gate does not exit successfully to Step 10/11 until every `BLOCKED` task is actually resolved.
 
@@ -612,10 +612,10 @@ When the user chooses **(a) Debug failures**, do NOT re-dispatch every task in t
 ## Step 12: Handle failures and retries
 
 If a worker produces empty, missing, or incorrect output:
-1. Retry automatically up to **3 times** (with improvements to the task prompt if possible).
+1. Retry automatically up to **3 times** (with improvements to the task prompt if possible). Note: re-dispatch passes through the Step 9.5 blocked-task gate also count toward this per-task budget (see Step 9.5 §5).
 2. If still failing after 3 retries, **notify the user at the end of the wave** and ask:
    - Retry again (optionally with a different model or more context)
-   - Skip the failed task and continue to the next wave
+   - Skip the failed task and continue to the next wave (not offered for tasks currently in `BLOCKED` state — see Step 9.5)
    - Stop the entire plan
 
 Apply wave pacing from Step 3. These options only govern the cadence of waves that contain no `BLOCKED` results. If the wave contains any `BLOCKED` results, Step 9.5 has already paused execution and presented the combined escalation; pacing does not apply to that pause.
