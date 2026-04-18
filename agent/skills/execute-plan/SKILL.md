@@ -420,6 +420,98 @@ After each wave completes, process each worker response:
 
 **Never ignore an escalation or re-dispatch the same task to the same model without changes.**
 
+## Step 9.5: Blocked-task escalation gate
+
+Run this gate once per wave after every dispatched worker in the wave has returned and Step 9 has classified each response. It sits between worker handling and wave verification.
+
+**Purpose:** Treat `STATUS: BLOCKED` as an immediate escalation — independent of the wave pacing choice from Step 3. Any wave that contains at least one `BLOCKED` worker response pauses here before any later wave is started, before wave verification (Step 10), and before the post-wave commit or integration-test (Step 11).
+
+### 1. Drain the current wave
+
+Do not cancel or interrupt any worker that is still running in the current wave. `execute-plan` already waits for all dispatched workers in a wave to return before proceeding; rely on that. Once every worker response has been received and Step 9 has been applied, the wave is "drained."
+
+Do not start the next wave. Do not run Step 10 or Step 11 for this wave yet.
+
+### 2. Collect blocked tasks
+
+After draining, collect the set `BLOCKED_TASKS` = every task in the wave whose most recent worker response is `STATUS: BLOCKED`.
+
+- If `BLOCKED_TASKS` is empty, skip this entire step and proceed to Step 10.
+- If `BLOCKED_TASKS` is non-empty, proceed to step 3 below.
+
+Tasks already re-dispatched and resolved in Step 9 via `NEEDS_CONTEXT` do not appear here — this gate only triggers on terminal `BLOCKED` outcomes for the wave.
+
+### 3. Present the combined escalation view
+
+Present a single combined escalation view covering every task in `BLOCKED_TASKS`. Do NOT present blocked tasks one at a time. The user must see the full list before choosing which to address first.
+
+The view MUST include:
+
+1. A header line naming the wave, e.g., `🚫 Wave <N>: <count> task(s) BLOCKED. Execution paused before any later wave.`
+2. A "Wave outcomes" summary block listing every task in the wave and its Step 9 status: `DONE`, `DONE_WITH_CONCERNS`, or `BLOCKED`. Include task number and task title for each. Successful same-wave tasks MUST appear here so the user can see what completed alongside the blockers.
+3. A "Blocked tasks" block, one entry per task in `BLOCKED_TASKS`, each containing:
+   - Task number and task title (the heading from the plan)
+   - The blocker text from the worker's `## Concerns / Needs / Blocker` section (full text, not truncated)
+   - Files the task was scoped to (the task's `**Files:**` section from the plan)
+
+Example layout:
+
+~~~
+🚫 Wave 2: 2 task(s) BLOCKED. Execution paused before any later wave.
+
+Wave outcomes:
+  - Task 3: Add baseline test capture           DONE
+  - Task 4: Add main-branch confirmation guard  BLOCKED
+  - Task 5: Wire final-review invocation        DONE_WITH_CONCERNS
+  - Task 6: Add commit-after-wave step          BLOCKED
+
+Blocked tasks:
+
+[Task 4] Add main-branch confirmation guard
+  Files: agent/skills/execute-plan/SKILL.md
+  Blocker:
+    <full blocker text from the worker report>
+
+[Task 6] Add commit-after-wave step
+  Files: agent/skills/execute-plan/SKILL.md
+  Blocker:
+    <full blocker text from the worker report>
+~~~
+
+### 4. Per-task intervention choice
+
+For each task in `BLOCKED_TASKS`, ask the user for an intervention choice independently. Do not force a single action across all blocked tasks. Present choices one task at a time after the combined view has been shown, using this form per task:
+
+~~~
+Task <N>: <task_title> (current tier: <tier>) — choose an intervention:
+  (c) More context      — re-dispatch this task with additional context you supply
+  (m) Better model      — re-dispatch this task with a more capable model tier
+                            [omit this line if current tier is already `capable`]
+  (s) Split into sub-tasks — break this task into smaller sub-tasks and dispatch them
+  (x) Stop execution    — halt the plan; committed waves are preserved as checkpoints
+~~~
+
+These options mirror the recovery paths previously inlined in Step 9's `BLOCKED` bullet and are the canonical intervention set for this gate. Do not invent new options. The `(m) Better model` option is suppressed (not offered, and not selectable) whenever the task's current model tier is already `capable`, because there is no higher tier to escalate to and re-dispatching to the same model would violate the Step 9 rule "Never ignore an escalation or re-dispatch the same task to the same model without changes." When `(m)` is suppressed, the user must pick `(c)`, `(s)`, or `(x)` for that task; a tier upgrade is not a valid same-tier "meaningful change" for `capable`-tier tasks.
+
+- **(c) More context:** prompt the user for the additional context (free-form text). Re-dispatch this single task to a `coder` worker with the original task spec plus the supplied context appended under a `## Additional Context` section in the worker prompt. Keep the task's existing model tier unless the user also picks (m) for the same task on a subsequent pass.
+- **(m) Better model:** only offered when the task's current tier is `cheap` or `standard`. Re-dispatch this single task to a `coder` worker using the next tier up from the task's current tier (`cheap` → `standard`, `standard` → `capable`). Resolve the concrete model string via `~/.pi/agent/model-tiers.json` as described in Step 6. If the task's current tier is `capable`, do NOT offer this option and do NOT re-dispatch to `capable` again under the guise of a "better model" — that would re-dispatch the same task to the same model with no change, which the Step 9 rule forbids. The user must instead pick `(c)` (which adds new context, satisfying the "with changes" requirement) or `(s)` (which restructures the task itself), or `(x)`.
+- **(s) Split into sub-tasks:** decompose the task into smaller sub-tasks in-session. Each sub-task must keep the same output file(s) and acceptance criteria coverage between them (no criterion may be dropped). Dispatch the sub-tasks as a mini-wave bounded by the pi-subagent `MAX_PARALLEL_TASKS` cap (see Step 5). If there is a natural ordering between sub-tasks, run them sequentially instead.
+- **(x) Stop execution:** halt execution immediately. Do NOT perform Step 10 or Step 11 for this wave. Report partial progress via Step 13. All prior wave commits are preserved as checkpoints.
+
+If the user picks `(x) Stop execution` for any blocked task, stop the whole plan regardless of outstanding choices for other blocked tasks. Do not continue asking about the remaining blocked tasks.
+
+### 5. Re-dispatch and wait for resolution
+
+After collecting a non-stop intervention for every task in `BLOCKED_TASKS`, re-dispatch all of them together (in parallel, subject to `MAX_PARALLEL_TASKS`). Use the same dispatch shape as Step 8. Wait for all re-dispatched workers to return.
+
+Apply Step 9 to the new responses. Then re-enter this gate (Step 9.5) with the new set of responses. The gate repeats until `BLOCKED_TASKS` is empty or the user picks `(x) Stop execution`.
+
+Each pass through the gate counts toward the per-task retry budget defined in Step 12 (3 retries per task). When a task exhausts its retry budget while still reporting `BLOCKED`, the gate does NOT defer to Step 12's generic "skip the failed task" branch — "skip" is not a valid exit from a `BLOCKED` state, because skipping would leave the wave with a permanently-unresolved blocker, and the spec forbids treating such a wave as successfully completed. The only ways out of this gate for a `BLOCKED` task are: (a) the user selects a non-stop intervention and re-dispatch eventually yields `DONE` or `DONE_WITH_CONCERNS` for that task, or (b) the user selects `(x) Stop execution`, which halts the entire plan via Step 13. If Step 12's automatic retry logic would otherwise offer "skip" for a task that is `BLOCKED` (as opposed to generically failing), present the user with only "retry with different model/context" (which re-enters this gate's §4 intervention menu) and "stop the entire plan" — never a silent skip. The gate does not exit successfully to Step 10/11 until every `BLOCKED` task is actually resolved.
+
+### 6. Gate exit
+
+Exit this gate only when every task in the wave has a non-`BLOCKED` Step 9 status achieved by actual worker completion — i.e., the worker returned `DONE` or `DONE_WITH_CONCERNS`. A task is never transitioned out of `BLOCKED` by being skipped. At that point the wave is eligible for Step 10. Do not run Step 10 or Step 11 before this gate exits. The only alternative exit from the gate is `(x) Stop execution`, which halts the plan entirely (Step 13) and does NOT run Step 10 or Step 11 for this wave.
+
 ## Step 10: Verify wave output
 
 After each wave, read each output file and verify its content against the plan's acceptance criteria point-by-point. Checking file existence or non-emptiness is **not sufficient** — review actual content. If content doesn't match the acceptance criteria, treat it as a failure and apply Step 12 retry logic.
