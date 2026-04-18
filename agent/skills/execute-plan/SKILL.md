@@ -412,11 +412,7 @@ After each wave completes, process each worker response:
 - **DONE** → proceed to verification (Step 10).
 - **DONE_WITH_CONCERNS** → read the concerns. Correctness/scope concerns must be addressed before verification; observations can be noted and execution continues.
 - **NEEDS_CONTEXT** → provide the missing context and re-dispatch the task immediately.
-- **BLOCKED** → assess the blocker:
-  - Context problem → provide more context and re-dispatch
-  - Reasoning problem → re-dispatch with a more capable model
-  - Task too large → break into smaller sub-tasks and dispatch them
-  - Plan is fundamentally wrong → escalate to the user
+- **BLOCKED** → do NOT recover inline. Record the worker's blocker details with the task, leave the task marked `BLOCKED`, and let the wave drain. The combined escalation is handled in Step 9.5, which surfaces every blocked task in the wave to the user before Step 10 runs. The four canonical interventions (more context, better model, split into sub-tasks, stop execution) live in Step 9.5.
 
 **Never ignore an escalation or re-dispatch the same task to the same model without changes.**
 
@@ -514,6 +510,8 @@ Exit this gate only when every task in the wave has a non-`BLOCKED` Step 9 statu
 
 ## Step 10: Verify wave output
 
+**Precondition:** Only run this step after the Step 9.5 blocked-task escalation gate has exited. If any task in the current wave still has a Step 9 status of `BLOCKED`, do not run wave verification — return to Step 9.5. A wave with any unresolved `BLOCKED` task is NOT considered successfully completed.
+
 After each wave, read each output file and verify its content against the plan's acceptance criteria point-by-point. Checking file existence or non-emptiness is **not sufficient** — review actual content. If content doesn't match the acceptance criteria, treat it as a failure and apply Step 12 retry logic.
 
 ### Task verification
@@ -521,6 +519,8 @@ After each wave, read each output file and verify its content against the plan's
 After verifying outputs yourself (above), the orchestrator's own acceptance criteria check is the per-wave verification. No subagent is dispatched for this step — the orchestrator reads the code and checks criteria directly. If any acceptance criterion is not met, treat it as a failure and apply Step 12 retry logic.
 
 ## Step 11: Post-wave commit and integration tests
+
+**Precondition:** Only run this step after both Step 9.5 (blocked-task escalation gate) has exited and Step 10 (wave verification) has passed. If any task in the current wave still has a Step 9 status of `BLOCKED`, do not commit and do not run integration tests for the wave — return to Step 9.5. Both the post-wave commit (Step 11.1) and the post-wave integration-test run (Step 11.2) are withheld until the wave completes successfully, meaning every wave task has a non-`BLOCKED` status.
 
 After wave verification (Step 10) completes successfully for a wave, perform the following steps in order.
 
@@ -618,10 +618,13 @@ If a worker produces empty, missing, or incorrect output:
    - Skip the failed task and continue to the next wave
    - Stop the entire plan
 
-Apply wave pacing from Step 3:
+Apply wave pacing from Step 3. These options only govern the cadence of waves that contain no `BLOCKED` results. If the wave contains any `BLOCKED` results, Step 9.5 has already paused execution and presented the combined escalation; pacing does not apply to that pause.
+
 - **(a)** Always pause and report before the next wave starts
 - **(b)** Never pause; collect all failures and report at the very end
 - **(c)** Pause only when a wave produced failures; otherwise auto-continue
+
+Under any of (a), (b), or (c), a wave that contains at least one `BLOCKED` task is not eligible to be "collected and reported at the end" — the blocker is surfaced via Step 9.5 before the next wave starts.
 
 ## Step 13: Report partial progress
 
