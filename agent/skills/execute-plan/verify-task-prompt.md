@@ -36,7 +36,7 @@ For file-inspection recipes, read only these files plus any files explicitly nam
 
 ## Diff Context
 
-The orchestrator may have truncated this diff if it exceeded a size threshold. If you see a `... [diff truncated — <N> lines, <B> bytes total; ...] ...` marker, note this in your per-criterion `reason:` where it affects judgment, and fall back to reading the file(s) in `## Verifier-Visible Files` directly for any file-inspection criterion whose relevant code may lie in the truncated window.
+The orchestrator may have truncated this diff if it exceeded a size threshold. If you see a truncation marker line in the diff — any single line indicating that diff content was omitted, typically including the pre-truncation line count and byte count — note this in your per-criterion `reason:` where it affects judgment, and fall back to reading the file(s) in `## Verifier-Visible Files` directly for any file-inspection criterion whose relevant code may lie in the truncated window.
 
 {DIFF_CONTEXT}
 
