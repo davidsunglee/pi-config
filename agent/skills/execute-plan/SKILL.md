@@ -518,28 +518,31 @@ Run this gate once per wave after Step 9.5 has exited (every `BLOCKED` task has 
 
 ### 1. Collect concerned tasks
 
-Build `CONCERNED_TASKS` = the ordered list of every task in the wave whose Step 9 status was `DONE_WITH_CONCERNS`. For each entry, carry along the task id, the worker's `## Concerns` section, and the typed label(s) parsed in Step 9 (`correctness`, `scope`, `observation`). A single task may carry multiple concerns with mixed types. If `CONCERNED_TASKS` is empty, skip this gate entirely and proceed to Step 10.
+Build `CONCERNED_TASKS` = the ordered list of every task in the wave whose Step 9 status was `DONE_WITH_CONCERNS`. For each entry, carry along the task id, the worker's `## Concerns` section, the typed label(s) parsed in Step 9 (`correctness`, `scope`, `observation`), and the list of files the task modified (the worker's `## Files Changed` paths). A single task may carry multiple concerns with mixed types. If `CONCERNED_TASKS` is empty, skip this gate entirely and proceed to Step 10.
 
 ### 2. Present a single combined view
 
 Do NOT interrupt as each worker returns. Do NOT present concerns one-at-a-time. Wait until the wave has fully drained and Step 9.5 has exited, then present every concerned task together in one combined message so the user can see the whole wave's concerns at once and decide in context.
 
-The combined view lists each concerned task as its own block with its typed concerns. Example layout for a wave where tasks 3, 5, and 7 all returned `DONE_WITH_CONCERNS`:
+The combined view lists each concerned task as its own block with its modified files and typed concerns. Each per-task block MUST include a `Files: ...` line that enumerates the files that task modified (from `CONCERNED_TASKS`), so the user can judge blast radius alongside the typed concerns. Example layout for a wave where tasks 3, 5, and 7 all returned `DONE_WITH_CONCERNS`:
 
 ```
 Wave N returned DONE_WITH_CONCERNS for 3 task(s). Review all concerns before verification runs.
 
 ── Task 3: <short title> ──────────────────────────────────
+  Files: <path/one>, <path/two>
   Type: correctness
     - <worker-reported concern text>
   Type: observation
     - <worker-reported concern text>
 
 ── Task 5: <short title> ──────────────────────────────────
+  Files: <path/one>
   Type: scope
     - <worker-reported concern text>
 
 ── Task 7: <short title> ──────────────────────────────────
+  Files: <path/one>, <path/two>, <path/three>
   Type: observation
     - <worker-reported concern text>
     - <worker-reported concern text>
@@ -554,7 +557,7 @@ For each task in `CONCERNED_TASKS`, in list order, present a menu whose options 
 
 **Correctness or scope concerns** — the task has at least one `Type: correctness` or `Type: scope` entry. Menu:
 
-- `(r) Re-dispatch with guidance` — prompt the user for additional instructions, then re-dispatch the task to a worker with those instructions appended. Counts against the task's Step 12 retry budget.
+- `(r) Re-dispatch with guidance` — prompt the user for additional instructions, then re-dispatch the task to a worker. The re-dispatched worker prompt MUST append a `## Concerns To Address` block containing every original typed concern from this task verbatim, with each concern's `Type:` prefix preserved (see §4 for the exact shape). The user-supplied additional instructions are appended too — they augment the typed concerns rather than replacing them. Counts against the task's Step 12 retry budget.
 - `(x) Stop execution` — halt the plan via Step 13. No further waves run.
 
 The correctness/scope menu contains exactly `(r)` and `(x)`. There is no `(a)` option: a correctness or scope concern may not be acknowledged and continued past this gate.
@@ -562,7 +565,7 @@ The correctness/scope menu contains exactly `(r)` and `(x)`. There is no `(a)` o
 **Observation-only concerns** — every concern on the task is `Type: observation`. Menu:
 
 - `(a) Acknowledge and continue` — record the observation in the wave notes and leave the task's status as `DONE_WITH_CONCERNS` without re-dispatch. The task is eligible for Step 10.
-- `(r) Re-dispatch with guidance` — same behavior as above. Counts against the Step 12 retry budget.
+- `(r) Re-dispatch with guidance` — same behavior as the correctness/scope `(r)` above, including the requirement to append a `## Concerns To Address` block with every original typed concern verbatim and `Type:` prefixes preserved. Counts against the Step 12 retry budget.
 - `(x) Stop execution` — halt the plan via Step 13.
 
 The observation-only menu contains exactly `(a)`, `(r)`, and `(x)`.
@@ -572,7 +575,18 @@ The observation-only menu contains exactly `(a)`, `(r)`, and `(x)`.
 Process choices in order:
 
 - `(a)` on an observation-only task: remove it from `CONCERNED_TASKS` and proceed.
-- `(r)` on any task: re-dispatch as in Step 9.5 §5. When the re-dispatched worker returns, apply Step 9 again. If the new status is `BLOCKED`, return to Step 9.5 with it. If the new status is `DONE_WITH_CONCERNS`, it re-enters `CONCERNED_TASKS` and the gate re-presents it on the next pass. If the new status is `DONE`, remove it from `CONCERNED_TASKS`. Each pass counts against the Step 12 retry budget. If the per-task retry budget is exhausted when the user picks `(r)`, re-prompt them with the applicable §3 menu — the correctness/scope menu for correctness/scope concerns, or the observation-only menu for observation-only concerns — but require them to specify a different model tier or additional context before `(r)` is offered again. The automatic retry counter does not advance further, but each manual re-dispatch still costs one retry. The only alternatives at this point are `(x) Stop execution` or, for an observation-only task, `(a) Acknowledge and continue` — never a silent skip.
+- `(r)` on any task: re-dispatch as in Step 9.5 §5, with one additional requirement specific to this gate — the worker prompt MUST append a `## Concerns To Address` block listing every original typed concern from that task verbatim, preserving each concern's `Type:` prefix (e.g. `Type: correctness`, `Type: scope`, `Type: observation`). The user-supplied additional instructions from the `(r)` prompt are appended in addition to (not in place of) the `## Concerns To Address` block. Use the following exact shape inside the worker prompt:
+
+  ~~~
+  ## Concerns To Address
+
+  Type: <type-1>
+    - <original concern text 1, verbatim>
+  Type: <type-2>
+    - <original concern text 2, verbatim>
+  ~~~
+
+  When the re-dispatched worker returns, apply Step 9 again. If the new status is `BLOCKED`, return to Step 9.5 with it. If the new status is `DONE_WITH_CONCERNS`, it re-enters `CONCERNED_TASKS` and the gate re-presents it on the next pass. If the new status is `DONE`, remove it from `CONCERNED_TASKS`. Each pass counts against the Step 12 retry budget. If the per-task retry budget is exhausted when the user picks `(r)`, re-prompt them with the applicable §3 menu — the correctness/scope menu for correctness/scope concerns, or the observation-only menu for observation-only concerns — but require them to specify a different model tier or additional context before `(r)` is offered again. The automatic retry counter does not advance further, but each manual re-dispatch still costs one retry. The `## Concerns To Address` requirement still applies to these manual re-dispatches. The only alternatives at this point are `(x) Stop execution` or, for an observation-only task, `(a) Acknowledge and continue` — never a silent skip.
 - `(x)` on any task: stop execution immediately (Step 13).
 
 Repeat §2–§4 until `CONCERNED_TASKS` is empty or the user picks `(x)`.
@@ -613,6 +627,8 @@ File-inspection and prose-inspection recipes (e.g. "read Step 10.2 and confirm �
 ### Step 10.2: Dispatch the verifier
 
 For each task in the wave (regardless of its Step 9 status, except `BLOCKED` which is already handled in Step 9.5), dispatch a fresh `verifier` subagent using the template at `agent/skills/execute-plan/verify-task-prompt.md`. The verifier does NOT run commands. It reads the command-evidence blocks produced in Step 10.1, reads only the files listed under `## Modified Files` (plus any files explicitly named by a recipe), and returns per-criterion verdicts.
+
+Verifier dispatches for the wave run in parallel, bounded by the pi-subagent `MAX_PARALLEL_TASKS` cap (see Step 5). Do not verify sequentially — issue all verifier subagents concurrently up to the cap and wait for all of them to return before parsing in Step 10.3.
 
 Fill the template's placeholders as follows:
 
@@ -829,7 +845,7 @@ These regressions were introduced by this plan and deferred during intermediate 
 They remain unresolved and must be addressed before this branch is considered shippable.
 ```
 
-**Persistence note:** Persisting `deferred_integration_regressions` across sessions (e.g., to a file on disk) is out of scope. If execution resumes in a new session, the deferred set must be manually reconstructed from the partial-progress report above before integration test classification can resume correctly.
+**Persistence note:** Persisting `deferred_integration_regressions` across sessions (e.g., to a file on disk) is out of scope. If execution resumes in a new session, do NOT attempt to reconstruct the deferred set from the prior partial-progress report — those identifiers may be stale. Instead, re-run the full integration suite on resume and re-derive the current failing/deferred state fresh from that run before integration test classification can resume correctly.
 
 ## Step 14: Request code review
 
