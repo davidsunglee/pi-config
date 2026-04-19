@@ -103,7 +103,7 @@ Recipes may describe any of:
 
 Recipes must be specific enough that a fresh reader can reproduce the check without re-deriving the intent. Avoid vague recipes like `Verify: check that it works` or `Verify: review the file`.
 
-Any file required for verification that the task did not modify must be named explicitly in the `Verify:` recipe; the verifier will not read unnamed files outside the task's `## Modified Files`.
+Any file required for verification that the task did not modify must be named explicitly in the `Verify:` recipe; the verifier will not read unnamed files outside the task's `## Verifier-Visible Files`.
 
 **Model recommendation:** cheap | standard | capable (see rubric below)
 

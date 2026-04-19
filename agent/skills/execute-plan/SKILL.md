@@ -954,15 +954,46 @@ Before moving the plan file, closing the linked todo, or running branch completi
    These regressions were introduced by this plan. They must be resolved before the plan can be marked complete.
 
    Options:
-   (a) Debug failures now — run the Step 11 debugger-first flow against the plan-introduced regressions (deferred ∪ new); on success, re-enter this gate.
+   (a) Debug failures now — run the final-gate debugger-first flow (below) against the plan-introduced regressions (deferred ∪ new); on success, re-enter this gate.
    (c) Stop execution     — halt plan execution; all committed wave commits are preserved as checkpoints.
    ```
 
    Empty lists render as `(none)`. The menu mirrors the Step 11 **final-wave menu** — there is no `(b) Defer` option here by design, matching the final-wave rule that plan-introduced regressions cannot be silently deferred past the point where the plan reports success.
 
 4. **Menu actions:**
-   - **(a) Debug failures now:** Run the Step 11 "Debugger-first flow" scoped to `still_failing_deferred ∪ new_regressions_after_deferment`. The debugger-first flow already re-runs the Step 11 reconciliation logic to judge success, so a remediation attempt succeeds when both `still_failing_deferred` and `new_regressions_after_deferment` are empty on the re-run. After debugging and remediation, re-run this entire gate from step 1 (which re-runs the suite, re-reconciles, and recomputes both sets). Repeat until both sets are empty or the user picks `(c)`. Each debugging attempt counts toward the Step 12 retry budget for the implicated tasks.
+   - **(a) Debug failures now:** Run the **final-gate debugger-first flow** defined below, scoped to `still_failing_deferred ∪ new_regressions_after_deferment`. That flow re-runs the Step 11 reconciliation logic to judge success, so a remediation attempt succeeds when both `still_failing_deferred` and `new_regressions_after_deferment` are empty on the re-run. After debugging and remediation, re-run this entire gate from step 1 (which re-runs the suite, re-reconciles, and recomputes both sets). Repeat until both sets are empty or the user picks `(c)`. Each debugging attempt counts toward the Step 12 retry budget for the implicated tasks.
    - **(c) Stop execution:** Halt execution. Report partial progress via Step 13 so the user has a complete picture of plan-introduced failures left on the branch: list any non-empty `deferred_integration_regressions` under the deferred-regressions heading, and list the still-unresolved `new_regressions_after_deferment` separately as newly discovered final-gate regressions — do NOT fold them under the deferred-regressions heading, since they were never deferred by the user. Do NOT move the plan file, close the todo, or run branch completion.
+
+### Final-gate debugger-first flow
+
+This flow is specific to Step 15's final integration regression gate. Do NOT reuse the Step 11 "Debugger-first flow" verbatim here: Step 11's flow assumes a current wave exists and reads `git show HEAD` as "the wave commit" and "wave tasks" as the suspect universe. At Step 15 time, there is no current wave — `HEAD` may be a Step 14 review/remediation commit, the regressions being debugged may have been deferred across multiple earlier waves, and the implicated tasks may span the whole plan. Using plan-execution range rather than a single wave commit ensures this flow works regardless of which commit last touched the tree.
+
+The Step 11 flow remains unchanged and continues to govern actual wave-time integration failures.
+
+1. **Identify the plan execution range and implicated tasks from the failure output.**
+   - Range: `BASE_SHA` = `PRE_EXECUTION_SHA` (recorded in Step 8, immediately before the first wave dispatched); `HEAD_SHA` = `git rev-parse HEAD` at this moment. The range `BASE_SHA..HEAD_SHA` captures every commit made by plan execution plus any Step 14 remediation commits, and nothing from before the plan started.
+   - Changed-file universe: `git diff --name-only BASE_SHA HEAD_SHA`. Use this — NOT `git show HEAD` — because HEAD at final-gate time is not guaranteed to be a wave commit.
+   - Suspect task list: inspect the failing test names, file paths in stack traces, and the changed-file universe above. Build a short list of plan tasks whose declared `**Files:**` scope (from the plan file) intersects the failing stack traces or whose behavior the failing tests cover. If the mapping is ambiguous, include every plan task whose `**Files:**` scope intersects `git diff --name-only BASE_SHA HEAD_SHA` — i.e., every task whose output was touched by plan execution. Do NOT constrain to a single wave.
+
+2. **Dispatch a single debugging pass** using the `coder` agent with a prompt that follows the `systematic-debugging` skill. The prompt MUST include:
+   - The failing test output (full, not truncated) for the union `still_failing_deferred ∪ new_regressions_after_deferment`.
+   - The plan execution range `BASE_SHA..HEAD_SHA` and the list of files changed across it (`git diff --name-only BASE_SHA HEAD_SHA`).
+   - A labeled breakdown of the two input sets: which failing identifiers were previously deferred (`still_failing_deferred`) and which first surfaced at the final gate (`new_regressions_after_deferment`). The diagnosis should use this split to reason about cause — e.g., long-deferred regressions vs. regressions newly introduced by Step 14 remediation.
+   - The suspect task list from step 1, with each task's title and declared files.
+   - An explicit instruction: "Follow the `systematic-debugging` skill. Complete Phase 1 (root cause investigation) before proposing any fix. If the root cause is a clear, localized defect in one or two files, you MAY apply the fix in this same dispatch — follow TDD (write a failing test reproducing the regression, then fix). If the root cause spans multiple tasks or requires design judgment, return a diagnosis only and do NOT modify code."
+   - The required report shape: either `STATUS: DONE` with the fix applied and RED/GREEN evidence for the regression test, or `STATUS: DONE_WITH_CONCERNS` containing a `## Diagnosis` section naming the implicated task(s), the root cause, and the minimal change needed.
+
+3. **Handle the debugging pass result:**
+
+   In both sub-cases below, success after a remediation attempt is judged by re-running the full Step 15 gate (go back to gate step 1: re-run the suite, re-reconcile, recompute both `still_failing_deferred` and `new_regressions_after_deferment`). The attempt succeeds when **both** sets are empty on the re-run. Any pre-existing baseline failures are allowed to remain. Note that unlike Step 11's wave-scoped flow (which only has to clear `new_regressions_after_deferment` before moving to the next wave), the final gate must also clear any `still_failing_deferred` carried from prior waves — the plan cannot complete while either set remains non-empty.
+
+   - **Diagnosed and fixed (`STATUS: DONE`):** Commit the fix with `git commit -m "fix(plan): final-gate regression — <short summary>"` (only if the debugging pass actually modified files; if it returned `STATUS: DONE` without changes, skip the commit). Re-enter the Step 15 gate at step 1 (re-run the suite, re-reconcile, recompute both sets). If both are empty, the gate passes and normal completion proceeds. If either is non-empty, treat it as a failed debugging pass (below) and re-present the Step 15 menu.
+   - **Diagnosis only (`STATUS: DONE_WITH_CONCERNS` with `## Diagnosis`):** Use the diagnosis to dispatch a **targeted remediation** — a second `coder` dispatch scoped to only the implicated task(s)/files from the diagnosis. Include the diagnosis text, the failing test output, and the original task spec(s) for the implicated task(s) from the plan file. After that dispatch returns, commit its changes with `git commit -m "fix(plan): final-gate regression — <short summary>"` (only if the remediation actually modified files), then re-enter the Step 15 gate at step 1. If both sets are empty, the gate passes. If either is non-empty, treat it as a failed debugging pass.
+   - **Failed debugging pass** (blocker, or post-re-run `still_failing_deferred ∪ new_regressions_after_deferment` is still non-empty): re-present the Step 15 menu (`(a) Debug failures now`, `(c) Stop execution` — there is no defer option at the final gate). Count this attempt toward the Step 12 retry limit for the implicated tasks.
+
+4. **Do NOT re-dispatch every plan task** unless the diagnosis explicitly implicates all of them. Targeted remediation against the diagnosed tasks is the point of this flow.
+
+5. **Commit undo is NOT a tool of the final-gate flow.** Step 11's fallback of `git reset HEAD~1` to undo a wave commit does not apply here: `HEAD` at Step 15 is not guaranteed to be a wave commit, and prior wave commits must remain as checkpoints for the `(c) Stop execution` exit path. If targeted remediation fails repeatedly, the only exits are (a) another debugging attempt (which costs a retry against Step 12's budget) or (c) stop execution.
 
 **Blocking guarantee:** Steps `### 1. Move plan to done`, `### 2. Close linked todo`, and `### 4. Branch completion` MUST NOT execute while `still_failing_deferred ∪ new_regressions_after_deferment` is non-empty. The only exits from this gate are: (a) both sets become empty (gate passes), or (b) the user selects `(c) Stop execution`. Silent success on the final gate is NOT an option when Step 14 remediation has introduced a regression — the same classification model used after every wave is reused here, so any plan-introduced regression still present at Step 15 blocks normal completion regardless of whether it was previously deferred.
 
