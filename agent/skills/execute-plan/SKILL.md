@@ -583,13 +583,67 @@ Exit this gate only when every task in the wave has a resolution recorded — ei
 
 ## Step 10: Verify wave output
 
-**Precondition:** Only run this step after the Step 9.5 blocked-task escalation gate has exited. If any task in the current wave still has a Step 9 status of `BLOCKED`, do not run wave verification — return to Step 9.5. A wave with any unresolved `BLOCKED` task is NOT considered successfully completed.
+**Precondition:** Only run this step after both the Step 9.5 blocked-task escalation gate and the Step 9.7 wave-level concerns checkpoint have exited. If any task in the current wave still has a Step 9 status of `BLOCKED`, do not run wave verification — return to Step 9.5. If the Step 9.7 checkpoint has not yet been presented and resolved for this wave, do not run wave verification — return to Step 9.7. A wave with any unresolved `BLOCKED` task or unresolved concerns checkpoint is NOT considered successfully completed.
 
-After each wave, read each output file and verify its content against the plan's acceptance criteria point-by-point. Checking file existence or non-emptiness is **not sufficient** — review actual content. If content doesn't match the acceptance criteria, treat it as a failure and apply Step 12 retry logic.
+Verification for each task in the wave runs in a fresh-context `verifier` subagent dispatched via `agent/skills/execute-plan/verify-task-prompt.md`. The orchestrator does NOT read code and judge acceptance criteria directly; it only collects command evidence and routes the verifier's verdict.
 
-### Task verification
+**Protocol-error stop — missing `Verify:` recipes:** Before dispatching the verifier, check that every acceptance criterion for the task has an attached `Verify:` recipe in the plan. If any acceptance criterion is missing a `Verify:` recipe at execute time, STOP with the exact literal error message:
 
-After verifying outputs yourself (above), the orchestrator's own acceptance criteria check is the per-wave verification. No subagent is dispatched for this step — the orchestrator reads the code and checks criteria directly. If any acceptance criterion is not met, treat it as a failure and apply Step 12 retry logic.
+```
+Plan task <N> has an acceptance criterion without a Verify: recipe. Re-run generate-plan to regenerate the plan.
+```
+
+Do not dispatch the verifier, do not treat the task as passing, and do not silently skip verification. A plan without complete `Verify:` recipes is a protocol error from generate-plan and must be regenerated.
+
+### Step 10.1: Orchestrator collects command evidence
+
+For every acceptance criterion whose `Verify:` recipe is a shell command (e.g. `grep ...`, `cat ...`, `test -f ...`, `go vet ./...`), the orchestrator — NOT the verifier — runs the command and captures:
+
+- the exact command string,
+- the exit status,
+- the relevant portion of stdout,
+- the relevant portion of stderr.
+
+**Deterministic truncation rule:** Apply this rule independently to each stream (stdout and stderr) of a recipe. If a single stream exceeds **200 lines or 20 KB**, truncate it by keeping the **first 100 lines**, inserting a single marker line of the exact form `... [<total_lines> lines, <total_bytes> bytes; truncated to first 100 + last 50 lines] ...` (where `<total_lines>` and `<total_bytes>` are the pre-truncation line count and byte count of that stream), then keeping the **last 50 lines**. Apply the rule identically and independently to stdout and stderr; never combine them for the threshold calculation, and never silently drop output. If the relevant evidence for a criterion is omitted by this truncation (for example the matching grep line is in the middle of a very long output), the verifier MUST return `FAIL` with `reason: insufficient evidence` for that criterion rather than guessing.
+
+Emit one evidence block per command-style recipe, numbered `[Evidence 1]`, `[Evidence 2]`, … in the same order as the acceptance criteria. Each block contains the command, exit status, stdout, and stderr (after the truncation rule). These blocks are what the orchestrator passes as `{ORCHESTRATOR_COMMAND_EVIDENCE}` in the verifier prompt.
+
+File-inspection and prose-inspection recipes (e.g. "read Step 10.2 and confirm …", "confirm the file contains section X") are NOT executed by the orchestrator. The verifier evaluates them directly against the named files.
+
+### Step 10.2: Dispatch the verifier
+
+For each task in the wave (regardless of its Step 9 status, except `BLOCKED` which is already handled in Step 9.5), dispatch a fresh `verifier` subagent using the template at `agent/skills/execute-plan/verify-task-prompt.md`. The verifier does NOT run commands. It reads the command-evidence blocks produced in Step 10.1, reads only the files listed under `## Modified Files` (plus any files explicitly named by a recipe), and returns per-criterion verdicts.
+
+Fill the template's placeholders as follows:
+
+- `{TASK_SPEC}` — the task block from the plan, verbatim.
+- `{ACCEPTANCE_CRITERIA_WITH_VERIFY}` — the acceptance criteria list for the task, each paired with its `Verify:` recipe, numbered starting at 1.
+- `{ORCHESTRATOR_COMMAND_EVIDENCE}` — the evidence blocks collected in Step 10.1, in criterion order. If the task has no command-style recipes, leave this section empty.
+- `{MODIFIED_FILES}` — the exact list of files the worker reported as modified (from its `## Files Changed` section), as a newline-separated list of paths.
+- `{DIFF_CONTEXT}` — the uncommitted wave diff against `HEAD`, produced by `git diff HEAD -- <modified files>` in the working directory. This reflects the working tree vs. the last commit, which is where wave changes live before Step 11's commit. Do NOT substitute a committed-range diff (e.g. a diff between `HEAD` and a prior commit) or a `--staged` diff; wave changes have not been committed yet.
+- `{WORKING_DIR}` — the plan's working directory.
+
+**Verifier model tier:** Default the verifier's model to `standard`. If the verified task itself ran at `capable`, upgrade the verifier to `capable` so its judgment matches the task's complexity. Never downgrade below `standard`.
+
+Dispatch the subagent with `agent: "verifier"`, using the Step 6 model-tier resolution to map `standard`/`capable` to the concrete model and dispatch strings.
+
+### Step 10.3: Parse verifier output and gate the wave
+
+The verifier returns a report with two sections: `## Per-Criterion Verdicts` and `## Overall Verdict`. Parse as follows:
+
+- Each per-criterion header MUST match the exact shape `[Criterion N] <PASS | FAIL>` where `N` is the criterion number and the verdict token is either the literal `PASS` or the literal `FAIL`. There is no `verdict:` prefix, no lowercase form, and no additional tokens on that line.
+- The overall verdict line MUST match `VERDICT: <PASS | FAIL>`.
+
+Acceptance criteria are binary: each criterion is either `PASS` or `FAIL`. No "partial pass", no "pass with concerns", no soft verdicts. A single `[Criterion N] FAIL` causes `VERDICT: FAIL` for the task.
+
+If the verifier output does not conform to the required shape — missing sections, malformed headers, a `verdict:` prefix, missing criterion numbers, or an unparseable overall verdict — treat the response as a protocol error and route the task into Step 12's retry loop exactly as if it had returned `VERDICT: FAIL`. Do not attempt to interpret malformed verdicts as passes.
+
+Route the parsed result:
+
+- `VERDICT: PASS` — the task passes wave verification.
+- `VERDICT: FAIL` (or malformed response treated as `FAIL`) — route the task into Step 12's retry loop, including the per-criterion `FAIL` entries and their `reason:` text so the retry has concrete remediation targets.
+
+**Wave gate exit:** The wave exits Step 10 successfully only when every task in the wave has `VERDICT: PASS`. If any task has `VERDICT: FAIL`, the wave is not verified and Step 11 MUST NOT run until Step 12's retry loop produces a `VERDICT: PASS` for every failed task.
 
 ## Step 11: Post-wave commit and integration tests
 
