@@ -504,7 +504,7 @@ After collecting a non-stop intervention for every task in `BLOCKED_TASKS`, re-d
 
 Apply Step 9 to the new responses. Then re-enter this gate (Step 9.5) with the new set of responses. The gate repeats until `BLOCKED_TASKS` is empty or the user picks `(x) Stop execution`. For tasks where `(s) Split into sub-tasks` was chosen, the sub-tasks' responses replace the original task's slot; if any sub-task returns `BLOCKED`, it appears in `BLOCKED_TASKS` on the next gate pass.
 
-Each pass through the gate counts toward the per-task retry budget defined in Step 12 (3 retries per task). This cap is shared across both `BLOCKED` re-dispatch passes through this gate and `DONE`-verification retries through Step 12's verification loop for the same task — e.g., if a task has been re-dispatched twice through this gate and once via Step 12's verification retry, the combined count of 3 exhausts the budget. When a task exhausts its retry budget while still reporting `BLOCKED`, the gate does NOT defer to Step 12's generic "skip the failed task" branch — "skip" is not a valid exit from a `BLOCKED` state, because skipping would leave the wave with a permanently-unresolved blocker, and the spec forbids treating such a wave as successfully completed. The only ways out of this gate for a `BLOCKED` task are: (a) the user selects a non-stop intervention and re-dispatch eventually yields `DONE` or `DONE_WITH_CONCERNS` for that task, or (b) the user selects `(x) Stop execution`, which halts the entire plan via Step 13. If Step 12's automatic retry logic would otherwise offer "skip" for a task that is `BLOCKED` (as opposed to generically failing), present the user with only "retry with different model/context" (which re-enters this gate's §4 intervention menu) and "stop the entire plan" — never a silent skip. The gate does not exit successfully to Step 10/11 until every `BLOCKED` task is actually resolved.
+Each pass through the gate counts toward the per-task retry budget defined in Step 12 (3 retries per task). This cap is shared across both `BLOCKED` re-dispatch passes through this gate and `DONE`-verification retries through Step 12's verification loop for the same task — e.g., if a task has been re-dispatched twice through this gate and once via Step 12's verification retry, the combined count of 3 exhausts the budget. When a task exhausts its retry budget while still reporting `BLOCKED`, skip is not a valid exit — skipping would leave the wave with a permanently-unresolved blocker, and the spec forbids treating such a wave as successfully completed. The only ways out of this gate for a `BLOCKED` task are: (a) the user selects a non-stop intervention and re-dispatch eventually yields `DONE` or `DONE_WITH_CONCERNS` for that task, or (b) the user selects `(x) Stop execution`, which halts the entire plan via Step 13. When a budget-exhausted `BLOCKED` task surfaces to the user, present only the §4 intervention choices — retry with different model/context, or stop the entire plan — never a skip option. The gate does not exit successfully to Step 10/11 until every `BLOCKED` task is actually resolved.
 
 ### 6. Gate exit
 
@@ -801,16 +801,17 @@ If a worker produces empty, missing, or incorrect output:
 1. Retry automatically up to **3 times** (with improvements to the task prompt if possible). Note: re-dispatch passes through the Step 9.5 blocked-task gate also count toward this per-task budget (see Step 9.5 §5).
 2. If still failing after 3 retries, **notify the user at the end of the wave** and ask:
    - Retry again (optionally with a different model or more context)
-   - Skip the failed task and continue to the next wave (not offered for tasks currently in `BLOCKED` state — see Step 9.5)
    - Stop the entire plan
 
-Apply wave pacing from Step 3. These options only govern the cadence of waves that contain no `BLOCKED` results. If the wave contains any `BLOCKED` results, Step 9.5 has already paused execution and presented the combined escalation; pacing does not apply to that pause.
+   There is no option to skip a failed task. A wave with any unresolved failure — including a verifier `VERDICT: FAIL` from Step 10 treated as a task failure — must either be retried to resolution or stopped. `VERDICT: FAIL` from Step 10 is routed through this same failure-handling path with no skip option.
+
+Apply wave pacing from Step 3. These options only govern the cadence of waves that contain no `BLOCKED` results and no unresolved Step 9.7 correctness/scope concerns. If the wave contains any `BLOCKED` results, Step 9.5 has already paused execution; if the wave has unresolved correctness/scope concerns, Step 9.7 has paused execution. Pacing does not apply to either of these pauses.
 
 - **(a)** Always pause and report before the next wave starts
 - **(b)** Never pause; collect all failures and report at the very end
 - **(c)** Pause only when a wave produced failures; otherwise auto-continue
 
-Under any of (a), (b), or (c), a wave that contains at least one `BLOCKED` task is not eligible to be "collected and reported at the end" — the blocker is surfaced via Step 9.5 before the next wave starts.
+Under any of (a), (b), or (c), a wave that contains at least one `BLOCKED` task, has unresolved `Type: correctness` or `Type: scope` concerns from Step 9.7, or has any task with Step 10 `VERDICT: FAIL` is not eligible to be "collected and reported at the end" — such waves are surfaced via Step 9.5, Step 9.7, or Step 12's retry loop respectively before the next wave starts.
 
 ## Step 13: Report partial progress
 
