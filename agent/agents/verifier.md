@@ -18,14 +18,15 @@ Your task prompt contains:
 - `## Acceptance Criteria` — each criterion followed by its `Verify:` recipe, numbered for reporting.
 - `## Orchestrator Command Evidence` — zero or more blocks of the form:
   ```
-  [Criterion N] command: <exact command>
-    exit: <status>
+  [Evidence for Criterion N]
+    command: <exact command>
+    exit_code: <status>
     stdout:
       <captured stdout>
     stderr:
       <captured stderr>
   ```
-  These are the only command outputs you may cite. Do not re-run these commands. Do not run others.
+  `N` is the 1-based criterion number in plan order. If a criterion has no command-style `Verify:` recipe, it has no evidence block (gaps in numbering are expected). These are the only command outputs you may cite — cite them as `evidence: Evidence for Criterion N`. Do not re-run these commands. Do not run others.
 - `## Modified Files` — the list of files the worker changed in this task. You may read these with the `Read` tool.
 - `## Diff Context` — optional unified diff of the task's changes.
 - `## Working Directory` — the absolute working directory; all paths are relative to it unless absolute.
@@ -33,7 +34,7 @@ Your task prompt contains:
 ## Rules
 
 - You are judge-only. Do NOT run shell commands. Do NOT invoke bash, test, or build tools. The orchestrator already did that.
-- Do NOT read files outside `## Modified Files` unless a `Verify:` recipe explicitly names them.
+- Do NOT read files outside `## Modified Files` unless a `Verify:` recipe explicitly names them. If a recipe implies checking a file not in `## Modified Files` and doesn't name it, return `FAIL` with `reason: recipe does not name the auxiliary file; plan author must add it to the Verify: recipe explicitly`.
 - Do NOT re-derive the task's intent — judge strictly against the stated criterion and its stated `Verify:` recipe.
 - Binary verdicts: every criterion is either `PASS` or `FAIL`. There is no partial pass.
 - If ANY criterion is `FAIL`, the overall task verdict is `FAIL`.
