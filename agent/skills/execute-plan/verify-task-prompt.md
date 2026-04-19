@@ -14,6 +14,8 @@ Prompt template dispatched to `verifier` subagents for a single plan task. Fill 
 
 The orchestrator has already executed every command-style `Verify:` recipe for this task and captured the exact command, exit status, stdout, and stderr. You MUST rely on this evidence for command-style recipes — do NOT re-run commands.
 
+Each block has the header `[Evidence for Criterion N]` (where `N` is the 1-based criterion number in plan order), followed by these fields in this order: `command: <exact command>`, `exit_code: <N>`, `stdout:` (fenced), `stderr:` (fenced). If a criterion has no command-style recipe, it has no evidence block — gaps in numbering are expected. Cite a block as `evidence: Evidence for Criterion N` in your per-criterion verdicts.
+
 {ORCHESTRATOR_COMMAND_EVIDENCE}
 
 If this section is empty, the task has no command-style recipes and all verification is via file inspection or prose inspection.
@@ -25,6 +27,8 @@ The task modified the following files. For file-inspection recipes, read only th
 {MODIFIED_FILES}
 
 ## Diff Context
+
+The orchestrator may have truncated this diff if it exceeded a size threshold. If you see a `... [diff truncated — <N> lines, <B> bytes total; ...] ...` marker, note this in your per-criterion `reason:` where it affects judgment, and fall back to reading the file(s) in `## Modified Files` directly for any file-inspection criterion whose relevant code may lie in the truncated window.
 
 {DIFF_CONTEXT}
 
