@@ -86,9 +86,22 @@ Numbered tasks, each with:
 - [ ] **Step 1: Description** — specific action
 - [ ] **Step 2: Description** — specific action
 
-**Acceptance criteria:**
-- Criterion 1
-- Criterion 2
+**Acceptance criteria** (strict two-line structure — one criterion line immediately followed by its own `Verify:` line):
+
+- Criterion 1 describing the expected outcome.
+  Verify: <recipe — a concrete, reproducible way to check Criterion 1>
+- Criterion 2 describing the expected outcome.
+  Verify: <recipe for Criterion 2>
+
+Every criterion MUST be immediately followed by its own `Verify:` line on the next line (indented as a continuation of that bullet). No criterion may share a `Verify:` line with another, and no criterion may omit its `Verify:` line. A plan that omits any `Verify:` line is a blocking review error, not a warning.
+
+Recipes may describe any of:
+- **Command execution** — an exact shell command plus the success condition, e.g. `Verify: run \`npm test -- execute-plan\` and confirm exit code 0 and no lines containing "FAIL"`.
+- **File-pattern inspection** — grep/ls patterns plus the expected result, e.g. `Verify: \`grep -n "STATUS: DONE_WITH_CONCERNS" agent/skills/execute-plan/SKILL.md\` returns at least one match inside the Step 9.7 block`.
+- **File-content inspection** — specific lines/sections a reader must confirm exist with specific content, e.g. `Verify: open \`agent/agents/verifier.md\` and confirm the frontmatter sets \`maxSubagentDepth: 0\` and the body forbids exploratory shell commands`.
+- **Prose inspection** — a concrete instruction a reader can carry out against a named artifact, e.g. `Verify: read Step 11.2 of \`agent/skills/execute-plan/SKILL.md\` and confirm the user-facing menu option text reads exactly "Defer integration debugging" and not "Skip tests"`.
+
+Recipes must be specific enough that a fresh reader can reproduce the check without re-deriving the intent. Avoid vague recipes like `Verify: check that it works` or `Verify: review the file`.
 
 **Model recommendation:** cheap | standard | capable (see rubric below)
 
@@ -146,6 +159,8 @@ Every step must contain actual content. Never write:
 - References to types, functions, or methods not defined in any task
 - "Add appropriate comments" / "document the API"
 - "Follow the existing pattern" (show the pattern explicitly)
+- A `Verify:` line that just says "check the file" / "confirm it works" / "looks right" / "verify manually" — recipes must name the artifact, the check, and the success condition.
+- A criterion without an immediately following `Verify:` line.
 
 ### Format Constraints and Footguns
 When tasks create files with specific format requirements (YAML frontmatter, JSON schema, templated content, specific file structures), state both:
@@ -168,7 +183,7 @@ Include per-task model recommendations:
 
 After writing the complete plan, review against the input:
 1. **Spec coverage** — skim each requirement, point to the task that implements it, list gaps
-2. **Placeholder scan** — search for "TBD", "TODO", "implement later", "similar to Task N"
+2. **Placeholder scan** — search for "TBD", "TODO", "implement later", "similar to Task N". Additionally confirm every acceptance criterion has its own immediately-following `Verify:` line, and no `Verify:` recipe is a placeholder (per the "No Placeholders" rules).
 3. **Type consistency** — do names, signatures, and types match across tasks?
 
 Fix issues inline. If a requirement has no task, add the task.
