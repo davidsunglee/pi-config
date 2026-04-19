@@ -19,7 +19,7 @@ Repository layout:
 
 ```text
 agent/
-  agents/          Local subagent definitions (5 agents)
+  agents/          Local subagent definitions (6 agents)
   extensions/      Custom pi extensions (11 files)
   skills/          Workflow and discipline skills (14 skills)
   themes/          Custom themes
@@ -146,7 +146,7 @@ The skills, extensions, subagents, and artifacts in this repo combine into a rep
 
 ### Subagent architecture
 
-The workflow uses five specialized subagents, each starting with **fresh context** — no session forking, no shared conversational history. Information flows through **file artifacts**:
+The workflow uses six specialized subagents, each starting with **fresh context** — no session forking, no shared conversational history. Information flows through **file artifacts**:
 
 - **Todos** (`.pi/todos/`) track lifecycle state
 - **Specs** (`.pi/specs/`) carry structured requirements from define-spec to generate-plan
@@ -469,7 +469,7 @@ Purely cosmetic, but fun.
 
 ## Local subagents
 
-This repo includes five local agent definitions in `agent/agents/`. Each operates with fresh context and no shared conversational history.
+This repo includes six local agent definitions in `agent/agents/`. Each operates with fresh context and no shared conversational history.
 
 ### `agent/agents/planner.md`
 
@@ -489,6 +489,16 @@ A **task execution agent** for carrying out a single task from a structured plan
 - Reads listed source files, executes the task, writes output to specified paths
 - Reports a structured status: `DONE`, `DONE_WITH_CONCERNS`, `NEEDS_CONTEXT`, `BLOCKED`
 - Runs on `claude-sonnet-4-6` with medium thinking
+
+### `agent/agents/verifier.md`
+
+A **judge-only per-task verification agent** used by `execute-plan` Step 10.
+
+- Reads a task's acceptance criteria (each paired with a `Verify:` recipe) and the orchestrator-provided command evidence, modified files, and diff context
+- Has **no shell access** — cannot run commands, only inspects orchestrator-captured output and the files named by each recipe
+- Returns per-criterion `PASS`/`FAIL` verdicts and an overall task `VERDICT: PASS` or `VERDICT: FAIL` in a strict report shape the orchestrator parses
+- Independent of the worker's own self-assessment, so a `coder` reporting `DONE` still has to clear verification before the wave advances
+- Runs with medium thinking
 
 ### `agent/agents/code-reviewer.md`
 
