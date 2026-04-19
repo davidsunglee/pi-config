@@ -43,3 +43,5 @@ Write the edited plan to `{OUTPUT_PATH}` (overwrite the existing file).
 3. Do NOT rewrite sections that are not flagged
 4. Do NOT add new tasks unless a finding explicitly identifies a missing task
 5. Do NOT remove tasks unless a finding explicitly identifies scope creep
+6. If a finding cites a missing `Verify:` line on an acceptance criterion, add a concrete `Verify:` recipe on the next line under that criterion using the strict two-line structure defined in the planner contract (one criterion → one `Verify:` line). Do not delete the criterion, and do not add a stub recipe like `Verify: check this`.
+7. If a finding cites a placeholder `Verify:` recipe ("check the file", "verify manually", "looks right", "confirm it works"), replace it with a recipe that names the artifact and the success condition (command + expected exit, grep pattern + expected match, file + expected content, or an explicit prose inspection).

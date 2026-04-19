@@ -107,11 +107,18 @@ Any issues found and fixed during self-review, or "None."
 
 ## Concerns / Needs / Blocker
 (only for DONE_WITH_CONCERNS, NEEDS_CONTEXT, or BLOCKED)
+
+For DONE_WITH_CONCERNS, emit one typed concern per line. Each line MUST start with exactly one of:
+- `Type: correctness — <what you doubt about correctness>`
+- `Type: scope — <what scope mismatch you detected>`
+- `Type: observation — <neutral note>`
+
+Do not emit untyped concerns. Do not mix multiple types on one line.
 ```
 
 **Status code guidance:**
 - `DONE` — all acceptance criteria met, self-review clean
-- `DONE_WITH_CONCERNS` — work complete but you have doubts about correctness, scope, or quality
+- `DONE_WITH_CONCERNS` — work complete but you have typed doubts. Every concern line MUST start with `Type: correctness`, `Type: scope`, or `Type: observation`. Correctness and scope concerns will block verification at the wave-level checkpoint and require remediate-or-stop. Observation concerns will require explicit acknowledgment before verification proceeds.
 - `NEEDS_CONTEXT` — cannot proceed without specific information that wasn't provided; list exactly what
 - `BLOCKED` — cannot complete the task; explain why, what you tried, and what would unblock you
 
