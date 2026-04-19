@@ -510,6 +510,77 @@ Each pass through the gate counts toward the per-task retry budget defined in St
 
 Exit this gate only when every task in the wave has a non-`BLOCKED` Step 9 status achieved by actual worker completion — i.e., the worker returned `DONE` or `DONE_WITH_CONCERNS`. A task is never transitioned out of `BLOCKED` by being skipped. At that point the wave is eligible for Step 10. Do not run Step 10 or Step 11 before this gate exits. The only alternative exit from the gate is `(x) Stop execution`, which halts the plan entirely (Step 13) and does NOT run Step 10 or Step 11 for this wave.
 
+## Step 9.7: Wave-level concerns checkpoint
+
+Run this gate once per wave after Step 9.5 has exited (every `BLOCKED` task has been resolved to a non-`BLOCKED` status or the user has stopped execution) and before Step 10. Its job is to surface every `DONE_WITH_CONCERNS` response from the wave to the user in a single combined view, then route each task according to its typed concerns.
+
+**Precondition:** Step 9.5 has exited. Every task in the wave has a Step 9 status of `DONE` or `DONE_WITH_CONCERNS`.
+
+### 1. Collect concerned tasks
+
+Build `CONCERNED_TASKS` = the ordered list of every task in the wave whose Step 9 status was `DONE_WITH_CONCERNS`. For each entry, carry along the task id, the worker's `## Concerns` section, and the typed label(s) parsed in Step 9 (`correctness`, `scope`, `observation`). A single task may carry multiple concerns with mixed types. If `CONCERNED_TASKS` is empty, skip this gate entirely and proceed to Step 10.
+
+### 2. Present a single combined view
+
+Do NOT interrupt as each worker returns. Do NOT present concerns one-at-a-time. Wait until the wave has fully drained and Step 9.5 has exited, then present every concerned task together in one combined message so the user can see the whole wave's concerns at once and decide in context.
+
+The combined view lists each concerned task as its own block with its typed concerns. Example layout for a wave where tasks 3, 5, and 7 all returned `DONE_WITH_CONCERNS`:
+
+```
+Wave N returned DONE_WITH_CONCERNS for 3 task(s). Review all concerns before verification runs.
+
+── Task 3: <short title> ──────────────────────────────────
+  Type: correctness
+    - <worker-reported concern text>
+  Type: observation
+    - <worker-reported concern text>
+
+── Task 5: <short title> ──────────────────────────────────
+  Type: scope
+    - <worker-reported concern text>
+
+── Task 7: <short title> ──────────────────────────────────
+  Type: observation
+    - <worker-reported concern text>
+    - <worker-reported concern text>
+───────────────────────────────────────────────────────────
+```
+
+After the combined view, the gate prompts the user per task (Section 3). The combined view is presented first, in full, before any per-task routing prompt.
+
+### 3. Per-task typed routing
+
+For each task in `CONCERNED_TASKS`, in list order, present a menu whose options depend on the highest-severity concern type attached to that task. Severity order is `correctness` > `scope` > `observation`. A task that mixes types is routed by its highest-severity type.
+
+**Correctness or scope concerns** — the task has at least one `Type: correctness` or `Type: scope` entry. Menu:
+
+- `(r) Re-dispatch with guidance` — prompt the user for additional instructions, then re-dispatch the task to a worker with those instructions appended. Counts against the task's Step 12 retry budget.
+- `(x) Stop execution` — halt the plan via Step 13. No further waves run.
+
+The correctness/scope menu contains exactly `(r)` and `(x)`. There is no `(a)` option: a correctness or scope concern may not be acknowledged and continued past this gate.
+
+**Observation-only concerns** — every concern on the task is `Type: observation`. Menu:
+
+- `(a) Acknowledge and continue` — record the observation in the wave notes and leave the task's status as `DONE_WITH_CONCERNS` without re-dispatch. The task is eligible for Step 10.
+- `(r) Re-dispatch with guidance` — same behavior as above. Counts against the Step 12 retry budget.
+- `(x) Stop execution` — halt the plan via Step 13.
+
+The observation-only menu contains exactly `(a)`, `(r)`, and `(x)`.
+
+### 4. Apply the user's routing choices
+
+Process choices in order:
+
+- `(a)` on an observation-only task: remove it from `CONCERNED_TASKS` and proceed.
+- `(r)` on any task: re-dispatch as in Step 9.5 §5. When the re-dispatched worker returns, apply Step 9 again. If the new status is `BLOCKED`, return to Step 9.5 with it. If the new status is `DONE_WITH_CONCERNS`, it re-enters `CONCERNED_TASKS` and the gate re-presents it on the next pass. If the new status is `DONE`, remove it from `CONCERNED_TASKS`. Each pass counts against the Step 12 retry budget; an exhausted budget on a `(r)` choice is surfaced to the user as `(r)` (offer a different model/context) or `(x)` — never a silent skip.
+- `(x)` on any task: stop execution immediately (Step 13).
+
+Repeat §2–§4 until `CONCERNED_TASKS` is empty or the user picks `(x)`.
+
+### 5. Gate exit
+
+Exit this gate only when every task in the wave has a resolution recorded — either `DONE`, or `DONE_WITH_CONCERNS` with every attached concern being `Type: observation` that the user explicitly acknowledged via `(a)`. A `correctness` or `scope` concern may never be "acknowledged and continued" — the only exits for such a concern are a re-dispatch that returns a resolution not carrying the same correctness/scope concern, or `(x) Stop execution`. Once the gate exits cleanly, the wave is eligible for Step 10. Do not run Step 10 or Step 11 before this gate exits.
+
 ## Step 10: Verify wave output
 
 **Precondition:** Only run this step after the Step 9.5 blocked-task escalation gate has exited. If any task in the current wave still has a Step 9 status of `BLOCKED`, do not run wave verification — return to Step 9.5. A wave with any unresolved `BLOCKED` task is NOT considered successfully completed.
