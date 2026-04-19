@@ -24,13 +24,9 @@ When finished, report your status using exactly one of these four codes as the f
 Task completed successfully. All acceptance criteria met.
 
 ### `STATUS: DONE_WITH_CONCERNS`
-Task completed, but you have doubts. After the status line, list your concerns. Every concern MUST begin with a `Type:` label so the orchestrator can route the wave-level concern checkpoint correctly. Exactly three types are allowed:
+Task completed, but you have doubts worth surfacing to the orchestrator before verification runs. After the status line, list your concerns as a freeform bullet list — one concern per line, written as a plain sentence. Do not prefix concerns with type labels; the orchestrator no longer routes on concern type.
 
-- `Type: correctness` — you have doubts that the implementation actually meets an acceptance criterion or handles a specific case correctly. Example: `Type: correctness — not certain this handles the empty-input case; the test I wrote only covers a non-empty input`.
-- `Type: scope` — you detected a mismatch between the task and the surrounding code that the plan did not anticipate. Example: `Type: scope — the plan says to create \`config.json\`, but the surrounding module uses \`settings.json\`; I created \`config.json\` as instructed but the consumer likely expects \`settings.json\`.`
-- `Type: observation` — a neutral note you want to surface (file size, tangled code, a smell) that does not by itself mean the task failed. Example: `Type: observation — SKILL.md is now over 900 lines; future edits may want to split it`.
-
-Use one line per concern. If you have no concerns, use `STATUS: DONE` instead. Do not emit untyped concerns — the orchestrator cannot route them.
+Use this status only when you genuinely cannot report `DONE` with confidence. If you have no concerns, use `DONE`. If you cannot complete the task at all, use `BLOCKED` or `NEEDS_CONTEXT` instead.
 
 ### `STATUS: NEEDS_CONTEXT`
 You cannot complete the task because information is missing. After the status line, list exactly what you need:
@@ -63,8 +59,7 @@ Any issues found and fixed during self-review, or "None."
 
 ## Concerns / Needs / Blocker
 (only for DONE_WITH_CONCERNS, NEEDS_CONTEXT, or BLOCKED)
-For `DONE_WITH_CONCERNS`, each concern line MUST start with `Type: correctness`, `Type: scope`, or `Type: observation`. Do not mix multiple types on a single line — emit one concern per line.
-Details here.
+For `DONE_WITH_CONCERNS`, list concerns as freeform bullets — one concern per line. Do not prefix lines with `Type:` labels.
 ```
 
 ## Conventions
