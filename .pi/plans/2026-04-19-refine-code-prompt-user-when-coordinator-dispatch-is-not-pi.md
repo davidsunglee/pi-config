@@ -61,7 +61,9 @@ Harden `refine-code`'s coordinator launch so it never runs under a non-`pi` host
 
   - The resolved coordinator model `M`.
   - The resolved dispatch `D`.
-  - A short warning: "The host runtime only passes through nested `model:` and `dispatch:` pairs when the host is `pi`. Under `D=<D>`, nested subagents dispatched by the coordinator (e.g., `code-reviewer` on `openai-codex/gpt-5.4`) will be silently coerced to the host's own tier labels, so cross-provider review and remediation would not actually run."
+  - A short warning. The warning text itself MUST name both the resolved model `M` and the resolved dispatch `D` inline (not only in the bullets above), and MUST explain why `pi` is required. Use this exact wording, substituting the literal values of `M` and `D`:
+
+    "Coordinator model `M=<M>` resolves to dispatch `D=<D>`, which is not `pi`. The host runtime only passes through nested `model:` and `dispatch:` pairs when the host itself is `pi`; under `D=<D>`, nested subagents dispatched by coordinator `<M>` (e.g., `code-reviewer` on `openai-codex/gpt-5.4`) will be silently coerced to the host's own tier labels, so cross-provider review and remediation would not actually run. The coordinator must run on a `pi` host for its nested dispatch algorithm to be honored."
 
   Offer three choices:
 
@@ -70,21 +72,9 @@ Harden `refine-code`'s coordinator launch so it never runs under a non-`pi` host
   - **(3) Cancel execution.** Stop the skill cleanly. Do not assemble the coordinator prompt. Do not dispatch any subagent. Do not commit. Report to the caller: "refine-code cancelled: coordinator dispatch required confirmation and user cancelled."
   ```
 
-- [ ] **Step 5: Insert the re-selection cap** — directly after the three choices, insert the 5-attempt cap contract:
+- [ ] **Step 5: Renumber downstream headings** — change `## Step 3: Assemble coordinator prompt` to `## Step 4: Assemble coordinator prompt`, `## Step 4: Dispatch code-refiner` to `## Step 5: Dispatch code-refiner`, and `## Step 5: Handle code-refiner result` to `## Step 6: Handle code-refiner result`. Keep the body of each unchanged except for the explicit dispatch-value references in the next step.
 
-  ```markdown
-  ### Re-selection cap
-
-  Track the count of choice-(2) re-selections. Allow up to 5 re-selections. If the 6th resolved dispatch (the original plus 5 re-selections) is still not `pi`, stop with this error, naming every model the user tried in order:
-
-  "refine-code cannot launch the coordinator: after 5 re-selection attempts, no chosen model resolved to `dispatch: pi`. Models tried: <M0>, <M1>, ..., <M5>."
-
-  Do not dispatch. Do not commit.
-  ```
-
-- [ ] **Step 6: Renumber downstream headings** — change `## Step 3: Assemble coordinator prompt` to `## Step 4: Assemble coordinator prompt`, `## Step 4: Dispatch code-refiner` to `## Step 5: Dispatch code-refiner`, and `## Step 5: Handle code-refiner result` to `## Step 6: Handle code-refiner result`. Keep the body of each unchanged except for the explicit dispatch-value references in the next step.
-
-- [ ] **Step 7: Update the renumbered Step 5 (Dispatch) to use the confirmed pair** — in the `subagent { ... }` block inside the renumbered Step 5, change the comment markers for model/dispatch from `"<standard from model matrix>"` / `"<dispatch for standard>"` to `"<confirmed coordinator model from Step 3>"` / `"<confirmed coordinator dispatch from Step 3 — guaranteed `pi`>"`. The block otherwise stays identical:
+- [ ] **Step 6: Update the renumbered Step 5 (Dispatch) to use the confirmed pair** — in the `subagent { ... }` block inside the renumbered Step 5, change the comment markers for model/dispatch from `"<standard from model matrix>"` / `"<dispatch for standard>"` to `"<confirmed coordinator model from Step 3>"` / `"<confirmed coordinator dispatch from Step 3 — guaranteed `pi`>"`. The block otherwise stays identical:
 
   ```
   subagent {
@@ -95,13 +85,13 @@ Harden `refine-code`'s coordinator launch so it never runs under a non-`pi` host
   }
   ```
 
-- [ ] **Step 8: Update Edge Cases fallback** — locate the bullet `- **Code-refiner fails to dispatch** (model unavailable): Retry with \`capable\` from the model matrix (re-resolving dispatch for the fallback model). If that also fails, stop with error.` and replace it with:
+- [ ] **Step 7: Update Edge Cases fallback** — locate the bullet `- **Code-refiner fails to dispatch** (model unavailable): Retry with \`capable\` from the model matrix (re-resolving dispatch for the fallback model). If that also fails, stop with error.` and replace it with:
 
-  `- **Code-refiner fails to dispatch** (model unavailable): Take the \`capable\` model from the model matrix and resolve its dispatch, then **re-enter Step 3 (Confirm coordinator dispatch)** with that fallback \`(M, D)\` pair. The same user prompt / pi-only rule applies. If the user cancels or the re-selection cap is reached, stop with the corresponding Step 3 error. If the second dispatch still fails at runtime, stop with error.`
+  `- **Code-refiner fails to dispatch** (model unavailable): Take the \`capable\` model from the model matrix and resolve its dispatch, then **re-enter Step 3 (Confirm coordinator dispatch)** with that fallback \`(M, D)\` pair. The same user prompt / pi-only rule applies. If the user cancels, stop with the corresponding Step 3 error. If the second dispatch still fails at runtime, stop with error.`
 
-- [ ] **Step 9: Update the stale Handle-result cross-reference** — in the renumbered `## Step 6: Handle code-refiner result` section, locate the bullet `**(a) Keep iterating** — re-invoke this skill from Step 3 with the same inputs but \`HEAD_SHA\` updated to current HEAD (budget resets, new cycle)`. Change `re-invoke this skill from Step 3` to `re-invoke this skill from Step 4` so the reference points at the renumbered Assemble-coordinator-prompt section (the original intent: re-assemble and re-dispatch with the already-confirmed `(M, D)` pair from the prior pass). Leave every other word in that bullet untouched.
+- [ ] **Step 8: Update the Handle-result cross-reference so iterations re-enter the confirmation gate** — in the renumbered `## Step 6: Handle code-refiner result` section, locate the bullet `**(a) Keep iterating** — re-invoke this skill from Step 3 with the same inputs but \`HEAD_SHA\` updated to current HEAD (budget resets, new cycle)`. Change `re-invoke this skill from Step 3` to `re-invoke this skill from Step 2` so the next iteration re-reads the model matrix and then flows into the new Step 3 confirmation gate. This preserves the per-run-only override behavior: the override granted by choice (1) in the prior iteration does not carry forward; each "keep iterating" pass is a fresh run that re-confirms the coordinator dispatch with the user if it resolves to non-`pi`. No in-memory `(M, D)` carry-forward is assumed and no state is persisted. Leave every other word in that bullet untouched.
 
-- [ ] **Step 10: Verify headings and cross-references** — re-read the modified SKILL.md top to bottom. Confirm the heading sequence is: Step 1 → Step 2 → Step 3 (new, Confirm coordinator dispatch) → Step 4 (Assemble) → Step 5 (Dispatch) → Step 6 (Handle result) → Edge Cases. Confirm no leftover references to the old numbering (search for "Step 3", "Step 4", "Step 5" in body text and confirm each now points at the correct renumbered section; the only body-text change beyond the insertions/renumbers above is the Step 9 fix to the Handle-result bullet). The "See execute-plan Step 6 for the full resolution algorithm" reference inside Step 2 is unchanged.
+- [ ] **Step 9: Verify headings and cross-references** — re-read the modified SKILL.md top to bottom. Confirm the heading sequence is: Step 1 → Step 2 → Step 3 (new, Confirm coordinator dispatch) → Step 4 (Assemble) → Step 5 (Dispatch) → Step 6 (Handle result) → Edge Cases. Confirm no leftover references to the old numbering (search for "Step 3", "Step 4", "Step 5" in body text and confirm each now points at the correct renumbered section; the only body-text change beyond the insertions/renumbers above is the Step 8 fix to the Handle-result bullet, which now points at Step 2). The "See execute-plan Step 6 for the full resolution algorithm" reference inside Step 2 is unchanged.
 
 **Acceptance criteria:**
 
@@ -109,17 +99,17 @@ Harden `refine-code`'s coordinator launch so it never runs under a non-`pi` host
   Verify: `grep -n '^## Step' ~/.pi/agent/skills/refine-code/SKILL.md` emits, in order, `## Step 1`, `## Step 2`, `## Step 3: Confirm coordinator dispatch`, `## Step 4: Assemble coordinator prompt`, `## Step 5: Dispatch code-refiner`, `## Step 6: Handle code-refiner result` — the new `Step 3` heading appears immediately after `## Step 2` and before `## Step 4: Assemble coordinator prompt`.
 - The new section explicitly enumerates the three choices described in the task, with exact wording for choice (1) being a dispatch-only override that does not mutate `model-tiers.json`, choice (2) requiring re-resolution of the new model's dispatch through the same algorithm, and choice (3) exiting cleanly.
   Verify: read `~/.pi/agent/skills/refine-code/SKILL.md` under `## Step 3: Confirm coordinator dispatch` and confirm all three bullets are present: `**(1) Keep the model, override dispatch to \`pi\` for this run only.**` with the literal sentences `Do not write to \`model-tiers.json\`.` and `Do not persist the choice.`; `**(2) Pick a different coordinator model.**` instructing to re-resolve dispatch using the Step 2 algorithm (prefix extraction, map lookup, default `"pi"`) and re-enter Step 3; and `**(3) Cancel execution.**` stating the skill stops cleanly with no dispatch and no commit.
-- The re-selection cap is stated as 5 re-selections; the 6th non-`pi` resolution fails with an error naming every model tried in order.
-  Verify: inside the `### Re-selection cap` subsection of `## Step 3` in `~/.pi/agent/skills/refine-code/SKILL.md`, confirm the text contains both the phrase `up to 5 re-selections` and the phrase `6th resolved dispatch`, and that the error template begins with `refine-code cannot launch the coordinator: after 5 re-selection attempts, no chosen model resolved to \`dispatch: pi\`. Models tried:` and ends with a comma-separated list template `<M0>, <M1>, ..., <M5>`.
+- The warning text itself names both the resolved coordinator model `M` and the resolved dispatch `D` inline (not only in separate bullets) and explains why `pi` is required.
+  Verify: inside the `### User prompt (shown only when \`D != "pi"\`)` subsection under `## Step 3: Confirm coordinator dispatch` in `~/.pi/agent/skills/refine-code/SKILL.md`, locate the quoted warning string. Confirm the quoted warning contains the literal substring `M=<M>` AND the literal substring `D=<D>` AND a phrase equivalent to `must run on a \`pi\` host` (e.g., `The coordinator must run on a \`pi\` host`). A warning that only references `D` without also naming `M` inline fails this check. A warning that names both but lacks a rationale tying the requirement to the `pi` host also fails.
 - Downstream sections are renumbered: Assemble → Step 4, Dispatch → Step 5, Handle result → Step 6.
   Verify: `grep -nE '^## Step [0-9]+: (Assemble coordinator prompt|Dispatch code-refiner|Handle code-refiner result)$' ~/.pi/agent/skills/refine-code/SKILL.md` emits exactly three lines in this order: `## Step 4: Assemble coordinator prompt`, `## Step 5: Dispatch code-refiner`, `## Step 6: Handle code-refiner result`; no `## Step 3: Assemble …`, `## Step 4: Dispatch …`, or `## Step 5: Handle …` headings remain.
 - The dispatch block in the renumbered Step 5 references values confirmed in Step 3, not raw matrix values.
   Verify: inside the `subagent { ... }` block under `## Step 5: Dispatch code-refiner` in `~/.pi/agent/skills/refine-code/SKILL.md`, the `model:` line reads `"<confirmed coordinator model from Step 3>"` and the `dispatch:` line reads ``"<confirmed coordinator dispatch from Step 3 — guaranteed `pi`>"``; neither `<standard from model matrix>` nor `<dispatch for standard>` appears anywhere in that block.
 - The Edge Cases `capable`-fallback bullet routes through Step 3 rather than bypassing it.
   Verify: in the `## Edge Cases` section of `~/.pi/agent/skills/refine-code/SKILL.md`, the `Code-refiner fails to dispatch` bullet contains the substring `re-enter Step 3 (Confirm coordinator dispatch)` and no longer contains the earlier text `Retry with \`capable\` from the model matrix (re-resolving dispatch for the fallback model)` as a standalone terminal instruction.
-- The Handle-result iterate bullet points at the renumbered Assemble step.
-  Verify: inside the `## Step 6: Handle code-refiner result` section of `~/.pi/agent/skills/refine-code/SKILL.md`, the `**(a) Keep iterating**` bullet contains the substring `re-invoke this skill from Step 4` and no longer contains `re-invoke this skill from Step 3`.
-- No other behavior (prompt assembly, coordinator contract, result parsing) changes. The only permitted edits are: the new `## Step 3: Confirm coordinator dispatch` block (heading + all inserted subsections), the renumbering of the three downstream `## Step` headings (Assemble → 4, Dispatch → 5, Handle result → 6), the two comment-marker lines inside the Step 5 `subagent { ... }` block, the `Code-refiner fails to dispatch` Edge Cases bullet, and the one-word change from `Step 3` to `Step 4` inside the `**(a) Keep iterating**` bullet of Step 6.
+- The Handle-result iterate bullet routes back through the new confirmation gate rather than skipping it.
+  Verify: inside the `## Step 6: Handle code-refiner result` section of `~/.pi/agent/skills/refine-code/SKILL.md`, the `**(a) Keep iterating**` bullet contains the substring `re-invoke this skill from Step 2` and no longer contains `re-invoke this skill from Step 3` or `re-invoke this skill from Step 4`. Re-entering at Step 2 ensures each fresh iteration re-reads the matrix and then flows through Step 3's confirmation gate, so the per-run-only override from choice (1) never silently carries forward into a later iteration.
+- No other behavior (prompt assembly, coordinator contract, result parsing) changes. The only permitted edits are: the new `## Step 3: Confirm coordinator dispatch` block (heading + all inserted subsections), the renumbering of the three downstream `## Step` headings (Assemble → 4, Dispatch → 5, Handle result → 6), the two comment-marker lines inside the Step 5 `subagent { ... }` block, the `Code-refiner fails to dispatch` Edge Cases bullet, and the one-token change from `Step 3` to `Step 2` inside the `**(a) Keep iterating**` bullet of Step 6.
   Verify: before starting Task 1, copy the file to a temp baseline: `cp ~/.pi/agent/skills/refine-code/SKILL.md /tmp/SKILL.md.pre-task1`. After completing all Task 1 steps, run `diff /tmp/SKILL.md.pre-task1 ~/.pi/agent/skills/refine-code/SKILL.md` and confirm every hunk falls within exactly one of the permitted edits above; reject any hunk outside those regions. In addition, confirm `grep -c '^## Step 1: Gather inputs$' ~/.pi/agent/skills/refine-code/SKILL.md` and `grep -c '^## Step 2: Read model matrix$' ~/.pi/agent/skills/refine-code/SKILL.md` each return `1` (Steps 1 and 2 headings are byte-identical), and that the `## Edge Cases` section still contains the `No changes in range` and `Empty requirements` bullets unchanged (grep for each bullet's opening literal substring and confirm a match).
 
 **Model recommendation:** standard
@@ -159,24 +149,24 @@ Harden `refine-code`'s coordinator launch so it never runs under a non-`pi` host
 
 - [ ] **Step 1: Simulate the `pi` path** — read the modified `SKILL.md` top to bottom assuming `model-tiers.json` has `standard: "anthropic/claude-sonnet-4-6"` and `dispatch: { "anthropic": "pi" }`. Confirm Step 3 takes the fast path (no prompt) and the renumbered Step 5 dispatches with `(M, "pi")`.
 
-- [ ] **Step 2: Simulate the `claude` path, choice (1)** — re-read assuming `dispatch: { "anthropic": "claude" }`. Confirm Step 3 prompts, choice (1) yields `(M, "pi")` for Step 5 without touching `model-tiers.json`, and the warning text matches the contract (names `M`, names `D=claude`, explains nested coercion).
+- [ ] **Step 2: Simulate the `claude` path, choice (1)** — re-read assuming `dispatch: { "anthropic": "claude" }`. Confirm Step 3 prompts, choice (1) yields `(M, "pi")` for Step 5 without touching `model-tiers.json`, and the warning text matches the contract (the warning string itself names both `M` and `D=claude` inline, explains nested coercion, and states the coordinator must run on a `pi` host).
 
 - [ ] **Step 3: Simulate the `claude` path, choice (2) that resolves to `pi`** — re-read assuming the user picks `openai-codex/gpt-5.4` with `dispatch: { "openai-codex": "pi" }`. Confirm the re-entry branch uses the same algorithm (prefix extraction, map lookup, default `pi`) and that Step 3 exits via the `D == "pi"` branch on the second pass.
 
-- [ ] **Step 4: Simulate the cap** — re-read assuming the user keeps picking `claude`-dispatched models. Confirm the 6th non-`pi` resolution fails with the error message naming every model the user tried in order, and that no coordinator dispatch happens.
+- [ ] **Step 4: Simulate choice (3)** — confirm the skill stops cleanly with the cancellation message, no prompt assembly, no dispatch, no commits.
 
-- [ ] **Step 5: Simulate choice (3)** — confirm the skill stops cleanly with the cancellation message, no prompt assembly, no dispatch, no commits.
+- [ ] **Step 5: Simulate Edge Cases fallback** — confirm the `capable` fallback bullet re-enters Step 3 and is subject to the same prompt rule.
 
-- [ ] **Step 6: Simulate Edge Cases fallback** — confirm the `capable` fallback bullet re-enters Step 3 and is subject to the same prompt / cap.
+- [ ] **Step 6: Simulate "Keep iterating" across iterations** — starting from the end of the first iteration's Step 6, follow the `**(a) Keep iterating**` bullet. Confirm it re-enters the skill at Step 2 (not Step 4), which re-reads the matrix and then flows into Step 3's confirmation gate. Assuming the matrix still resolves the coordinator to a non-`pi` dispatch, confirm the user is prompted again on the new iteration (i.e., choice (1)'s per-run override did not silently carry forward). Assuming the matrix now resolves to `pi`, confirm Step 3 takes the fast path on the new iteration.
 
 - [ ] **Step 7: Simulate `refine-code-prompt.md` under the guarantee** — read the modified prompt file. Confirm the new paragraph is the only change and that the host-guarantee note appears before `## Protocol`.
 
 **Acceptance criteria:**
 
 - All six simulated scenarios behave as described without contradiction or ambiguity in the skill text.
-  Verify: read `~/.pi/agent/skills/refine-code/SKILL.md` and `~/.pi/agent/skills/refine-code/refine-code-prompt.md` end-to-end and confirm each scenario resolves as specified — (a) `pi` path takes the fast branch in Step 3 and dispatches `(M, "pi")` at Step 5; (b) `claude` path choice (1) dispatches `(M, "pi")` at Step 5 without any instruction to write `model-tiers.json`; (c) `claude` path choice (2) resolving to `pi` re-enters Step 3 once and exits via the `D == "pi"` branch; (d) repeated `claude` choices terminate at the 6th resolution with the cap error listing every tried model; (e) choice (3) stops cleanly with the cancellation message and no Step 4/5/6 actions; (f) the Edge Cases `Code-refiner fails to dispatch` bullet routes back into Step 3. Any scenario that cannot be traced unambiguously through the skill text fails this check.
+  Verify: read `~/.pi/agent/skills/refine-code/SKILL.md` and `~/.pi/agent/skills/refine-code/refine-code-prompt.md` end-to-end and confirm each scenario resolves as specified — (a) `pi` path takes the fast branch in Step 3 and dispatches `(M, "pi")` at Step 5; (b) `claude` path choice (1) dispatches `(M, "pi")` at Step 5 without any instruction to write `model-tiers.json`, and the warning string itself names both `M` and `D` inline; (c) `claude` path choice (2) resolving to `pi` re-enters Step 3 once and exits via the `D == "pi"` branch; (d) choice (3) stops cleanly with the cancellation message and no Step 4/5/6 actions; (e) the Edge Cases `Code-refiner fails to dispatch` bullet routes back into Step 3; (f) the Step 6 `**(a) Keep iterating**` bullet re-enters the skill at Step 2, so the next iteration necessarily passes through Step 3's confirmation gate — the per-run-only override does not silently carry forward. Any scenario that cannot be traced unambiguously through the skill text fails this check.
 - No placeholder text (`TBD`, `TODO`, `…`) is left in either modified file.
-  Verify: `grep -nE 'TBD|TODO|\.\.\.|…' ~/.pi/agent/skills/refine-code/SKILL.md ~/.pi/agent/skills/refine-code/refine-code-prompt.md` returns no matches outside the intentional `<M0>, <M1>, ..., <M5>` template inside the re-selection cap error string; every other hit fails this check.
+  Verify: `grep -nE 'TBD|TODO|\.\.\.|…' ~/.pi/agent/skills/refine-code/SKILL.md ~/.pi/agent/skills/refine-code/refine-code-prompt.md` returns no matches; every hit fails this check.
 - No references to the old step numbering linger in SKILL.md.
   Verify: `grep -nE '(Step 3: Assemble coordinator prompt|Step 4: Dispatch code-refiner|Step 5: Handle code-refiner result)' ~/.pi/agent/skills/refine-code/SKILL.md` returns zero matches, and every body-text mention of `Step 3`, `Step 4`, `Step 5`, and `Step 6` in the file refers to the new numbering (Step 3 = Confirm coordinator dispatch, Step 4 = Assemble coordinator prompt, Step 5 = Dispatch code-refiner, Step 6 = Handle code-refiner result).
 
@@ -189,19 +179,13 @@ Harden `refine-code`'s coordinator launch so it never runs under a non-`pi` host
 
 ## Risk Assessment
 
-- **Risk: Re-selection cap is ambiguous ("5 attempts" vs "6th resolution").** Mitigation: the inserted text in Task 1 Step 5 states the cap in both forms — "up to 5 re-selections" and "the 6th resolved dispatch". The plan explicitly ties them together to avoid an off-by-one in implementation.
 - **Risk: Downstream steps reference the old numbering.** Mitigation: Task 1 Step 9 requires a full-file re-read and scan for stale step references. Task 3 Step 1 re-reads the file end-to-end.
-- **Risk: The Edge Cases fallback silently bypasses the new step.** Mitigation: Task 1 Step 8 explicitly rewrites the fallback bullet to route through Step 3, and Task 3 Step 6 verifies it.
+- **Risk: The Edge Cases fallback silently bypasses the new step.** Mitigation: Task 1 Step 7 explicitly rewrites the fallback bullet to route through Step 3, and Task 3 Step 5 verifies it.
 - **Risk: Coordinator prompt claims the host is `pi` when it isn't.** Mitigation: the note in Task 2 only asserts the guarantee; the actual enforcement is in SKILL.md Step 3. As long as Step 3 is correctly implemented, the guarantee holds. Task 3 verifies the two files are consistent.
 - **Risk: User's replacement model in choice (2) has no `/` prefix.** Mitigation: the referenced Step 2 algorithm already handles this — "extract the substring before the first `/`" and default to `"pi"` if the map has no entry — so a bare model id resolves to `pi` and exits the prompt cleanly. Called out implicitly by "default to `"pi"` if absent".
 - **Risk: Persistent state creep.** The task explicitly forbids writing `model-tiers.json` or any per-user state. Task 1 Steps 3–4 restate "Do not write to `model-tiers.json`. Do not persist the choice."
+- **Risk: `Keep iterating` bypasses the confirmation gate.** The per-run-only override from choice (1) must not silently carry forward into a later iteration. Mitigation: Task 1 Step 8 routes `**(a) Keep iterating**` back to Step 2 (which flows into Step 3's confirmation gate) rather than to the Assemble step, and Task 3 Step 6 simulates a multi-iteration run to confirm the gate re-fires.
 
 ## Review Notes
 
-_Added by plan reviewer — informational, not blocking._
-
-### Warnings
-- **Task 1**:
-  - **What:** Task 1 Step 9 changes the Handle-result bullet to `re-invoke this skill from Step 4` and the plan rationale says this preserves the “already-confirmed `(M, D)` pair from the prior pass.” But the plan does not add `M`/`D` to Step 1 inputs, does not define any in-memory carry-forward mechanism, and the spec explicitly says choice (1) is for “this run only” with no persisted state.
-  - **Why it matters:** If “Keep iterating” means a fresh invocation of `refine-code`, starting at Step 4 would bypass the new confirmation gate or require the executor to invent state that the skill never collected. That creates ambiguity in the resulting skill and risks violating the spec’s non-persistent, per-run confirmation behavior.
-  - **Recommendation:** Clarify the intended control flow for this branch. Either state that “Keep iterating” is an in-run continuation where the confirmed `(M, D)` remain in scope, or route a fresh invocation back through the new confirmation step instead of Step 4.
+_Prior reviewer warnings have been addressed in this revision: Task 1 Step 8 now routes "Keep iterating" back through Step 2 (which flows into the new Step 3 confirmation gate) instead of skipping to the Assemble step, preserving the per-run-only override behavior without assuming any carry-forward state; and the Task 1 Step 4 warning text now names both the resolved coordinator model `M` and the resolved dispatch `D` inline, with a matching acceptance check added._
