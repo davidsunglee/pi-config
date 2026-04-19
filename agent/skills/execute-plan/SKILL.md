@@ -434,7 +434,7 @@ Do not start the next wave. Do not run Step 10 or Step 11 for this wave yet.
 
 After draining, collect the set `BLOCKED_TASKS` = every task in the wave whose most recent worker response is `STATUS: BLOCKED`.
 
-- If `BLOCKED_TASKS` is empty, skip this entire step and proceed to Step 10.
+- If `BLOCKED_TASKS` is empty, skip this entire step and proceed to Step 9.7 (which then gates entry to Step 10). Never advance directly from Step 9.5 to Step 10.
 - If `BLOCKED_TASKS` is non-empty, proceed to step 3 below.
 
 Tasks already re-dispatched and resolved in Step 9 via `NEEDS_CONTEXT` do not appear here — this gate only triggers on terminal `BLOCKED` outcomes for the wave.
@@ -508,7 +508,7 @@ Each pass through the gate counts toward the per-task retry budget defined in St
 
 ### 6. Gate exit
 
-Exit this gate only when every task in the wave has a non-`BLOCKED` Step 9 status achieved by actual worker completion — i.e., the worker returned `DONE` or `DONE_WITH_CONCERNS`. A task is never transitioned out of `BLOCKED` by being skipped. At that point the wave is eligible for Step 10. Do not run Step 10 or Step 11 before this gate exits. The only alternative exit from the gate is `(x) Stop execution`, which halts the plan entirely (Step 13) and does NOT run Step 10 or Step 11 for this wave.
+Exit this gate only when every task in the wave has a non-`BLOCKED` Step 9 status achieved by actual worker completion — i.e., the worker returned `DONE` or `DONE_WITH_CONCERNS`. A task is never transitioned out of `BLOCKED` by being skipped. At that point the wave is eligible to proceed to Step 9.7 (the wave-level concerns checkpoint), which then gates entry into Step 10. The control-flow path out of this gate is always `Step 9.5 -> Step 9.7 -> Step 10`; never advance directly from Step 9.5 to Step 10. Do not run Step 10 or Step 11 before both this gate and Step 9.7 have exited. The only alternative exit from the gate is `(x) Stop execution`, which halts the plan entirely (Step 13) and does NOT run Step 9.7, Step 10, or Step 11 for this wave.
 
 ## Step 9.7: Wave-level concerns checkpoint
 
@@ -816,7 +816,7 @@ When the user chooses **(a) Debug failures**, do NOT re-dispatch every task in t
 If a worker produces empty, missing, or incorrect output:
 1. Retry automatically up to **3 times** (with improvements to the task prompt if possible). Note: re-dispatch passes through the Step 9.5 blocked-task gate also count toward this per-task budget (see Step 9.5 §5). **Shared counter:** All re-dispatches from Step 9.5 §5 (blocked-task re-dispatch), Step 9.7 §4 (concerned-task re-dispatch via `(r)`), and Step 10 failure routing (verifier `VERDICT: FAIL`) share a single per-task retry counter. Exhaustion in one path exhausts it for all paths — a task that has been re-dispatched twice through Step 9.5 and once through Step 9.7 has used all 3 retries, and any subsequent Step 10 `VERDICT: FAIL` for that task goes directly to the user-prompt in step 2 below rather than triggering another automatic retry. **Sub-task split budget rule:** Choosing `(s) Split into sub-tasks` in Step 9.5 §5 consumes 1 retry against the parent task's budget, and each resulting sub-task inherits the parent's remaining retry count rather than a fresh 3-retry budget. This closes the bypass where an exhausted parent could be split to obtain additional effective retries.
 2. If still failing after 3 retries, **notify the user at the end of the wave** and ask:
-   - Retry again (optionally with a different model or more context)
+   - Retry again (optionally with a different model or more context). Choosing `Retry again` **resets the per-task 3-retry budget for that task** — the user has explicitly authorized a fresh remediation window, so the shared counter described in step 1 (blocked-task re-dispatch + Step 9.7 `(r)` re-dispatch + Step 10 `VERDICT: FAIL` retries) is cleared back to 3 for this task only. A subsequent failure on that task re-enters the automatic-retry loop at the top of step 1 with a full budget.
    - Stop the entire plan
 
    There is no option to skip a failed task. A wave with any unresolved failure — including a verifier `VERDICT: FAIL` from Step 10 treated as a task failure — must either be retried to resolution or stopped. `VERDICT: FAIL` from Step 10 is routed through this same failure-handling path with no skip option.
@@ -877,7 +877,7 @@ After all waves complete successfully (and if the user chose review in Step 3):
 
 ### Deferred integration regression gate (precondition)
 
-**Skip if:** Integration tests are disabled (Step 3 settings), no test command is available, or `deferred_integration_regressions` was empty at the start of this step.
+**Skip if:** Integration tests are disabled (Step 3 settings), no test command is available, or deferment never occurred at any point during this run (i.e., `deferred_integration_regressions` was never added to — not merely "is empty right now"). If any integration regression was deferred in any prior wave, the gate MUST run, even if the deferred set has since been auto-cleared by reconciliation.
 
 Before moving the plan file, closing the linked todo, or running branch completion, verify that every integration regression deferred during prior intermediate waves has been resolved.
 
@@ -890,38 +890,31 @@ Before moving the plan file, closing the linked todo, or running branch completi
    - Compute `still_failing_deferred := deferred_integration_regressions ∩ current_failing`.
    - Compute `cleared_deferred := deferred_integration_regressions \ current_failing`.
    - Set `deferred_integration_regressions := still_failing_deferred`.
-   - Compute `new_regressions_after_deferment := current_failing \ (baseline_failures ∪ deferred_integration_regressions)` — brand-new regressions that first surface at the Step 15 run and were neither pre-existing nor previously deferred.
    - If `cleared_deferred` is non-empty, report: "✅ Cleared deferred regressions: `<list>`".
 
-3. **Gate on `still_failing_deferred` and `new_regressions_after_deferment`:**
-   - If both `still_failing_deferred` and `new_regressions_after_deferment` are **empty**: the gate passes. Proceed to `### 1. Move plan to done`.
-   - If either set is **non-empty**: the plan cannot be marked complete. Brand-new regressions appearing at the Step 15 run are treated the same as still-failing deferred regressions — both block completion and must be debugged or the plan stopped. Present the following report and menu:
+3. **Gate on `still_failing_deferred`:**
+   - If `still_failing_deferred` is **empty**: the gate passes. Proceed to `### 1. Move plan to done`.
+   - If `still_failing_deferred` is **non-empty**: the plan cannot be marked complete. Present the following report and menu:
 
    ```
-   🚫 Plan completion blocked: <N> deferred and <M> new integration regression(s) still failing.
+   ⚠️ Final completion blocked: <N> deferred integration regression(s) are still failing.
 
-   ### Deferred integration regressions still failing
-   <list of tests in still_failing_deferred — render `(none)` if empty>
+   Still-failing deferred integration regressions:
+     <list of tests in still_failing_deferred>
 
-   ### New regressions at final gate
-   <list of tests in new_regressions_after_deferment — render `(none)` if empty>
-
-   These regressions were introduced by this plan (either deferred during execution or
-   first observed at the final gate). They must be resolved before the plan can be
-   marked complete.
+   These regressions were introduced by this plan and deferred during execution.
+   They must be resolved before the plan can be marked complete.
 
    Options:
-   (a) Debug failures now — dispatch a systematic-debugging pass against the union of
-                            still_failing_deferred and new_regressions_after_deferment,
-                            then remediate
-   (c) Stop execution     — halt plan execution; all committed wave commits are preserved as checkpoints
+   (a) Debug failures now — run the Step 11 debugger-first flow against the deferred regressions; on success, re-enter this gate.
+   (c) Stop execution     — halt plan execution; all committed wave commits are preserved as checkpoints.
    ```
 
 4. **Menu actions:**
-   - **(a) Debug failures now:** Run the debugger-first flow from Step 11 ("Debugger-first flow"), scoped to the union of `still_failing_deferred` and `new_regressions_after_deferment`. After debugging and remediation, re-run this entire gate from step 1. Repeat until both sets are empty or the user picks `(c)`. Each debugging attempt counts toward the Step 12 retry budget for the implicated tasks.
-   - **(c) Stop execution:** Halt execution. Report partial progress via Step 13 (including the non-empty `deferred_integration_regressions` and any `new_regressions_after_deferment`). Do NOT move the plan file, close the todo, or run branch completion.
+   - **(a) Debug failures now:** Run the debugger-first flow from Step 11 ("Debugger-first flow"), scoped to `still_failing_deferred`. After debugging and remediation, re-run this entire gate from step 1 (which re-runs the suite, re-reconciles, and recomputes `still_failing_deferred`). Repeat until `still_failing_deferred` is empty or the user picks `(c)`. Each debugging attempt counts toward the Step 12 retry budget for the implicated tasks.
+   - **(c) Stop execution:** Halt execution. Report partial progress via Step 13 (including the non-empty `deferred_integration_regressions`). Do NOT move the plan file, close the todo, or run branch completion.
 
-**Blocking guarantee:** Steps `### 1. Move plan to done`, `### 2. Close linked todo`, and `### 4. Branch completion` MUST NOT execute while either `still_failing_deferred` or `new_regressions_after_deferment` is non-empty. The only exits from this gate are: (a) both sets become empty (gate passes), or (b) the user selects `(c) Stop execution`.
+**Blocking guarantee:** Steps `### 1. Move plan to done`, `### 2. Close linked todo`, and `### 4. Branch completion` MUST NOT execute while `still_failing_deferred` is non-empty. The only exits from this gate are: (a) `still_failing_deferred` becomes empty (gate passes), or (b) the user selects `(c) Stop execution`.
 
 ### 1. Move plan to done
 
