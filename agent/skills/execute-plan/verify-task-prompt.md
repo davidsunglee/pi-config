@@ -14,7 +14,7 @@ Prompt template dispatched to `verifier` subagents for a single plan task. Fill 
 
 The orchestrator has already executed every command-style `Verify:` recipe for this task and captured the exact command, exit status, stdout, and stderr. You MUST rely on this evidence for command-style recipes — do NOT re-run commands.
 
-Each block has the header `[Evidence for Criterion N]` (where `N` is the 1-based criterion number in plan order), followed by these fields in this order: `command: <exact command>`, `exit_code: <N>`, `stdout:` (fenced), `stderr:` (fenced). If a criterion has no command-style recipe, it has no evidence block — gaps in numbering are expected. Cite a block as `evidence: Evidence for Criterion N` in your per-criterion verdicts.
+Each block has the header `[Evidence for Criterion N]` (where `N` is the 1-based criterion number in plan order), followed by these fields in this order: `command: <exact command>`, `exit_code: <status>`, `stdout:` (fenced), `stderr:` (fenced). If a criterion has no command-style recipe, it has no evidence block — gaps in numbering are expected. Cite a block as `evidence: Evidence for Criterion N` in your per-criterion verdicts.
 
 {ORCHESTRATOR_COMMAND_EVIDENCE}
 
