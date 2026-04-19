@@ -156,7 +156,7 @@ Read the review output file. Parse for the Status line (`**[Approved]**` or `**[
   - **Task N**: <full suggestion text from review, including "What", "Why it matters", and "Recommendation">
   ```
   The review file at `.pi/plans/reviews/` is kept for reference (do not delete it).
-- Proceed to Step 5.
+- Proceed to Step 5 (commit).
 
 **If Issues Found (errors):**
 - Continue to Step 4.3.
@@ -209,7 +209,22 @@ If **(a):** increment era (v1 → v2), create a new versioned review file (e.g.,
 
 If **(b):** proceed to Step 5 with outstanding findings noted.
 
-## Step 5: Report result
+## Step 5: Commit artifacts
+
+Commit the plan file and every review artifact produced during this run using the `commit` skill. Specify the concrete file paths explicitly — no globs, no wildcards — so only these files are committed.
+
+As you run the review-edit loop, keep a running list of the exact review file paths written in Step 4.1, one entry per era (e.g., `.pi/plans/reviews/<plan-basename>-plan-review-v1.md`, `.pi/plans/reviews/<plan-basename>-plan-review-v2.md`, …). Each era overwrites its own versioned file in place per Step 4.4, so the list contains one concrete path per era that actually ran, with `<plan-basename>` resolved from the plan filename (no wildcard in the final value).
+
+When invoking the `commit` skill, pass the following concrete paths:
+
+- The plan path from Step 3 (e.g., `.pi/plans/<date>-<short-description>.md`), with `<date>` and `<short-description>` resolved to the actual filename.
+- Each review path from the tracked list above, fully resolved (v1, v2, …, through the current era). Only include versions that were actually written during this run — if the user never chose **(a) Keep iterating** in Step 4.4, this is a single-element list containing the v1 path.
+
+Do not pass a glob or wildcard pattern to `commit`; pass the explicit, fully resolved list of paths from this run so older same-basename reviews from prior runs are not accidentally staged.
+
+Do not push. Do not auto-invoke execute-plan — that remains the user's choice in Step 6.
+
+## Step 6: Report result
 
 - Show the path to the generated plan file (e.g., `.pi/plans/2026-04-13-my-feature.md`)
 - Report the review status:
