@@ -273,22 +273,34 @@ TEST_OUTPUT=$(<test_command> 2>&1)
 TEST_EXIT=$?
 ```
 
+#### Identifier-extraction contract
+
+Baseline capture and every post-wave integration classification (Step 11) use the SAME rule for turning test-runner output into a set of failing-test identifiers. Do not use failure counts, exit-code deltas, or any other heuristic — the three-set model in Step 11 requires exact identifier equality, so Step 7 and Step 11 must extract identifiers identically.
+
+A "test identifier" is the suite-native unique name for a single failing test, taken verbatim from the test runner's failure output. Examples by runner:
+
+- `go test ./...` — `<package>.<TestName>` or `<package>/<TestName>` exactly as printed on `--- FAIL:` lines
+- `pytest` — the `nodeid`, e.g. `tests/test_foo.py::test_bar` or `tests/test_foo.py::TestX::test_bar`
+- `cargo test` — the fully qualified test path printed on `test <path> ... FAILED`
+- `npm test` / Jest / Vitest — the file path plus test name, e.g. `src/foo.test.ts > describe > it`
+- Other runners — use the runner's own unique per-test identifier verbatim; never synthesize or normalize
+
+Extract one identifier per failing test. Strip surrounding whitespace but do NOT lowercase, reorder, or otherwise transform the identifier. The resulting collection is a set (deduplicated). This set — not a count — is what gets stored and compared. If the runner's output does not yield a stable per-test identifier for a particular failure (e.g. a crash before test names are printed), record that failure's raw line as the identifier so it still participates in set equality; do NOT silently drop it.
+
+#### Baseline recording
+
 **If exit code 0 (all tests pass):**
-Record a clean baseline. Any post-wave test failure is a regression introduced by the plan execution.
+Record `baseline_failures := ∅` (the empty set). Any post-wave failing-test identifier that is not later classified as a deferred integration regression is a regression introduced by the plan execution.
 
 **If exit code non-zero (some tests fail):**
-Warn the user:
+Apply the identifier-extraction contract above to the baseline test output and record `baseline_failures` as the resulting set of identifiers. Warn the user:
 ```
 ⚠️ Baseline: N tests already failing before execution.
 New failures only will be flagged after each wave.
 ```
-Record the test output (failing test names/count). Proceed with execution — pre-existing failures will be excluded from the pass/fail decision after each wave.
+`baseline_failures` is frozen at this point and never mutated for the rest of the plan run — subsequent waves only compare against it, never modify it. Proceed with execution; pre-existing failures are excluded from the pass/fail decision after each wave via the Step 11 three-set classification.
 
-**How to distinguish new failures from pre-existing ones:**
-- After each wave, run the test command again and compare the output against the baseline.
-- If the set of failing tests is the same as (or a subset of) the baseline, treat it as a pass — no regressions introduced.
-- If new test names appear in the failures that were not in the baseline, treat it as a fail — regressions introduced.
-- A simple heuristic: if the exit code is non-zero and the count of failing tests increased, or if any new test name appears in the output that wasn't in the baseline output, flag it as a regression.
+**How new failures are distinguished from pre-existing ones:** Step 11's reconciliation uses exact set operations on identifiers extracted via the same contract above (`baseline_failures`, `deferred_integration_regressions`, `current_failing`). There is no count-based or heuristic fallback — a test is a new regression if and only if its identifier appears in the current run and is not in either tracked set. Step 7 and Step 11 MUST use the same extraction logic so the sets are comparable.
 
 ## Step 8: Execute waves
 
@@ -518,7 +530,7 @@ Run this gate once per wave after Step 9.5 has exited (every `BLOCKED` task has 
 
 ### 1. Collect concerned tasks
 
-Build `CONCERNED_TASKS` = the ordered list of every task in the wave whose Step 9 status was `DONE_WITH_CONCERNS`. For each entry, carry along the task id, the worker's `## Concerns` section, the typed label(s) parsed in Step 9 (`correctness`, `scope`, `observation`), and the list of files the task modified (the worker's `## Files Changed` paths). A single task may carry multiple concerns with mixed types. If `CONCERNED_TASKS` is empty, skip this gate entirely and proceed to Step 10.
+Build `CONCERNED_TASKS` = the ordered list of every task in the wave whose Step 9 status was `DONE_WITH_CONCERNS`. For each entry, carry along the task id, the worker's `## Concerns / Needs / Blocker` section, the typed label(s) parsed in Step 9 (`correctness`, `scope`, `observation`), and the list of files the task modified (the worker's `## Files Changed` paths). A single task may carry multiple concerns with mixed types. If `CONCERNED_TASKS` is empty, skip this gate entirely and proceed to Step 10.
 
 ### 2. Present a single combined view
 
@@ -652,7 +664,16 @@ The verifier returns a report with two sections: `## Per-Criterion Verdicts` and
 
 Acceptance criteria are binary: each criterion is either `PASS` or `FAIL`. No "partial pass", no "pass with concerns", no soft verdicts. A single `[Criterion N] FAIL` causes `VERDICT: FAIL` for the task.
 
-If the verifier output does not conform to the required shape — missing sections, malformed headers, a `verdict:` prefix, missing criterion numbers, or an unparseable overall verdict — treat the response as a protocol error and route the task into Step 12's retry loop exactly as if it had returned `VERDICT: FAIL`. Do not attempt to interpret malformed verdicts as passes.
+**Full-coverage requirement.** Let `K` be the total number of acceptance criteria for the task (numbered `1..K` in plan order, the same numbering passed in via `{ACCEPTANCE_CRITERIA_WITH_VERIFY}`). The verifier output MUST contain exactly one `[Criterion N]` header for every `N ∈ {1..K}` — no more, no less. Parse the set of criterion numbers `S := { N : the output contains a header "[Criterion N] <PASS|FAIL>" }` and check all four conditions:
+
+1. **Count.** `|S| == K` — every criterion has a verdict block.
+2. **Coverage.** `S == {1..K}` — no criterion number in `1..K` is missing.
+3. **Uniqueness.** No criterion number appears in two or more `[Criterion N]` headers (duplicates are a protocol error even if both duplicates agree on `PASS`/`FAIL`).
+4. **Range.** No `[Criterion N]` header appears with `N < 1` or `N > K` (out-of-range criterion numbers are a protocol error).
+
+If any of the four conditions fails, the verifier output is a protocol error. Do NOT partial-parse the subset of well-formed blocks; do NOT treat the task as passing; do NOT treat only-present criteria as the authoritative verdict. Route the task directly into Step 12's retry loop exactly as if it had returned `VERDICT: FAIL`, and include in the retry input a concrete description of the protocol violation (e.g. "missing [Criterion 3]", "duplicate [Criterion 2]", "out-of-range [Criterion 5] when K=4") so the re-dispatched verifier has a concrete target to fix.
+
+The same protocol-error routing applies to the other malformations already enumerated: missing sections, malformed headers, a `verdict:` prefix, lowercase verdict tokens, or an unparseable overall verdict line. Protocol errors never pass the wave gate and are never silently interpreted as `PASS`.
 
 Route the parsed result:
 
@@ -737,27 +758,37 @@ After every post-wave integration test run, and before classifying pass/fail, co
 
 #### Pass/fail classification
 
-- **Pass:** `new_regressions_after_deferment` is empty. Report briefly ("✅ Integration tests pass after wave `<N>` (no new regressions)") and proceed to the next wave. Any remaining `baseline_failures` and `deferred_integration_regressions` are noted but do not block.
-- **Fail:** `new_regressions_after_deferment` is non-empty. Present the user-facing failure report and menu below.
+- **Pass:** `new_regressions_after_deferment` is empty. Proceed to the next wave. The user-facing summary is formatted per the rules below (brief on a fully-clean suite; three-section block otherwise).
+- **Fail:** `new_regressions_after_deferment` is non-empty. Present the three-section report (below) followed by the failure menu.
 
-#### User-facing failure report
+#### User-facing summary
 
-When `new_regressions_after_deferment` is non-empty, present a report with exactly these three separately-headed sections, in this order:
+The user-facing summary uses one of two formats, depending on whether the suite is clean:
 
-```
-❌ Integration tests failed after wave <N>.
+- **Fully-clean suite** — `baseline_failures ∩ current_failing`, post-reconciliation `deferred_integration_regressions`, and `new_regressions_after_deferment` are ALL empty. Report briefly, without the three-section block:
 
-### Baseline failures
-<list of tests in baseline_failures ∩ current_failing — pre-existing, not plan-introduced>
+  ```
+  ✅ Integration tests pass after wave <N> (no failures).
+  ```
 
-### Deferred integration regressions
-<list of tests in deferred_integration_regressions (post-reconciliation) — plan-introduced regressions the user chose to defer>
+- **Not fully clean** — any of the three sets above is non-empty (including the pass path where `new_regressions_after_deferment` is empty but baseline failures or deferred regressions remain). Present exactly these three separately-headed sections, in this order, regardless of whether the overall classification is pass or fail:
 
-### New regressions in this wave
-<list of tests in new_regressions_after_deferment — plan-introduced regressions first observed in this wave>
-```
+  ```
+  <header line — see below>
 
-Each section MUST be present even if its list is empty (render an empty list as `(none)`), and the section headings MUST be the exact strings `Baseline failures`, `Deferred integration regressions`, and `New regressions in this wave`. The `(a)` and `(b)` menu actions below operate only on the "New regressions in this wave" list — i.e. on `new_regressions_after_deferment`.
+  ### Baseline failures
+  <list of tests in baseline_failures ∩ current_failing — pre-existing, not plan-introduced>
+
+  ### Deferred integration regressions
+  <list of tests in deferred_integration_regressions (post-reconciliation) — plan-introduced regressions the user chose to defer>
+
+  ### New regressions in this wave
+  <list of tests in new_regressions_after_deferment — plan-introduced regressions first observed in this wave>
+  ```
+
+  The header line is `✅ Integration tests pass after wave <N> (no new regressions; baseline and/or deferred failures remain — see below).` on the pass path, and `❌ Integration tests failed after wave <N>.` on the fail path.
+
+  Each of the three sections MUST be present even if its list is empty (render an empty list as `(none)`), and the section headings MUST be the exact strings `Baseline failures`, `Deferred integration regressions`, and `New regressions in this wave`. On the pass path, the "New regressions in this wave" section is rendered as `(none)` by construction. The `(a)` and `(b)` menu actions — which only appear on the fail path — operate only on the "New regressions in this wave" list (i.e. on `new_regressions_after_deferment`).
 
 #### Menu
 
@@ -803,9 +834,12 @@ When the user chooses **(a) Debug failures**, do NOT re-dispatch every task in t
    - The required report shape: either `STATUS: DONE` with the fix applied and RED/GREEN evidence for the regression test, or `STATUS: DONE_WITH_CONCERNS` containing a `## Diagnosis` section naming the implicated task(s), the root cause, and the minimal change needed.
 
 3. **Handle the debugging pass result:**
-   - **Diagnosed and fixed (`STATUS: DONE`):** Re-run the test command. If it now matches the baseline (pass), add a follow-up commit (`git commit -m "fix(plan): wave <N> regression — <short summary>"`) and proceed to the next wave. If tests still fail, treat it as a failed debugging pass (below).
-   - **Diagnosis only (`STATUS: DONE_WITH_CONCERNS` with `## Diagnosis`):** Use the diagnosis to dispatch a **targeted remediation** — a second `coder` dispatch scoped to only the implicated task(s)/files from the diagnosis. Include the diagnosis text, the failing test output, and the original task spec(s) for the implicated task(s). After that dispatch returns, re-run the test command. If it now passes, add a follow-up commit (`git commit -m "fix(plan): wave <N> regression — <short summary>"`) and proceed to the next wave. If tests still fail, treat it as a failed debugging pass.
-   - **Failed debugging pass** (blocker, or fix did not resolve failures): re-present the integration-failure menu to the user in its wave-appropriate form — the intermediate-wave menu (`(a) Debug failures`, `(b) Defer integration debugging`, `(c) Stop execution`) when the current wave is not the final wave, or the final-wave menu (`(a) Debug failures`, `(c) Stop execution`, with no defer option) when it is. Count this attempt toward the Step 12 retry limit.
+
+   In both sub-cases below, success after a remediation attempt is judged by re-running the Step 11 reconciliation logic — NOT by requiring the suite to fully pass or match the baseline. The attempt succeeds when, after re-running the test command and feeding the output through reconciliation, `new_regressions_after_deferment` is empty. Any pre-existing baseline failures and previously-deferred regressions are allowed to remain; the remediation only has to clear the new regressions that triggered this debugging pass. Rerunning reconciliation also updates `deferred_integration_regressions` via the normal rule (clearing any deferred identifier no longer in `current_failing`), so an incidentally-fixed deferred regression is reported under "Cleared deferred regressions" just like any other reconciliation pass.
+
+   - **Diagnosed and fixed (`STATUS: DONE`):** Re-run the test command, then apply the Step 11 "Reconciliation" sub-section to the output. If `new_regressions_after_deferment` is empty after reconciliation, the remediation succeeded: add a follow-up commit (`git commit -m "fix(plan): wave <N> regression — <short summary>"`) and proceed to the next wave. If `new_regressions_after_deferment` is non-empty, treat it as a failed debugging pass (below).
+   - **Diagnosis only (`STATUS: DONE_WITH_CONCERNS` with `## Diagnosis`):** Use the diagnosis to dispatch a **targeted remediation** — a second `coder` dispatch scoped to only the implicated task(s)/files from the diagnosis. Include the diagnosis text, the failing test output, and the original task spec(s) for the implicated task(s). After that dispatch returns, re-run the test command and apply the Step 11 reconciliation logic. If `new_regressions_after_deferment` is empty after reconciliation, the remediation succeeded: add a follow-up commit (`git commit -m "fix(plan): wave <N> regression — <short summary>"`) and proceed to the next wave. If `new_regressions_after_deferment` is non-empty, treat it as a failed debugging pass.
+   - **Failed debugging pass** (blocker, or post-reconciliation `new_regressions_after_deferment` is still non-empty): re-present the integration-failure menu to the user in its wave-appropriate form — the intermediate-wave menu (`(a) Debug failures`, `(b) Defer integration debugging`, `(c) Stop execution`) when the current wave is not the final wave, or the final-wave menu (`(a) Debug failures`, `(c) Stop execution`, with no defer option) when it is. Count this attempt toward the Step 12 retry limit.
 
 4. **Do NOT re-dispatch unaffected wave tasks** unless the diagnosis explicitly implicates them. Avoiding blanket re-runs is the point of this flow.
 
