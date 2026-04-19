@@ -196,7 +196,7 @@ Orchestrates plan creation from a todo, spec file, or freeform description.
 
 ### `agent/skills/execute-plan/`
 
-Orchestrates multi-wave parallel plan execution with verification, integration testing, commits, and refinement.
+Orchestrates multi-wave parallel plan execution with fresh-context verification, integration testing, commits, and refinement.
 
 - Validates the plan structure
 - Presents configurable execution settings (worktree, parallelism, TDD, integration tests, review, commits)
@@ -205,12 +205,12 @@ Orchestrates multi-wave parallel plan execution with verification, integration t
 - Captures a baseline test snapshot before the first wave
 - Dispatches `coder` subagents in parallel per wave using filled `execute-task-prompt.md` templates
 - Handles worker status codes and retries (up to 3, then escalates)
-- Verifies wave output against acceptance criteria
-- Commits each wave as a checkpoint, then runs integration tests against baseline (new failures flagged as regressions)
+- Verifies wave output in **fresh-context `verifier` subagents** dispatched via `verify-task-prompt.md` — the orchestrator collects command evidence, assembles the verifier-visible file set from the union of the task's declared `**Files:**` scope, the worker's self-report, and orchestrator-observed diff state (so a worker cannot narrow its own verification surface), and routes per-criterion `PASS`/`FAIL` verdicts
+- Commits each wave as a checkpoint, then runs integration tests and classifies failures against a three-set model (baseline failures, user-deferred regressions, new regressions in this wave); the final-wave menu has no defer option and Step 15 re-runs the same classification to block completion on any plan-introduced regression still present — including regressions introduced by Step 14 review/remediation
 - Invokes `refine-code` for the post-execution review-remediate loop
 - Moves completed plans to `done/`, closes linked todos, invokes branch completion
 
-**Files:** `SKILL.md`, `execute-task-prompt.md`
+**Files:** `SKILL.md`, `execute-task-prompt.md`, `verify-task-prompt.md`
 
 ### `agent/skills/refine-code/`
 

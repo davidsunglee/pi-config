@@ -20,15 +20,23 @@ Each block has the header `[Evidence for Criterion N]` (where `N` is the 1-based
 
 If this section is empty, the task has no command-style recipes and all verification is via file inspection or prose inspection.
 
-## Modified Files
+## Verifier-Visible Files
 
-The task modified the following files. For file-inspection recipes, read only these files plus any files explicitly named by a recipe. Do not browse the codebase.
+The orchestrator has assembled the list below as the authoritative file set for this verification. It is the deduplicated union of:
+
+1. The task's declared `**Files:**` scope from the plan (authoritative — the task is on the hook for every file it claimed),
+2. The worker's self-reported `## Files Changed` (informative but NOT authoritative on its own), and
+3. Orchestrator-observed changes in the working tree for this task (via `git status --porcelain` and `git diff HEAD`).
+
+Do NOT treat this list as a worker self-report. A worker that omits a file from its own `## Files Changed` cannot narrow this set, and a file declared in the task's `**Files:**` scope always appears here even if the worker claims it was untouched.
+
+For file-inspection recipes, read only these files plus any files explicitly named by a specific `Verify:` recipe. Do not browse the codebase.
 
 {MODIFIED_FILES}
 
 ## Diff Context
 
-The orchestrator may have truncated this diff if it exceeded a size threshold. If you see a `... [diff truncated — <N> lines, <B> bytes total; ...] ...` marker, note this in your per-criterion `reason:` where it affects judgment, and fall back to reading the file(s) in `## Modified Files` directly for any file-inspection criterion whose relevant code may lie in the truncated window.
+The orchestrator may have truncated this diff if it exceeded a size threshold. If you see a `... [diff truncated — <N> lines, <B> bytes total; ...] ...` marker, note this in your per-criterion `reason:` where it affects judgment, and fall back to reading the file(s) in `## Verifier-Visible Files` directly for any file-inspection criterion whose relevant code may lie in the truncated window.
 
 {DIFF_CONTEXT}
 
@@ -41,7 +49,7 @@ All paths in this prompt are relative to that directory unless otherwise stated.
 ## Rules
 
 - You are judge-only. Do NOT run shell commands.
-- Do NOT read files outside `## Modified Files` unless a `Verify:` recipe explicitly names them by path.
+- Do NOT read files outside `## Verifier-Visible Files` unless a `Verify:` recipe explicitly names them by path.
 - Every criterion gets a binary verdict: `PASS` or `FAIL`. Any `FAIL` means the overall verdict is `FAIL`.
 - If evidence is missing, return `FAIL` with `reason:` explaining what is missing. Do not guess.
 
