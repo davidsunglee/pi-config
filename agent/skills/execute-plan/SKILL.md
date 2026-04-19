@@ -410,9 +410,11 @@ The filled template becomes the task prompt for the `coder` subagent. The templa
 After each wave completes, process each worker response:
 
 - **DONE** → proceed to verification (Step 10).
-- **DONE_WITH_CONCERNS** → read the concerns. Correctness/scope concerns must be addressed before verification; observations can be noted and execution continues.
+- **DONE_WITH_CONCERNS** → record the task's typed concerns as reported by the worker (`Type: correctness`, `Type: scope`, `Type: observation`). Do NOT resolve the checkpoint inline. Let the wave drain, then Step 9.7 presents a single combined wave-level concerns checkpoint for all `DONE_WITH_CONCERNS` tasks in the wave before Step 10 runs. A task whose concerns lack the `Type:` prefix is treated as a protocol violation: re-dispatch that task once to the same model with an additional prompt line reminding the worker to emit typed concerns; if the re-dispatch still returns untyped concerns, treat every untyped concern as `Type: correctness` for routing purposes.
 - **NEEDS_CONTEXT** → provide the missing context and re-dispatch the task immediately.
 - **BLOCKED** → do NOT recover inline. Record the worker's blocker details with the task, leave the task marked `BLOCKED`, and let the wave drain. The combined escalation is handled in Step 9.5, which surfaces every blocked task in the wave to the user before Step 10, Step 11, or any subsequent wave runs. The four canonical interventions (more context, better model, split into sub-tasks, stop execution) live in Step 9.5.
+
+After the wave drains (i.e., every dispatched worker in the wave has returned and been classified), Step 9.5 runs first to handle any `BLOCKED` tasks. Step 9.7 then runs to handle any `DONE_WITH_CONCERNS` tasks. Only after both gates exit does Step 10 (verification) run.
 
 **Never ignore an escalation or re-dispatch the same task to the same model without changes.**
 
