@@ -819,6 +819,18 @@ Under any of (a), (b), or (c), a wave that contains at least one `BLOCKED` task,
 - Leave the plan file in `.pi/plans/` so it can be resumed.
 - Report which tasks completed, which failed, and which remain.
 
+**Deferred integration regressions:** If `deferred_integration_regressions` is non-empty at the time execution stops, include them under a dedicated heading in the partial-progress report:
+
+```
+### Deferred integration regressions (unresolved)
+<list of tests in deferred_integration_regressions>
+
+These regressions were introduced by this plan and deferred during intermediate waves.
+They remain unresolved and must be addressed before this branch is considered shippable.
+```
+
+**Persistence note:** Persisting `deferred_integration_regressions` across sessions (e.g., to a file on disk) is out of scope. If execution resumes in a new session, the deferred set must be manually reconstructed from the partial-progress report above before integration test classification can resume correctly.
+
 ## Step 14: Request code review
 
 After all waves complete successfully (and if the user chose review in Step 3):
@@ -846,6 +858,47 @@ After all waves complete successfully (and if the user chose review in Step 3):
    **Review disabled** (user chose to disable in Step 3): Skip directly to Step 15.
 
 ## Step 15: Complete
+
+### 0. Deferred integration regression gate
+
+**Skip if:** Integration tests are disabled (Step 3 settings), no test command is available, or `deferred_integration_regressions` was empty at the start of this step.
+
+Before moving the plan file, closing the linked todo, or running branch completion, verify that every integration regression deferred during prior intermediate waves has been resolved.
+
+**Gate protocol:**
+
+1. **Re-run the full integration suite** using the same test command from Step 3.
+
+2. **Apply the Step 11 reconciliation rule** against the current `deferred_integration_regressions` set:
+   - Compute `current_failing` := the set of failing-test identifiers from the just-completed run.
+   - Compute `still_failing_deferred := deferred_integration_regressions ∩ current_failing`.
+   - Compute `cleared_deferred := deferred_integration_regressions \ current_failing`.
+   - Set `deferred_integration_regressions := still_failing_deferred`.
+   - If `cleared_deferred` is non-empty, report: "✅ Cleared deferred regressions: `<list>`".
+
+3. **Gate on `still_failing_deferred`:**
+   - If `still_failing_deferred` is **empty**: the gate passes. Proceed to `### 1. Move plan to done`.
+   - If `still_failing_deferred` is **non-empty**: the plan cannot be marked complete. Present the following report and menu:
+
+   ```
+   🚫 Plan completion blocked: <N> deferred integration regression(s) still failing.
+
+   ### Deferred integration regressions still failing
+   <list of tests in still_failing_deferred>
+
+   These regressions were introduced by this plan and explicitly deferred during execution.
+   They must be resolved before the plan can be marked complete.
+
+   Options:
+   (a) Debug failures now — dispatch a systematic-debugging pass against still_failing_deferred, then remediate
+   (c) Stop execution     — halt plan execution; all committed wave commits are preserved as checkpoints
+   ```
+
+4. **Menu actions:**
+   - **(a) Debug failures now:** Run the debugger-first flow from Step 11 ("Debugger-first flow"), scoped to the tests in `still_failing_deferred`. After debugging and remediation, re-run this entire gate from step 1. Repeat until `still_failing_deferred` is empty or the user picks `(c)`. Each debugging attempt counts toward the Step 12 retry budget for the implicated tasks.
+   - **(c) Stop execution:** Halt execution. Report partial progress via Step 13 (including the non-empty `deferred_integration_regressions`). Do NOT move the plan file, close the todo, or run branch completion.
+
+**Blocking guarantee:** Steps `### 1. Move plan to done`, `### 2. Close linked todo`, and `### 4. Branch completion` MUST NOT execute while `still_failing_deferred` is non-empty. The only exits from this gate are: (a) `still_failing_deferred` becomes empty (gate passes), or (b) the user selects `(c) Stop execution`.
 
 ### 1. Move plan to done
 
