@@ -638,7 +638,7 @@ File-inspection and prose-inspection recipes (e.g. "read Step 10.2 and confirm �
 
 ### Step 10.2: Dispatch the verifier
 
-For each task in the wave (regardless of its Step 9 status, except `BLOCKED` which is already handled in Step 9.5), dispatch a fresh `verifier` subagent using the template at `agent/skills/execute-plan/verify-task-prompt.md`. The verifier does NOT run commands. It reads the command-evidence blocks produced in Step 10.1, reads only the files listed under `## Modified Files` (plus any files explicitly named by a recipe), and returns per-criterion verdicts.
+For each task in the wave (regardless of its Step 9 status, except `BLOCKED` which is already handled in Step 9.5), dispatch a fresh `verifier` subagent using the template at `agent/skills/execute-plan/verify-task-prompt.md`. The verifier does NOT run commands. It reads the command-evidence blocks produced in Step 10.1, reads only the files listed under `## Verifier-Visible Files` (plus any files explicitly named by a recipe), and returns per-criterion verdicts.
 
 Verifier dispatches for the wave run in parallel, bounded by the pi-subagent `MAX_PARALLEL_TASKS` cap (see Step 5). Do not verify sequentially — issue all verifier subagents concurrently up to the cap and wait for all of them to return before parsing in Step 10.3.
 
@@ -647,8 +647,12 @@ Fill the template's placeholders as follows:
 - `{TASK_SPEC}` — the task block from the plan, verbatim.
 - `{ACCEPTANCE_CRITERIA_WITH_VERIFY}` — the acceptance criteria list for the task, each paired with its `Verify:` recipe, numbered starting at 1.
 - `{ORCHESTRATOR_COMMAND_EVIDENCE}` — the evidence blocks collected in Step 10.1, in criterion order. If the task has no command-style recipes, leave this section empty.
-- `{MODIFIED_FILES}` — the exact list of files the worker reported as modified (from its `## Files Changed` section), as a newline-separated list of paths.
-- `{DIFF_CONTEXT}` — the uncommitted wave diff against `HEAD`, produced as follows. For tracked files modified in this wave, use `git diff HEAD -- <modified files>`. For newly created (untracked) files, `git diff HEAD` does not produce output; instead, generate a diff for each new file via `git diff --no-index /dev/null -- <file>` (which produces a unified diff showing the entire file as added). Concatenate both outputs into a single diff block. To identify which files are new vs. modified, check `git status --porcelain -- <modified files>`: entries prefixed with `??` are untracked/new; all others are tracked modifications. This reflects the working tree vs. the last commit, which is where wave changes live before Step 11's commit. Do NOT substitute a committed-range diff (e.g. a diff between `HEAD` and a prior commit) or a `--staged` diff; wave changes have not been committed yet. **Diff truncation rule:** If the combined diff output exceeds **500 lines or 40 KB**, truncate it by keeping the **first 300 lines**, appending a single marker line of the exact form `... [diff truncated — <total_lines> lines, <total_bytes> bytes total; verifier should note this and apply judgment for file-inspection criteria where the relevant code may be outside the truncated window] ...` (where `<total_lines>` and `<total_bytes>` are the pre-truncation totals), then keeping the **last 100 lines**. Never silently drop diff output. If a file-inspection criterion cannot be judged because the relevant hunk falls inside the truncated window, the verifier should read the named file(s) directly from `## Modified Files` rather than guessing. **Sub-task dispatch carve-out:** Sub-task dispatches from Step 9.5 §5 (split-into-sub-tasks) MUST occur pre-commit — their changes must remain in the working tree at Step 10 time so `git diff HEAD` captures them alongside the rest of the wave. Step 11's commit is the only sanctioned transition from working tree to committed state for wave changes, and it runs after Step 10. If for any reason a sub-task's changes were committed before Step 10 runs for this wave (a protocol violation that should not normally occur), substitute `git diff <pre-subtask-commit>..HEAD -- <modified files>` for those criteria so the verifier still sees the sub-task's changes; otherwise file-inspection criteria will fail for insufficient evidence even though the work was done.
+- `{MODIFIED_FILES}` — the orchestrator-assembled verifier-visible file set, as a newline-separated, deduplicated list of paths. The orchestrator MUST compute this set as the union of three inputs so that the worker being judged cannot narrow its own verification surface:
+  1. **Task-declared scope.** Every path listed in the plan task's `**Files:**` section, verbatim. A task that declares a file is on the hook for that file regardless of whether the worker reported touching it.
+  2. **Worker-reported changes.** The paths listed in the worker's `## Files Changed` section. These are informative but NOT authoritative on their own — a worker that omits a file it actually modified cannot hide that file from the verifier.
+  3. **Orchestrator-observed diff state.** The paths surfaced by `git status --porcelain` (working tree and index, relative to the last commit) for the wave, plus any files present in the wave's `git diff HEAD` output. In parallel-wave dispatch where multiple tasks share the working tree, scope this to files that plausibly belong to this task — at minimum include every path from inputs 1 and 2 that also appears in the orchestrator-observed set, and include any additional orchestrator-observed paths that fall under the task's declared `**Files:**` directories. Include all orchestrator-observed paths when the wave contains only this task.
+  Deduplicate the union and present it as the verifier-visible file set. Explicitly record in the prompt that this set is orchestrator-assembled so the verifier knows it is not simply the worker's self-report.
+- `{DIFF_CONTEXT}` — the uncommitted wave diff against `HEAD`, produced as follows. For tracked files modified in this wave, use `git diff HEAD -- <modified files>`. For newly created (untracked) files, `git diff HEAD` does not produce output; instead, generate a diff for each new file via `git diff --no-index /dev/null -- <file>` (which produces a unified diff showing the entire file as added). Concatenate both outputs into a single diff block. To identify which files are new vs. modified, check `git status --porcelain -- <modified files>`: entries prefixed with `??` are untracked/new; all others are tracked modifications. This reflects the working tree vs. the last commit, which is where wave changes live before Step 11's commit. Do NOT substitute a committed-range diff (e.g. a diff between `HEAD` and a prior commit) or a `--staged` diff; wave changes have not been committed yet. **Diff truncation rule:** If the combined diff output exceeds **500 lines or 40 KB**, truncate it by keeping the **first 300 lines**, appending a single marker line of the exact form `... [diff truncated — <total_lines> lines, <total_bytes> bytes total; verifier should note this and apply judgment for file-inspection criteria where the relevant code may be outside the truncated window] ...` (where `<total_lines>` and `<total_bytes>` are the pre-truncation totals), then keeping the **last 100 lines**. Never silently drop diff output. If a file-inspection criterion cannot be judged because the relevant hunk falls inside the truncated window, the verifier should read the named file(s) directly from `## Verifier-Visible Files` rather than guessing. **Sub-task dispatch carve-out:** Sub-task dispatches from Step 9.5 §5 (split-into-sub-tasks) MUST occur pre-commit — their changes must remain in the working tree at Step 10 time so `git diff HEAD` captures them alongside the rest of the wave. Step 11's commit is the only sanctioned transition from working tree to committed state for wave changes, and it runs after Step 10. If for any reason a sub-task's changes were committed before Step 10 runs for this wave (a protocol violation that should not normally occur), substitute `git diff <pre-subtask-commit>..HEAD -- <modified files>` for those criteria so the verifier still sees the sub-task's changes; otherwise file-inspection criteria will fail for insufficient evidence even though the work was done.
 - `{WORKING_DIR}` — the plan's working directory.
 
 **Verifier model tier:** Default the verifier's model to `standard`. If the verified task itself ran at `capable`, upgrade the verifier to `capable` so its judgment matches the task's complexity. Never downgrade below `standard`.
@@ -747,7 +751,7 @@ The post-wave integration run is classified against three explicitly tracked set
 
 After every post-wave integration test run, and before classifying pass/fail, compute the transient `current_failing` from the run output and reconcile `deferred_integration_regressions` against it, then derive `new_regressions_after_deferment`:
 
-1. Compute `current_failing` := the set of failing-test identifiers reported by the just-completed integration run. This value is transient — used only as input to steps 2–4 below and discarded after this reconciliation.
+1. Compute `current_failing` := the set of failing-test identifiers reported by the just-completed integration run, extracted via the Step 7 identifier-extraction contract so the identifiers are directly comparable with `baseline_failures` and `deferred_integration_regressions`. This value is transient — used only as input to steps 2–4 below and discarded after this reconciliation.
 2. Compute `still_failing_deferred := deferred_integration_regressions ∩ current_failing` — deferred regressions that are still failing.
 3. Compute `cleared_deferred := deferred_integration_regressions \ current_failing` — deferred regressions that are no longer failing (either the wave's changes fixed them, or the suite's output no longer includes them). Report these briefly in the pass/fail output as "Cleared deferred regressions: <list>".
 4. Set `deferred_integration_regressions := still_failing_deferred`. Any deferred regression not in the current failing set is removed from the tracked set — the orchestrator does NOT carry stale identifiers forward.
@@ -817,7 +821,7 @@ Options:
 
 The defer option is intentionally removed on the final wave: there is no subsequent wave to carry deferred regressions into, and the precondition that final completion is blocked until all plan-introduced regressions are resolved forbids silently shipping them. On the final wave, the user MUST either debug or stop.
 
-- **(a) Debug failures:** Same as the intermediate-wave `(a)` — run the debugger-first flow scoped to `new_regressions_after_deferment`, counting toward the Step 12 retry limit. Deferred regressions from prior waves are NOT handled here; they are cleared by Step 15's "Deferred integration regression gate (precondition)" before the plan can report success.
+- **(a) Debug failures:** Same as the intermediate-wave `(a)` — run the debugger-first flow scoped to `new_regressions_after_deferment`, counting toward the Step 12 retry limit. Deferred regressions from prior waves are NOT handled here; they are cleared by Step 15's "Final integration regression gate (precondition)" before the plan can report success. The same final gate also catches any regression introduced after this final wave (e.g. by Step 14 review/remediation) via the same three-set classification used here.
 - **(c) Stop execution:** Halt execution. Prior wave commits are preserved as checkpoints. Report partial progress (Step 13).
 
 ### Debugger-first flow
@@ -909,48 +913,58 @@ After all waves complete successfully (and if the user chose review in Step 3):
 
 ## Step 15: Complete
 
-### Deferred integration regression gate (precondition)
+### Final integration regression gate (precondition)
 
 **Skip if:** Integration tests are disabled (Step 3 settings) or no test command is available.
 
-**Always run otherwise.** Whenever integration tests are enabled and a test command exists, this gate runs regardless of whether deferment occurred during execution. This avoids requiring the workflow to track whether `deferred_integration_regressions` was ever non-empty — a final integration check is cheap and confirms no regressions slipped through.
+**Always run otherwise.** Whenever integration tests are enabled and a test command exists, this gate runs regardless of whether deferment occurred during execution and regardless of whether Step 14 review/remediation produced follow-up commits. A final integration check is cheap and confirms that no plan-introduced regression — whether previously deferred by the user or freshly introduced by Step 14 remediation — slipped through to completion.
 
-Before moving the plan file, closing the linked todo, or running branch completion, verify that every integration regression deferred during prior intermediate waves has been resolved.
+Before moving the plan file, closing the linked todo, or running branch completion, verify that **no plan-introduced integration regression remains**. This includes (a) regressions the user deferred during intermediate waves and (b) any regressions that surfaced for the first time in the final integration run — for example, regressions introduced by the Step 14 review/remediation commits after the final wave's own integration check.
 
 **Gate protocol:**
 
-1. **Re-run the full integration suite** using the same test command from Step 3.
+1. **Re-run the full integration suite** using the same test command from Step 3. Apply the Step 7 identifier-extraction contract to the runner's failure output so identifiers are directly comparable with `baseline_failures` and `deferred_integration_regressions`.
 
-2. **Apply the Step 11 reconciliation rule** against the current `deferred_integration_regressions` set:
+2. **Apply the full Step 11 three-set classification** against the run output. This is the same classification used after every wave — reuse it verbatim so the final gate cannot silently miss a regression that Step 11 would have surfaced:
    - Compute `current_failing` := the set of failing-test identifiers from the just-completed run.
    - Compute `still_failing_deferred := deferred_integration_regressions ∩ current_failing`.
    - Compute `cleared_deferred := deferred_integration_regressions \ current_failing`.
-   - Set `deferred_integration_regressions := still_failing_deferred`.
+   - Set `deferred_integration_regressions := still_failing_deferred` (reconciliation, per Step 11).
    - If `cleared_deferred` is non-empty, report: "✅ Cleared deferred regressions: `<list>`".
+   - Compute `new_regressions_after_deferment := current_failing \ (baseline_failures ∪ deferred_integration_regressions)` — the set of plan-introduced regressions that are neither pre-existing baseline failures nor previously-deferred regressions. On this gate, a non-empty value typically means Step 14 review/remediation (or another post-final-wave change) introduced a fresh regression that no wave's integration menu had a chance to surface.
 
-3. **Gate on `still_failing_deferred`:**
-   - If `still_failing_deferred` is **empty**: the gate passes. Proceed to `### 1. Move plan to done`.
-   - If `still_failing_deferred` is **non-empty**: the plan cannot be marked complete. Present the following report and menu:
+3. **Gate on the union `still_failing_deferred ∪ new_regressions_after_deferment`:**
+   - If **both** sets are empty: the gate passes. Proceed to `### 1. Move plan to done`.
+   - If **either** set is non-empty: the plan cannot be marked complete. Present the report and menu below.
+
+   Report format (always use the Step 11 "three-section block" — do NOT collapse it, even if one section is empty, so the user sees the full final-state picture):
 
    ```
-   ⚠️ Final completion blocked: <N> deferred integration regression(s) are still failing.
+   ⚠️ Final completion blocked: plan-introduced integration regressions remain.
 
-   Still-failing deferred integration regressions:
-     <list of tests in still_failing_deferred>
+   ### Baseline failures
+   <list of tests in baseline_failures ∩ current_failing — pre-existing, not plan-introduced>
 
-   These regressions were introduced by this plan and deferred during execution.
-   They must be resolved before the plan can be marked complete.
+   ### Deferred integration regressions
+   <list of tests in deferred_integration_regressions (post-reconciliation) — plan-introduced regressions the user chose to defer>
+
+   ### New regressions in this wave
+   <list of tests in new_regressions_after_deferment — on Step 15 this section represents plan-introduced regressions first observed at this final check (typically introduced by Step 14 remediation), reported under the same Step 11 heading so the three-section contract is identical>
+
+   These regressions were introduced by this plan. They must be resolved before the plan can be marked complete.
 
    Options:
-   (a) Debug failures now — run the Step 11 debugger-first flow against the deferred regressions; on success, re-enter this gate.
+   (a) Debug failures now — run the Step 11 debugger-first flow against the plan-introduced regressions (deferred ∪ new); on success, re-enter this gate.
    (c) Stop execution     — halt plan execution; all committed wave commits are preserved as checkpoints.
    ```
 
-4. **Menu actions:**
-   - **(a) Debug failures now:** Run the debugger-first flow from Step 11 ("Debugger-first flow"), scoped to `still_failing_deferred`. After debugging and remediation, re-run this entire gate from step 1 (which re-runs the suite, re-reconciles, and recomputes `still_failing_deferred`). Repeat until `still_failing_deferred` is empty or the user picks `(c)`. Each debugging attempt counts toward the Step 12 retry budget for the implicated tasks.
-   - **(c) Stop execution:** Halt execution. Report partial progress via Step 13 (including the non-empty `deferred_integration_regressions`). Do NOT move the plan file, close the todo, or run branch completion.
+   Empty lists render as `(none)`. The menu mirrors the Step 11 **final-wave menu** — there is no `(b) Defer` option here by design, matching the final-wave rule that plan-introduced regressions cannot be silently deferred past the point where the plan reports success.
 
-**Blocking guarantee:** Steps `### 1. Move plan to done`, `### 2. Close linked todo`, and `### 4. Branch completion` MUST NOT execute while `still_failing_deferred` is non-empty. The only exits from this gate are: (a) `still_failing_deferred` becomes empty (gate passes), or (b) the user selects `(c) Stop execution`.
+4. **Menu actions:**
+   - **(a) Debug failures now:** Run the Step 11 "Debugger-first flow" scoped to `still_failing_deferred ∪ new_regressions_after_deferment`. The debugger-first flow already re-runs the Step 11 reconciliation logic to judge success, so a remediation attempt succeeds when both `still_failing_deferred` and `new_regressions_after_deferment` are empty on the re-run. After debugging and remediation, re-run this entire gate from step 1 (which re-runs the suite, re-reconciles, and recomputes both sets). Repeat until both sets are empty or the user picks `(c)`. Each debugging attempt counts toward the Step 12 retry budget for the implicated tasks.
+   - **(c) Stop execution:** Halt execution. Report partial progress via Step 13 so the user has a complete picture of plan-introduced failures left on the branch: list any non-empty `deferred_integration_regressions` under the deferred-regressions heading, and list the still-unresolved `new_regressions_after_deferment` separately as newly discovered final-gate regressions — do NOT fold them under the deferred-regressions heading, since they were never deferred by the user. Do NOT move the plan file, close the todo, or run branch completion.
+
+**Blocking guarantee:** Steps `### 1. Move plan to done`, `### 2. Close linked todo`, and `### 4. Branch completion` MUST NOT execute while `still_failing_deferred ∪ new_regressions_after_deferment` is non-empty. The only exits from this gate are: (a) both sets become empty (gate passes), or (b) the user selects `(c) Stop execution`. Silent success on the final gate is NOT an option when Step 14 remediation has introduced a regression — the same classification model used after every wave is reused here, so any plan-introduced regression still present at Step 15 blocks normal completion regardless of whether it was previously deferred.
 
 ### 1. Move plan to done
 
