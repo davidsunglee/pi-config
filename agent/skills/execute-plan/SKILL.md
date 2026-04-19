@@ -302,6 +302,70 @@ New failures only will be flagged after each wave.
 
 **How new failures are distinguished from pre-existing ones:** Step 11's reconciliation uses exact set operations on identifiers extracted via the same contract above (`baseline_failures`, `deferred_integration_regressions`, `current_failing`). There is no count-based or heuristic fallback — a test is a new regression if and only if its identifier appears in the current run and is not in either tracked set. Step 7 and Step 11 MUST use the same extraction logic so the sets are comparable.
 
+#### Integration regression model
+
+This subsection is the single canonical definition of the three-set integration tracking model, the reconciliation algorithm, and the user-facing summary format. Step 11 (post-wave integration tests) and Step 15 (final integration regression gate) both reference this subsection rather than restating it.
+
+**The three tracked sets.** The post-wave integration run is classified against three explicitly tracked sets of test identifiers. A "test identifier" is the suite-native unique name for a failing test (e.g. file path plus test name, or fully qualified symbol), taken verbatim from the test runner's failure output per the identifier-extraction contract above.
+
+1. **`baseline_failures`** — the set of tests that failed in the Step 7 baseline run. Captured once, before any wave executes, and never mutated after baseline capture. A test in this set represents a pre-existing failure the plan did not introduce.
+2. **`deferred_integration_regressions`** — the set of tests the user has chosen to debug later via `(b) Defer integration debugging` in a prior wave's intermediate-wave menu. Starts empty at plan start. Grows only when the user selects `(b)` on an intermediate wave, and is reconciled on every subsequent integration run (see reconciliation algorithm below). These are regressions caused by this plan that the user has explicitly deferred — not pre-existing failures.
+3. **`new_regressions_after_deferment`** — the set of tests that are failing in the just-completed integration run AND are not in `baseline_failures` AND are not in the post-reconciliation `deferred_integration_regressions`. Recomputed from scratch on every post-wave integration run (it does not persist across waves). This set names the plan-introduced regressions that first surface in the current run — i.e. the ones the user has not already chosen to defer and that were not pre-existing. It is the authoritative driver of the pass/fail classification below and the target scope of the `(a) Debug failures` and `(b) Defer integration debugging` menu actions.
+
+`current_failing` is NOT one of the three tracked sets. It is a transient per-run value: the set of tests failing in the just-completed integration run, recomputed from scratch on every run, and used solely as input to the reconciliation step that derives the post-reconciliation `deferred_integration_regressions` and the fresh `new_regressions_after_deferment`. Once reconciliation computes those two tracked sets, `current_failing` is not referenced further and is not persisted across waves.
+
+**Disjointness and transition rules:**
+
+- `baseline_failures` and `deferred_integration_regressions` MUST remain disjoint. When adding a test to `deferred_integration_regressions`, first subtract `baseline_failures` from the candidate set; a test cannot simultaneously be a pre-existing baseline failure and a deferred regression.
+- `new_regressions_after_deferment` is disjoint from both `baseline_failures` and `deferred_integration_regressions` by construction (see reconciliation step 4). A test can be in at most one of the three tracked sets at any moment.
+- A test transitions out of `deferred_integration_regressions` only via the reconciliation rule below (when it is no longer failing). It never transitions into `baseline_failures` — the baseline is frozen at Step 7.
+- Only `baseline_failures` and `deferred_integration_regressions` are carried across waves. `new_regressions_after_deferment` is recomputed fresh each run (via reconciliation), and `current_failing` is purely ephemeral input to that computation.
+
+**Reconciliation algorithm.** After every integration test run (post-wave in Step 11, and the final gate in Step 15), and before classifying pass/fail, compute the transient `current_failing` from the run output and reconcile `deferred_integration_regressions` against it, then derive `new_regressions_after_deferment`:
+
+1. Compute `current_failing` := the set of failing-test identifiers reported by the just-completed integration run, extracted via the Step 7 identifier-extraction contract so the identifiers are directly comparable with `baseline_failures` and `deferred_integration_regressions`. This value is transient — used only as input to steps 2–4 below and discarded after this reconciliation.
+2. Compute `still_failing_deferred := deferred_integration_regressions ∩ current_failing` — deferred regressions that are still failing.
+3. Compute `cleared_deferred := deferred_integration_regressions \ current_failing` — deferred regressions that are no longer failing (either the wave's changes fixed them, or the suite's output no longer includes them). Report these briefly in the pass/fail output as "Cleared deferred regressions: <list>".
+4. Set `deferred_integration_regressions := still_failing_deferred`. Any deferred regression not in the current failing set is removed from the tracked set — the orchestrator does NOT carry stale identifiers forward.
+5. Assign `new_regressions_after_deferment := current_failing \ (baseline_failures ∪ deferred_integration_regressions)`. This set is empty when every currently failing test is either a pre-existing baseline failure or a previously deferred regression; it is populated when the just-completed run includes at least one failure that was neither in the baseline nor previously deferred. `new_regressions_after_deferment` is the authoritative source for:
+   - the user-facing "New regressions in this wave" section,
+   - the pass/fail classification below, and
+   - the `(a) Debug failures` and `(b) Defer integration debugging` menu actions (which operate only on the tests in this set).
+
+**Pass/fail classification (post-wave, Step 11):**
+
+- **Pass:** `new_regressions_after_deferment` is empty. Proceed to the next wave. The user-facing summary is formatted per the rules below (brief on a fully-clean suite; three-section block otherwise).
+- **Fail:** `new_regressions_after_deferment` is non-empty. Present the three-section report followed by the Step 11 failure menu.
+
+Step 15's final gate uses a stricter condition — it gates on the union `still_failing_deferred ∪ new_regressions_after_deferment` — but uses the same reconciliation algorithm and the same three-section report format defined here.
+
+**User-facing summary format.** The user-facing summary uses one of two formats, depending on whether the suite is clean:
+
+- **Fully-clean suite** — `baseline_failures ∩ current_failing`, post-reconciliation `deferred_integration_regressions`, and `new_regressions_after_deferment` are ALL empty. Report briefly, without the three-section block:
+
+  ```
+  ✅ Integration tests pass after wave <N> (no failures).
+  ```
+
+- **Not fully clean** — any of the three sets above is non-empty (including the pass path where `new_regressions_after_deferment` is empty but baseline failures or deferred regressions remain). Present exactly these three separately-headed sections, in this order, regardless of whether the overall classification is pass or fail:
+
+  ```
+  <header line — see below>
+
+  ### Baseline failures
+  <list of tests in baseline_failures ∩ current_failing — pre-existing, not plan-introduced>
+
+  ### Deferred integration regressions
+  <list of tests in deferred_integration_regressions (post-reconciliation) — plan-introduced regressions the user chose to defer>
+
+  ### New regressions in this wave
+  <list of tests in new_regressions_after_deferment — plan-introduced regressions first observed in this run>
+  ```
+
+  The header line is `✅ Integration tests pass after wave <N> (no new regressions; baseline and/or deferred failures remain — see below).` on the pass path, and `❌ Integration tests failed after wave <N>.` on the fail path.
+
+  Each of the three sections MUST be present even if its list is empty (render an empty list as `(none)`), and the section headings MUST be the exact strings `Baseline failures`, `Deferred integration regressions`, and `New regressions in this wave`. On the pass path, the "New regressions in this wave" section is rendered as `(none)` by construction. The `(a)` and `(b)` menu actions — which only appear on the fail path — operate only on the "New regressions in this wave" list (i.e. on `new_regressions_after_deferment`).
+
 ## Step 8: Execute waves
 
 Before dispatching the first wave, record the current HEAD SHA for the post-completion review:
@@ -696,69 +760,14 @@ TEST_OUTPUT=$(<test_command> 2>&1)
 TEST_EXIT=$?
 ```
 
-#### Three-set integration tracking
+#### Classification
 
-The post-wave integration run is classified against three explicitly tracked sets of test identifiers. A "test identifier" is the suite-native unique name for a failing test (e.g. file path plus test name, or fully qualified symbol), taken verbatim from the test runner's failure output.
+Apply the **Integration regression model** defined in Step 7 — specifically the Step 7 reconciliation algorithm — to the just-completed integration run. That subsection is the single canonical definition of the three tracked sets (`baseline_failures`, `deferred_integration_regressions`, `new_regressions_after_deferment`), the disjointness and transition rules, the reconciliation algorithm, and the user-facing summary format. Use it verbatim here; do not restate.
 
-1. **`baseline_failures`** — the set of tests that failed in the Step 7 baseline run. Captured once, before any wave executes, and never mutated after baseline capture. A test in this set represents a pre-existing failure the plan did not introduce.
-2. **`deferred_integration_regressions`** — the set of tests the user has chosen to debug later via `(b) Defer integration debugging` in a prior wave's intermediate-wave menu. Starts empty at plan start. Grows only when the user selects `(b)` on an intermediate wave, and is reconciled on every subsequent integration run (see below). These are regressions caused by this plan that the user has explicitly deferred — not pre-existing failures.
-3. **`new_regressions_after_deferment`** — the set of tests that are failing in the just-completed wave's integration run AND are not in `baseline_failures` AND are not in the post-reconciliation `deferred_integration_regressions`. Recomputed from scratch on every post-wave integration run (it does not persist across waves). This set names the plan-introduced regressions that first surface in the current wave — i.e. the ones the user has not already chosen to defer and that were not pre-existing. It is the authoritative driver of the pass/fail classification below and the target scope of the `(a) Debug failures` and `(b) Defer integration debugging` menu actions.
+After reconciliation:
 
-`current_failing` is NOT one of the three tracked sets. It is a transient per-run value: the set of tests failing in the just-completed integration run for wave `<N>`, recomputed from scratch on every run, and used solely as input to the reconciliation step that derives the post-reconciliation `deferred_integration_regressions` and the fresh `new_regressions_after_deferment`. Once reconciliation computes those two tracked sets, `current_failing` is not referenced further and is not persisted across waves.
-
-**Disjointness and transition rules:**
-
-- `baseline_failures` and `deferred_integration_regressions` MUST remain disjoint. When adding a test to `deferred_integration_regressions`, first subtract `baseline_failures` from the candidate set; a test cannot simultaneously be a pre-existing baseline failure and a deferred regression.
-- `new_regressions_after_deferment` is disjoint from both `baseline_failures` and `deferred_integration_regressions` by construction (see reconciliation step 4). A test can be in at most one of the three tracked sets at any moment.
-- A test transitions out of `deferred_integration_regressions` only via the reconciliation rule below (when it is no longer failing). It never transitions into `baseline_failures` — the baseline is frozen at Step 7.
-- Only `baseline_failures` and `deferred_integration_regressions` are carried across waves. `new_regressions_after_deferment` is recomputed fresh each wave (via reconciliation), and `current_failing` is purely ephemeral input to that computation.
-
-#### Reconciliation
-
-After every post-wave integration test run, and before classifying pass/fail, compute the transient `current_failing` from the run output and reconcile `deferred_integration_regressions` against it, then derive `new_regressions_after_deferment`:
-
-1. Compute `current_failing` := the set of failing-test identifiers reported by the just-completed integration run, extracted via the Step 7 identifier-extraction contract so the identifiers are directly comparable with `baseline_failures` and `deferred_integration_regressions`. This value is transient — used only as input to steps 2–4 below and discarded after this reconciliation.
-2. Compute `still_failing_deferred := deferred_integration_regressions ∩ current_failing` — deferred regressions that are still failing.
-3. Compute `cleared_deferred := deferred_integration_regressions \ current_failing` — deferred regressions that are no longer failing (either the wave's changes fixed them, or the suite's output no longer includes them). Report these briefly in the pass/fail output as "Cleared deferred regressions: <list>".
-4. Set `deferred_integration_regressions := still_failing_deferred`. Any deferred regression not in the current failing set is removed from the tracked set — the orchestrator does NOT carry stale identifiers forward.
-5. Assign `new_regressions_after_deferment := current_failing \ (baseline_failures ∪ deferred_integration_regressions)`. This set is empty when every currently failing test is either a pre-existing baseline failure or a previously deferred regression; it is populated when the just-completed wave introduced at least one failure that was neither in the baseline nor previously deferred. `new_regressions_after_deferment` is the authoritative source for:
-   - the user-facing "New regressions in this wave" section,
-   - the pass/fail classification below, and
-   - the `(a) Debug failures` and `(b) Defer integration debugging` menu actions (which operate only on the tests in this set).
-
-#### Pass/fail classification
-
-- **Pass:** `new_regressions_after_deferment` is empty. Proceed to the next wave. The user-facing summary is formatted per the rules below (brief on a fully-clean suite; three-section block otherwise).
-- **Fail:** `new_regressions_after_deferment` is non-empty. Present the three-section report (below) followed by the failure menu.
-
-#### User-facing summary
-
-The user-facing summary uses one of two formats, depending on whether the suite is clean:
-
-- **Fully-clean suite** — `baseline_failures ∩ current_failing`, post-reconciliation `deferred_integration_regressions`, and `new_regressions_after_deferment` are ALL empty. Report briefly, without the three-section block:
-
-  ```
-  ✅ Integration tests pass after wave <N> (no failures).
-  ```
-
-- **Not fully clean** — any of the three sets above is non-empty (including the pass path where `new_regressions_after_deferment` is empty but baseline failures or deferred regressions remain). Present exactly these three separately-headed sections, in this order, regardless of whether the overall classification is pass or fail:
-
-  ```
-  <header line — see below>
-
-  ### Baseline failures
-  <list of tests in baseline_failures ∩ current_failing — pre-existing, not plan-introduced>
-
-  ### Deferred integration regressions
-  <list of tests in deferred_integration_regressions (post-reconciliation) — plan-introduced regressions the user chose to defer>
-
-  ### New regressions in this wave
-  <list of tests in new_regressions_after_deferment — plan-introduced regressions first observed in this wave>
-  ```
-
-  The header line is `✅ Integration tests pass after wave <N> (no new regressions; baseline and/or deferred failures remain — see below).` on the pass path, and `❌ Integration tests failed after wave <N>.` on the fail path.
-
-  Each of the three sections MUST be present even if its list is empty (render an empty list as `(none)`), and the section headings MUST be the exact strings `Baseline failures`, `Deferred integration regressions`, and `New regressions in this wave`. On the pass path, the "New regressions in this wave" section is rendered as `(none)` by construction. The `(a)` and `(b)` menu actions — which only appear on the fail path — operate only on the "New regressions in this wave" list (i.e. on `new_regressions_after_deferment`).
+- **Pass** if `new_regressions_after_deferment` is empty. Render the user-facing summary per Step 7's format (brief on a fully-clean suite; three-section block otherwise) and proceed to the next wave.
+- **Fail** if `new_regressions_after_deferment` is non-empty. Render Step 7's three-section report and present the menu below.
 
 #### Menu
 
@@ -805,10 +814,10 @@ When the user chooses **(a) Debug failures**, do NOT re-dispatch every task in t
 
 3. **Handle the debugging pass result:**
 
-   In both sub-cases below, success after a remediation attempt is judged by re-running the Step 11 reconciliation logic — NOT by requiring the suite to fully pass or match the baseline. The attempt succeeds when, after re-running the test command and feeding the output through reconciliation, `new_regressions_after_deferment` is empty. Any pre-existing baseline failures and previously-deferred regressions are allowed to remain; the remediation only has to clear the new regressions that triggered this debugging pass. Rerunning reconciliation also updates `deferred_integration_regressions` via the normal rule (clearing any deferred identifier no longer in `current_failing`), so an incidentally-fixed deferred regression is reported under "Cleared deferred regressions" just like any other reconciliation pass.
+   In both sub-cases below, success after a remediation attempt is judged by re-running the Step 7 reconciliation algorithm — NOT by requiring the suite to fully pass or match the baseline. The attempt succeeds when, after re-running the test command and feeding the output through reconciliation, `new_regressions_after_deferment` is empty. Any pre-existing baseline failures and previously-deferred regressions are allowed to remain; the remediation only has to clear the new regressions that triggered this debugging pass. Rerunning reconciliation also updates `deferred_integration_regressions` via the normal rule (clearing any deferred identifier no longer in `current_failing`), so an incidentally-fixed deferred regression is reported under "Cleared deferred regressions" just like any other reconciliation pass.
 
-   - **Diagnosed and fixed (`STATUS: DONE`):** Re-run the test command, then apply the Step 11 "Reconciliation" sub-section to the output. If `new_regressions_after_deferment` is empty after reconciliation, the remediation succeeded: add a follow-up commit (`git commit -m "fix(plan): wave <N> regression — <short summary>"`) and proceed to the next wave. If `new_regressions_after_deferment` is non-empty, treat it as a failed debugging pass (below).
-   - **Diagnosis only (`STATUS: DONE_WITH_CONCERNS` with `## Diagnosis`):** Use the diagnosis to dispatch a **targeted remediation** — a second `coder` dispatch scoped to only the implicated task(s)/files from the diagnosis. Include the diagnosis text, the failing test output, and the original task spec(s) for the implicated task(s). After that dispatch returns, re-run the test command and apply the Step 11 reconciliation logic. If `new_regressions_after_deferment` is empty after reconciliation, the remediation succeeded: add a follow-up commit (`git commit -m "fix(plan): wave <N> regression — <short summary>"`) and proceed to the next wave. If `new_regressions_after_deferment` is non-empty, treat it as a failed debugging pass.
+   - **Diagnosed and fixed (`STATUS: DONE`):** Re-run the test command, then apply the Step 7 reconciliation algorithm to the output. If `new_regressions_after_deferment` is empty after reconciliation, the remediation succeeded: add a follow-up commit (`git commit -m "fix(plan): wave <N> regression — <short summary>"`) and proceed to the next wave. If `new_regressions_after_deferment` is non-empty, treat it as a failed debugging pass (below).
+   - **Diagnosis only (`STATUS: DONE_WITH_CONCERNS` with `## Diagnosis`):** Use the diagnosis to dispatch a **targeted remediation** — a second `coder` dispatch scoped to only the implicated task(s)/files from the diagnosis. Include the diagnosis text, the failing test output, and the original task spec(s) for the implicated task(s). After that dispatch returns, re-run the test command and apply the Step 7 reconciliation algorithm. If `new_regressions_after_deferment` is empty after reconciliation, the remediation succeeded: add a follow-up commit (`git commit -m "fix(plan): wave <N> regression — <short summary>"`) and proceed to the next wave. If `new_regressions_after_deferment` is non-empty, treat it as a failed debugging pass.
    - **Failed debugging pass** (blocker, or post-reconciliation `new_regressions_after_deferment` is still non-empty): re-present the integration-failure menu to the user in its wave-appropriate form — the intermediate-wave menu (`(a) Debug failures`, `(b) Defer integration debugging`, `(c) Stop execution`) when the current wave is not the final wave, or the final-wave menu (`(a) Debug failures`, `(c) Stop execution`, with no defer option) when it is. Count this attempt toward the Step 12 retry limit.
 
 4. **Do NOT re-dispatch unaffected wave tasks** unless the diagnosis explicitly implicates them. Avoiding blanket re-runs is the point of this flow.
@@ -891,19 +900,13 @@ Before moving the plan file, closing the linked todo, or running branch completi
 
 1. **Re-run the full integration suite** using the same test command from Step 3. Apply the Step 7 identifier-extraction contract to the runner's failure output so identifiers are directly comparable with `baseline_failures` and `deferred_integration_regressions`.
 
-2. **Apply the full Step 11 three-set classification** against the run output. This is the same classification used after every wave — reuse it verbatim so the final gate cannot silently miss a regression that Step 11 would have surfaced:
-   - Compute `current_failing` := the set of failing-test identifiers from the just-completed run.
-   - Compute `still_failing_deferred := deferred_integration_regressions ∩ current_failing`.
-   - Compute `cleared_deferred := deferred_integration_regressions \ current_failing`.
-   - Set `deferred_integration_regressions := still_failing_deferred` (reconciliation, per Step 11).
-   - If `cleared_deferred` is non-empty, report: "✅ Cleared deferred regressions: `<list>`".
-   - Compute `new_regressions_after_deferment := current_failing \ (baseline_failures ∪ deferred_integration_regressions)` — the set of plan-introduced regressions that are neither pre-existing baseline failures nor previously-deferred regressions. On this gate, a non-empty value typically means Step 14 review/remediation (or another post-final-wave change) introduced a fresh regression that no wave's integration menu had a chance to surface.
+2. **Apply the Step 7 reconciliation algorithm** to the run output. That algorithm is the single canonical definition of how to compute `current_failing`, reconcile `deferred_integration_regressions` (reporting any `cleared_deferred`), and derive `new_regressions_after_deferment`. Reuse it verbatim here so the final gate cannot silently miss a regression that a post-wave Step 11 classification would have surfaced. On this gate, a non-empty `new_regressions_after_deferment` typically means Step 14 review/remediation (or another post-final-wave change) introduced a fresh regression that no wave's integration menu had a chance to surface.
 
 3. **Gate on the union `still_failing_deferred ∪ new_regressions_after_deferment`:**
    - If **both** sets are empty: the gate passes. Proceed to `### 1. Move plan to done`.
-   - If **either** set is non-empty: the plan cannot be marked complete. Present the report and menu below.
+   - If **either** `still_failing_deferred` or `new_regressions_after_deferment` is non-empty: the plan cannot be marked complete while either set is non-empty. Present the report and menu below.
 
-   Report format (always use the Step 11 "three-section block" — do NOT collapse it, even if one section is empty, so the user sees the full final-state picture):
+   Report format (always use the Step 7 three-section block — do NOT collapse it, even if one section is empty, so the user sees the full final-state picture):
 
    ```
    ⚠️ Final completion blocked: plan-introduced integration regressions remain.
@@ -927,7 +930,7 @@ Before moving the plan file, closing the linked todo, or running branch completi
    Empty lists render as `(none)`. The menu mirrors the Step 11 **final-wave menu** — there is no `(b) Defer` option here by design, matching the final-wave rule that plan-introduced regressions cannot be silently deferred past the point where the plan reports success.
 
 4. **Menu actions:**
-   - **(a) Debug failures now:** Run the **final-gate debugger-first flow** defined below, scoped to `still_failing_deferred ∪ new_regressions_after_deferment`. That flow re-runs the Step 11 reconciliation logic to judge success, so a remediation attempt succeeds when both `still_failing_deferred` and `new_regressions_after_deferment` are empty on the re-run. After debugging and remediation, re-run this entire gate from step 1 (which re-runs the suite, re-reconciles, and recomputes both sets). Repeat until both sets are empty or the user picks `(c)`. Each debugging attempt counts toward the Step 12 retry budget for the implicated tasks.
+   - **(a) Debug failures now:** Run the **final-gate debugger-first flow** defined below, scoped to `still_failing_deferred ∪ new_regressions_after_deferment`. That flow re-runs the Step 7 reconciliation algorithm to judge success, so a remediation attempt succeeds when both `still_failing_deferred` and `new_regressions_after_deferment` are empty on the re-run. After debugging and remediation, re-run this entire gate from step 1 (which re-runs the suite, re-reconciles, and recomputes both sets). Repeat until both sets are empty or the user picks `(c)`. Each debugging attempt counts toward the Step 12 retry budget for the implicated tasks.
    - **(c) Stop execution:** Halt execution. Report partial progress via Step 13 so the user has a complete picture of plan-introduced failures left on the branch: list any non-empty `deferred_integration_regressions` under the deferred-regressions heading, and list the still-unresolved `new_regressions_after_deferment` separately as newly discovered final-gate regressions — do NOT fold them under the deferred-regressions heading, since they were never deferred by the user. Do NOT move the plan file, close the todo, or run branch completion.
 
 ### Final-gate debugger-first flow
