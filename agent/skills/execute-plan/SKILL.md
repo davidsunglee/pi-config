@@ -647,7 +647,7 @@ Route the parsed result:
 
 ## Step 11: Post-wave commit and integration tests
 
-**Precondition:** Only run this step after both Step 9.5 (blocked-task escalation gate) has exited and Step 10 (wave verification) has passed. If any task in the current wave still has a Step 9 status of `BLOCKED`, do not commit and do not run integration tests for the wave — return to Step 9.5. Both the post-wave commit (Step 11.1) and the post-wave integration-test run (Step 11.2) are withheld until the wave completes successfully, meaning every wave task has a non-`BLOCKED` status.
+**Precondition:** Only run this step after Step 9.5 (blocked-task escalation gate) has exited, Step 9.7 (combined concerns checkpoint) has exited, and Step 10 (wave verification) has passed. If any task in the current wave still has a Step 9 status of `BLOCKED`, do not commit and do not run integration tests for the wave — return to Step 9.5. If any task in the wave has an unresolved `Type: correctness` or `Type: scope` concern from Step 9.7, do not commit and do not run integration tests — return to Step 9.7; such concerns can never be "acknowledged and continued" past this gate. If any task in the wave still carries `VERDICT: FAIL` from Step 10 (including malformed verifier output treated as `FAIL`), do not commit and do not run integration tests — return to Step 12's retry loop until every task has `VERDICT: PASS`. Both the post-wave commit (Step 11.1) and the post-wave integration-test run (Step 11.2) are withheld until the wave completes successfully, meaning every wave task has a non-`BLOCKED` status, no unresolved correctness/scope concerns, and `VERDICT: PASS` from Step 10.
 
 After wave verification (Step 10) completes successfully for a wave, perform the following steps in order.
 
@@ -689,30 +689,89 @@ TEST_OUTPUT=$(<test_command> 2>&1)
 TEST_EXIT=$?
 ```
 
-**Compare against baseline** (from Step 7):
-- If the baseline was clean (exit 0) and the current run exits 0 → **pass**. Proceed to next wave.
-- If the baseline was clean (exit 0) and the current run exits non-0 → **fail**. Regressions introduced.
-- If the baseline had pre-existing failures: compare the current failing tests against the baseline failures. If only the same tests fail → **pass** (no regressions). If new failures appear → **fail** (regressions introduced).
+#### Three-set integration tracking
 
-**On pass:** Report briefly ("✅ Integration tests pass after wave N") and proceed to the next wave.
+The post-wave integration run is classified against three explicitly tracked sets of test identifiers. A "test identifier" is the suite-native unique name for a failing test (e.g. file path plus test name, or fully qualified symbol), taken verbatim from the test runner's failure output.
 
-**On fail:** Present the user with the suite-standard choices:
+1. **`baseline_failures`** — the set of tests that failed in the Step 7 baseline run. Captured once, before any wave executes, and never mutated after baseline capture. A test in this set represents a pre-existing failure the plan did not introduce.
+2. **`deferred_integration_regressions`** — the set of tests the user has chosen to debug later via `(b) Defer integration debugging` in a prior wave's intermediate-wave menu. Starts empty at plan start. Grows only when the user selects `(b)` on an intermediate wave, and is reconciled on every subsequent integration run (see below). These are regressions caused by this plan that the user has explicitly deferred — not pre-existing failures.
+3. **`new_regressions_after_deferment`** — the set of tests that are failing in the just-completed wave's integration run AND are not in `baseline_failures` AND are not in the post-reconciliation `deferred_integration_regressions`. Recomputed from scratch on every post-wave integration run (it does not persist across waves). This set names the plan-introduced regressions that first surface in the current wave — i.e. the ones the user has not already chosen to defer and that were not pre-existing. It is the authoritative driver of the pass/fail classification below and the target scope of the `(a) Debug failures` and `(b) Defer integration debugging` menu actions.
+
+`current_failing` is NOT one of the three tracked sets. It is a transient per-run value: the set of tests failing in the just-completed integration run for wave `<N>`, recomputed from scratch on every run, and used solely as input to the reconciliation step that derives the post-reconciliation `deferred_integration_regressions` and the fresh `new_regressions_after_deferment`. Once reconciliation computes those two tracked sets, `current_failing` is not referenced further and is not persisted across waves.
+
+**Disjointness and transition rules:**
+
+- `baseline_failures` and `deferred_integration_regressions` MUST remain disjoint. When adding a test to `deferred_integration_regressions`, first subtract `baseline_failures` from the candidate set; a test cannot simultaneously be a pre-existing baseline failure and a deferred regression.
+- `new_regressions_after_deferment` is disjoint from both `baseline_failures` and `deferred_integration_regressions` by construction (see reconciliation step 4). A test can be in at most one of the three tracked sets at any moment.
+- A test transitions out of `deferred_integration_regressions` only via the reconciliation rule below (when it is no longer failing). It never transitions into `baseline_failures` — the baseline is frozen at Step 7.
+- Only `baseline_failures` and `deferred_integration_regressions` are carried across waves. `new_regressions_after_deferment` is recomputed fresh each wave (via reconciliation), and `current_failing` is purely ephemeral input to that computation.
+
+#### Reconciliation
+
+After every post-wave integration test run, and before classifying pass/fail, compute the transient `current_failing` from the run output and reconcile `deferred_integration_regressions` against it, then derive `new_regressions_after_deferment`:
+
+1. Compute `current_failing` := the set of failing-test identifiers reported by the just-completed integration run. This value is transient — used only as input to steps 2–4 below and discarded after this reconciliation.
+2. Compute `still_failing_deferred := deferred_integration_regressions ∩ current_failing` — deferred regressions that are still failing.
+3. Compute `cleared_deferred := deferred_integration_regressions \ current_failing` — deferred regressions that are no longer failing (either the wave's changes fixed them, or the suite's output no longer includes them). Report these briefly in the pass/fail output as "Cleared deferred regressions: <list>".
+4. Set `deferred_integration_regressions := still_failing_deferred`. Any deferred regression not in the current failing set is removed from the tracked set — the orchestrator does NOT carry stale identifiers forward.
+5. Assign `new_regressions_after_deferment := current_failing \ (baseline_failures ∪ deferred_integration_regressions)`. This set is empty when every currently failing test is either a pre-existing baseline failure or a previously deferred regression; it is populated when the just-completed wave introduced at least one failure that was neither in the baseline nor previously deferred. `new_regressions_after_deferment` is the authoritative source for:
+   - the user-facing "New regressions in this wave" section,
+   - the pass/fail classification below, and
+   - the `(a) Debug failures` and `(b) Defer integration debugging` menu actions (which operate only on the tests in this set).
+
+#### Pass/fail classification
+
+- **Pass:** `new_regressions_after_deferment` is empty. Report briefly ("✅ Integration tests pass after wave `<N>` (no new regressions)") and proceed to the next wave. Any remaining `baseline_failures` and `deferred_integration_regressions` are noted but do not block.
+- **Fail:** `new_regressions_after_deferment` is non-empty. Present the user-facing failure report and menu below.
+
+#### User-facing failure report
+
+When `new_regressions_after_deferment` is non-empty, present a report with exactly these three separately-headed sections, in this order:
 
 ```
 ❌ Integration tests failed after wave <N>.
 
-New failures:
-<list of new failing tests or diff from baseline>
+### Baseline failures
+<list of tests in baseline_failures ∩ current_failing — pre-existing, not plan-introduced>
 
-Options:
-(a) Debug failures — dispatch a systematic-debugging pass, then remediate
-(b) Skip tests     — proceed to wave <N+1> despite failures
-(c) Stop execution — halt plan execution; committed waves are preserved as checkpoints
+### Deferred integration regressions
+<list of tests in deferred_integration_regressions (post-reconciliation) — plan-introduced regressions the user chose to defer>
+
+### New regressions in this wave
+<list of tests in new_regressions_after_deferment — plan-introduced regressions first observed in this wave>
 ```
 
-- **(a) Debug failures:** Run the debugger-first flow described in "Debugger-first flow" below. Do NOT undo the wave commit up front; the debugging dispatch inspects the committed state. This path counts as a retry toward the 3-retry limit in Step 12.
-- **(b) Skip tests:** Proceed to the next wave. The failing commit remains. Warn: "⚠️ Proceeding with known test regressions."
+Each section MUST be present even if its list is empty (render an empty list as `(none)`), and the section headings MUST be the exact strings `Baseline failures`, `Deferred integration regressions`, and `New regressions in this wave`. The `(a)` and `(b)` menu actions below operate only on the "New regressions in this wave" list — i.e. on `new_regressions_after_deferment`.
+
+#### Menu
+
+The menu differs between intermediate waves (any wave before the final wave of the plan) and the final wave.
+
+**Intermediate-wave menu** (wave `<N>` where `<N> < total_waves`):
+
+```
+Options:
+(a) Debug failures                  — dispatch a systematic-debugging pass against new_regressions_after_deferment, then remediate
+(b) Defer integration debugging     — add new_regressions_after_deferment to deferred_integration_regressions and proceed to wave <N+1>
+(c) Stop execution                  — halt plan execution; committed waves are preserved as checkpoints
+```
+
+- **(a) Debug failures:** Run the debugger-first flow described in "Debugger-first flow" below, scoped to the tests in `new_regressions_after_deferment`. Do NOT undo the wave commit up front; the debugging dispatch inspects the committed state. This path counts as a retry toward the 3-retry limit in Step 12.
+- **(b) Defer integration debugging:** Compute `additions := new_regressions_after_deferment \ baseline_failures` (preserving disjointness with `baseline_failures`) and set `deferred_integration_regressions := deferred_integration_regressions ∪ additions`. The wave commit remains. Warn: "⚠️ Proceeding with deferred integration regressions. Final plan completion is BLOCKED until every deferred regression is resolved — the final wave's menu will not offer a defer option, so these failures must be debugged (or explicitly accepted via `Stop execution`) before the plan can report success." Then proceed to wave `<N+1>`.
 - **(c) Stop execution:** Halt execution. All prior wave commits are preserved as checkpoints. Report partial progress (Step 13). The user can resume or fix manually.
+
+**Final-wave menu** (wave `<N>` where `<N> == total_waves`):
+
+```
+Options:
+(a) Debug failures  — dispatch a systematic-debugging pass against new_regressions_after_deferment, then remediate
+(c) Stop execution  — halt plan execution; committed waves are preserved as checkpoints
+```
+
+The defer option is intentionally removed on the final wave: there is no subsequent wave to carry deferred regressions into, and the precondition that final completion is blocked until all plan-introduced regressions are resolved forbids silently shipping them. On the final wave, the user MUST either debug or stop.
+
+- **(a) Debug failures:** Same as the intermediate-wave `(a)` — run the debugger-first flow scoped to `new_regressions_after_deferment`, counting toward the Step 12 retry limit. If `deferred_integration_regressions` is also non-empty at the final wave, include those identifiers in the debugging scope as well; final-wave debugging must clear both sets before the plan can report success.
+- **(c) Stop execution:** Halt execution. Prior wave commits are preserved as checkpoints. Report partial progress (Step 13).
 
 ### Debugger-first flow
 
@@ -730,7 +789,7 @@ When the user chooses **(a) Debug failures**, do NOT re-dispatch every task in t
 3. **Handle the debugging pass result:**
    - **Diagnosed and fixed (`STATUS: DONE`):** Re-run the test command. If it now matches the baseline (pass), add a follow-up commit (`git commit -m "fix(plan): wave <N> regression — <short summary>"`) and proceed to the next wave. If tests still fail, treat it as a failed debugging pass (below).
    - **Diagnosis only (`STATUS: DONE_WITH_CONCERNS` with `## Diagnosis`):** Use the diagnosis to dispatch a **targeted remediation** — a second `coder` dispatch scoped to only the implicated task(s)/files from the diagnosis. Include the diagnosis text, the failing test output, and the original task spec(s) for the implicated task(s). After that dispatch returns, re-run the test command. If it now passes, add a follow-up commit (`git commit -m "fix(plan): wave <N> regression — <short summary>"`) and proceed to the next wave. If tests still fail, treat it as a failed debugging pass.
-   - **Failed debugging pass** (blocker, or fix did not resolve failures): re-present the `(a)/(b)/(c)` choices to the user. Count this attempt toward the Step 12 retry limit.
+   - **Failed debugging pass** (blocker, or fix did not resolve failures): re-present the integration-failure menu to the user in its wave-appropriate form — the intermediate-wave menu (`(a) Debug failures`, `(b) Defer integration debugging`, `(c) Stop execution`) when the current wave is not the final wave, or the final-wave menu (`(a) Debug failures`, `(c) Stop execution`, with no defer option) when it is. Count this attempt toward the Step 12 retry limit.
 
 4. **Do NOT re-dispatch unaffected wave tasks** unless the diagnosis explicitly implicates them. Avoiding blanket re-runs is the point of this flow.
 
