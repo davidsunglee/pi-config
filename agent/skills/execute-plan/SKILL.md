@@ -620,7 +620,7 @@ Fill the template's placeholders as follows:
 - `{ACCEPTANCE_CRITERIA_WITH_VERIFY}` — the acceptance criteria list for the task, each paired with its `Verify:` recipe, numbered starting at 1.
 - `{ORCHESTRATOR_COMMAND_EVIDENCE}` — the evidence blocks collected in Step 10.1, in criterion order. If the task has no command-style recipes, leave this section empty.
 - `{MODIFIED_FILES}` — the exact list of files the worker reported as modified (from its `## Files Changed` section), as a newline-separated list of paths.
-- `{DIFF_CONTEXT}` — the uncommitted wave diff against `HEAD`, produced by `git diff HEAD -- <modified files>` in the working directory. This reflects the working tree vs. the last commit, which is where wave changes live before Step 11's commit. Do NOT substitute a committed-range diff (e.g. a diff between `HEAD` and a prior commit) or a `--staged` diff; wave changes have not been committed yet.
+- `{DIFF_CONTEXT}` — the uncommitted wave diff against `HEAD`, produced by `git diff HEAD -- <modified files>` in the working directory. This reflects the working tree vs. the last commit, which is where wave changes live before Step 11's commit. Do NOT substitute a committed-range diff (e.g. a diff between `HEAD` and a prior commit) or a `--staged` diff; wave changes have not been committed yet. **Sub-task dispatch carve-out:** Sub-task dispatches from Step 9.5 §5 (split-into-sub-tasks) MUST occur pre-commit — their changes must remain in the working tree at Step 10 time so `git diff HEAD` captures them alongside the rest of the wave. Step 11's commit is the only sanctioned transition from working tree to committed state for wave changes, and it runs after Step 10. If for any reason a sub-task's changes were committed before Step 10 runs for this wave (a protocol violation that should not normally occur), substitute `git diff <pre-subtask-commit>..HEAD -- <modified files>` for those criteria so the verifier still sees the sub-task's changes; otherwise file-inspection criteria will fail for insufficient evidence even though the work was done.
 - `{WORKING_DIR}` — the plan's working directory.
 
 **Verifier model tier:** Default the verifier's model to `standard`. If the verified task itself ran at `capable`, upgrade the verifier to `capable` so its judgment matches the task's complexity. Never downgrade below `standard`.
@@ -798,7 +798,7 @@ When the user chooses **(a) Debug failures**, do NOT re-dispatch every task in t
 ## Step 12: Handle failures and retries
 
 If a worker produces empty, missing, or incorrect output:
-1. Retry automatically up to **3 times** (with improvements to the task prompt if possible). Note: re-dispatch passes through the Step 9.5 blocked-task gate also count toward this per-task budget (see Step 9.5 §5).
+1. Retry automatically up to **3 times** (with improvements to the task prompt if possible). Note: re-dispatch passes through the Step 9.5 blocked-task gate also count toward this per-task budget (see Step 9.5 §5). **Shared counter:** All re-dispatches from Step 9.5 §5 (blocked-task re-dispatch), Step 9.7 §4 (concerned-task re-dispatch via `(r)`), and Step 10 failure routing (verifier `VERDICT: FAIL`) share a single per-task retry counter. Exhaustion in one path exhausts it for all paths — a task that has been re-dispatched twice through Step 9.5 and once through Step 9.7 has used all 3 retries, and any subsequent Step 10 `VERDICT: FAIL` for that task goes directly to the user-prompt in step 2 below rather than triggering another automatic retry.
 2. If still failing after 3 retries, **notify the user at the end of the wave** and ask:
    - Retry again (optionally with a different model or more context)
    - Stop the entire plan
@@ -859,7 +859,7 @@ After all waves complete successfully (and if the user chose review in Step 3):
 
 ## Step 15: Complete
 
-### 0. Deferred integration regression gate
+### Deferred integration regression gate (precondition)
 
 **Skip if:** Integration tests are disabled (Step 3 settings), no test command is available, or `deferred_integration_regressions` was empty at the start of this step.
 
