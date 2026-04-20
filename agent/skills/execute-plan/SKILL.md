@@ -514,7 +514,7 @@ When `(c)` is the exit, tasks whose status is still `DONE_WITH_CONCERNS` flow in
 
 ## Step 10: Verify wave output
 
-**Precondition:** Only run this step after both the Step 9.5 blocked-task escalation gate and the Step 9.7 wave-level concerns checkpoint have exited. If any task in the current wave still has a Step 9 status of `BLOCKED`, do not run wave verification — return to Step 9.5. If the Step 9.7 checkpoint has not yet been presented and resolved for this wave, do not run wave verification — return to Step 9.7. A wave with any unresolved `BLOCKED` task or a Step 9.7 checkpoint that has not yet been resolved is NOT considered successfully completed. Tasks that exit Step 9.7 with status `DONE_WITH_CONCERNS` proceed to verification as-is; the verifier's per-criterion verdict is authoritative.
+**Precondition:** Step 9.5 (BLOCKED) and Step 9.7 (DONE_WITH_CONCERNS) must have exited before Step 10 runs. If either gate is unresolved, return to that gate first; Step 10 is the next gate only after both have exited. Tasks exiting Step 9.7 with status `DONE_WITH_CONCERNS` flow into verification as-is — the verifier's per-criterion verdict is authoritative.
 
 Verification for each task in the wave runs in a fresh-context `verifier` subagent dispatched via `agent/skills/execute-plan/verify-task-prompt.md`. The orchestrator does NOT read code and judge acceptance criteria directly; it only collects command evidence and routes the verifier's verdict.
 
@@ -582,7 +582,7 @@ Route the parsed result:
 
 ## Step 11: Post-wave commit and integration tests
 
-**Precondition:** Only run this step after Step 9.5 (blocked-task escalation gate) has exited, Step 9.7 (combined concerns checkpoint) has exited, and Step 10 (wave verification) has passed. If any task in the current wave still has a Step 9 status of `BLOCKED`, do not commit and do not run integration tests — return to Step 9.5. If Step 9.7 has not yet been resolved for this wave, return to Step 9.7. If any task in the wave still carries `VERDICT: FAIL` from Step 10 (including malformed verifier output treated as `FAIL`), do not commit and do not run integration tests — return to Step 12's retry loop until every task has `VERDICT: PASS`. Both the post-wave commit and the post-wave integration-test run are withheld until the wave completes successfully (every wave task non-`BLOCKED`, Step 9.7 exited via `(c)` or remediation, and `VERDICT: PASS` from Step 10).
+**Precondition:** Step 9.5 and Step 9.7 must have exited and Step 10 must report `VERDICT: PASS` for every task in the wave. If any precondition is unmet, return to the responsible gate (Step 9.5 for BLOCKED, Step 9.7 for unresolved concerns, Step 12's retry loop for `VERDICT: FAIL`). Both the post-wave commit and the integration-test run are withheld until the wave completes successfully.
 
 After wave verification (Step 10) completes successfully for a wave, perform the following steps in order.
 
@@ -771,9 +771,7 @@ After all waves complete successfully (and if the user chose review in Step 3):
 
 **Skip if:** Integration tests are disabled (Step 3 settings) or no test command is available.
 
-**Always run otherwise.** Whenever integration tests are enabled and a test command exists, this gate runs regardless of whether deferment occurred during execution and regardless of whether Step 14 review/remediation produced follow-up commits. A final integration check is cheap and confirms that no plan-introduced regression — whether previously deferred by the user or freshly introduced by Step 14 remediation — slipped through to completion.
-
-Before moving the plan file, closing the linked todo, or running branch completion, verify that **no plan-introduced integration regression remains**. This includes (a) regressions the user deferred during intermediate waves and (b) any regressions that surfaced for the first time in the final integration run — for example, regressions introduced by the Step 14 review/remediation commits after the final wave's own integration check.
+Otherwise, always run this gate: re-run the full integration suite and confirm no plan-introduced regression (deferred or freshly surfaced by Step 14 remediation) remains before moving the plan to done.
 
 **Gate protocol:**
 
