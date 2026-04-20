@@ -353,32 +353,27 @@ The filled template becomes the task prompt for the `coder` subagent. The templa
 After each wave completes, process each worker response:
 
 - **DONE** → proceed to verification (Step 10).
-- **DONE_WITH_CONCERNS** → record the worker's freeform concerns with the task. Do NOT resolve the checkpoint inline. Let the wave drain, then Step 9.7 presents a single combined wave-level concerns checkpoint for every `DONE_WITH_CONCERNS` task in the wave before Step 10 runs. Concerns do not need type labels and are not preclassified by severity.
+- **DONE_WITH_CONCERNS** → record the worker's freeform concerns with the task. Do NOT resolve the checkpoint inline. Let the wave drain, then Step 9.5 (wave gate) presents a single combined wave-level concerns checkpoint for every `DONE_WITH_CONCERNS` task in the wave before Step 10 runs. Concerns do not need type labels and are not preclassified by severity.
 - **NEEDS_CONTEXT** → provide the missing context and re-dispatch the task immediately.
-- **BLOCKED** → do NOT recover inline. Record the worker's blocker details with the task, leave the task marked `BLOCKED`, and let the wave drain. The combined escalation is handled in Step 9.5, which surfaces every blocked task in the wave to the user before Step 10, Step 11, or any subsequent wave runs. The four canonical interventions (more context, better model, split into sub-tasks, stop execution) live in Step 9.5.
+- **BLOCKED** → do NOT recover inline. Record the worker's blocker details with the task, leave the task marked `BLOCKED`, and let the wave drain. The combined escalation is handled in Step 9.5 (wave gate), which surfaces every blocked task in the wave to the user before Step 10, Step 11, or any subsequent wave runs. The four canonical interventions (more context, better model, split into sub-tasks, stop execution) live in Step 9.5.
 
-After the wave drains (i.e., every dispatched worker in the wave has returned and been classified), Step 9.5 runs first to handle any `BLOCKED` tasks. Step 9.7 then runs to handle any `DONE_WITH_CONCERNS` tasks. Only after both gates exit does Step 10 (verification) run.
+After the wave drains (i.e., every dispatched worker in the wave has returned and been classified), Step 9.5 runs to handle any `BLOCKED` tasks first and then any `DONE_WITH_CONCERNS` tasks. Only after the wave gate exits does Step 10 (verification) run.
 
 **Never ignore an escalation or re-dispatch the same task to the same model without changes.**
 
-## Step 9.5: Blocked-task escalation gate
+## Step 9.5: Wave gate: blocked and concerns handling
 
-Run this gate once per wave after every dispatched worker has been classified by Step 9. **Purpose:** Treat `STATUS: BLOCKED` as an immediate escalation — independent of wave pacing. Any wave with at least one `BLOCKED` response pauses here before any later wave, before Step 10, and before Step 11.
+Run this gate once per wave after every dispatched worker has been classified by Step 9. It handles both `STATUS: BLOCKED` and `STATUS: DONE_WITH_CONCERNS` in a fixed order: blocked handling runs first, then concerns handling, then the wave exits to verification (Step 10). Any wave with at least one `BLOCKED` response pauses here before any later wave, before Step 10, and before Step 11. A wave with no `BLOCKED` and no `DONE_WITH_CONCERNS` passes through this gate without user interaction and proceeds directly to Step 10.
 
 ### 1. Drain the current wave
 
-Wait for every dispatched worker to return and Step 9 to classify each response before proceeding; the wave is then "drained." Do not start the next wave or run Step 10/Step 11 yet.
+Wait for every dispatched worker to return and Step 9 to classify each response before proceeding; the wave is then "drained." Do not start the next wave or run Step 10/Step 11 yet. Build `BLOCKED_TASKS` = every task whose most recent Step 9 status is `BLOCKED` and `CONCERNED_TASKS` = every task whose most recent Step 9 status is `DONE_WITH_CONCERNS`.
 
-### 2. Collect blocked tasks
+### 2. Blocked handling (runs first)
 
-After draining, collect the set `BLOCKED_TASKS` = every task in the wave whose most recent worker response is `STATUS: BLOCKED`.
+If `BLOCKED_TASKS` is empty, skip to §3 (concerns handling).
 
-- If `BLOCKED_TASKS` is empty, skip this entire step and proceed to Step 9.7 (which then gates entry to Step 10). Never advance directly from Step 9.5 to Step 10.
-- If `BLOCKED_TASKS` is non-empty, proceed to step 3 below.
-
-### 3. Present the combined escalation view
-
-Present a single combined escalation view for all `BLOCKED_TASKS` — do NOT present blocked tasks one at a time. The view MUST include:
+If `BLOCKED_TASKS` is non-empty, present a single combined escalation view for all `BLOCKED_TASKS` — do NOT present blocked tasks one at a time. The view MUST include:
 
 1. A header line naming the wave, e.g., `🚫 Wave <N>: <count> task(s) BLOCKED. Execution paused before any later wave.`
 2. A "Wave outcomes" summary block listing every task in the wave and its Step 9 status: `DONE`, `DONE_WITH_CONCERNS`, or `BLOCKED`. Include task number and task title for each. Successful same-wave tasks MUST appear here so the user can see what completed alongside the blockers.
@@ -411,8 +406,6 @@ Blocked tasks:
     <full blocker text from the worker report>
 ~~~
 
-### 4. Per-task intervention choice
-
 For each task in `BLOCKED_TASKS`, ask the user for an intervention choice independently. Do not force a single action across all blocked tasks. Present choices one task at a time after the combined view has been shown, using this form per task:
 
 ~~~
@@ -424,38 +417,24 @@ Task <N>: <task_title> (current tier: <tier>) — choose an intervention:
   (x) Stop execution    — halt the plan; committed waves are preserved as checkpoints
 ~~~
 
-These options mirror the recovery paths previously inlined in Step 9's `BLOCKED` bullet and are the canonical intervention set for this gate. Do not invent new options. The `(m) Better model` option is suppressed (not offered, and not selectable) whenever the task's current model tier is already `capable`, because there is no higher tier to escalate to and re-dispatching to the same model would violate the Step 9 rule "Never ignore an escalation or re-dispatch the same task to the same model without changes." When `(m)` is suppressed, the user must pick `(c)`, `(s)`, or `(x)` for that task; a tier upgrade is not a valid same-tier "meaningful change" for `capable`-tier tasks.
+These are the canonical intervention options for blocked tasks. Do not invent new options. The `(m) Better model` option is suppressed (not offered, and not selectable) whenever the task's current model tier is already `capable`, because there is no higher tier to escalate to and re-dispatching to the same model would violate the Step 9 rule "Never ignore an escalation or re-dispatch the same task to the same model without changes." When `(m)` is suppressed, the user must pick `(c)`, `(s)`, or `(x)` for that task.
 
 - **(c) More context:** prompt the user for the additional context (free-form text). Re-dispatch this single task to a `coder` worker with the original task spec plus the supplied context appended under a `## Additional Context` section in the worker prompt. Keep the task's existing model tier unless the user also picks (m) for the same task on a subsequent pass.
 - **(m) Better model:** only offered when the task's current tier is `cheap` or `standard`. Re-dispatch this single task to a `coder` worker using the next tier up (`cheap` → `standard`, `standard` → `capable`). Resolve the concrete model string via `~/.pi/agent/model-tiers.json` as described in Step 6.
-- **(s) Split into sub-tasks:** decompose the task into smaller sub-tasks in-session. Each sub-task must keep the same output file(s) and acceptance criteria coverage between them (no criterion may be dropped). Dispatch the sub-tasks as a mini-wave bounded by the pi-subagent `MAX_PARALLEL_TASKS` cap (see Step 5). If there is a natural ordering between sub-tasks, run them sequentially instead. The parent task's slot is replaced by the sub-tasks for all subsequent tracking; each sub-task is treated as an independent task in this wave for Step 9 classification and gate re-entry. **Retry budget:** Splitting a task counts as 1 retry against the parent task's Step 12 budget. Each sub-task inherits the parent task's remaining retry count (not a fresh 3-retry budget) — e.g., if the parent had 2 retries remaining at the point of split, each sub-task starts with 2 retries remaining. This prevents retry-budget bypass via repeated splits. ⚠ Sub-task dispatches run pre-commit: their changes must remain in the working tree (uncommitted) at the point Step 10 dispatches the verifier. See Step 10.2 for the fallback diff range if this is violated.
+- **(s) Split into sub-tasks:** decompose the task into smaller sub-tasks in-session. Each sub-task must keep the same output file(s) and acceptance criteria coverage between them (no criterion may be dropped). Dispatch the sub-tasks as a mini-wave bounded by the pi-subagent `MAX_PARALLEL_TASKS` cap (see Step 5). If there is a natural ordering between sub-tasks, run them sequentially instead. The parent task's slot is replaced by the sub-tasks for all subsequent tracking; each sub-task is treated as an independent task in this wave for Step 9 classification and gate re-entry. ⚠ Sub-task dispatches run pre-commit: their changes must remain in the working tree (uncommitted) at the point Step 10 dispatches the verifier. See Step 10.2 for the fallback diff range if this is violated. Retry budget: see Step 12.
 - **(x) Stop execution:** halt execution immediately. Do NOT perform Step 10 or Step 11 for this wave. Report partial progress via Step 13. All prior wave commits are preserved as checkpoints.
 
 If the user picks `(x) Stop execution` for any blocked task, stop the whole plan regardless of outstanding choices for other blocked tasks. Do not continue asking about the remaining blocked tasks.
 
-### 5. Re-dispatch and wait for resolution
+After collecting a non-stop intervention for every task in `BLOCKED_TASKS`, re-dispatch all of them together (in parallel, subject to `MAX_PARALLEL_TASKS`). Use the same dispatch shape as Step 8. Wait for all re-dispatched workers to return. Apply Step 9 to the new responses. Rebuild `BLOCKED_TASKS` and `CONCERNED_TASKS` from the updated wave state, then re-enter §2 with the new `BLOCKED_TASKS`. The blocked phase repeats until `BLOCKED_TASKS` is empty or the user picks `(x) Stop execution`. For tasks where `(s) Split into sub-tasks` was chosen, the sub-tasks' responses replace the original task's slot; if any sub-task returns `BLOCKED`, it appears in `BLOCKED_TASKS` on the next pass. Each re-dispatch counts toward the per-task retry budget (see Step 12). When a task exhausts its budget while still `BLOCKED`, present only the intervention choices (never a skip option) — the gate cannot exit successfully until every `BLOCKED` task yields `DONE` or `DONE_WITH_CONCERNS`, or the user picks `(x)`.
 
-After collecting a non-stop intervention for every task in `BLOCKED_TASKS`, re-dispatch all of them together (in parallel, subject to `MAX_PARALLEL_TASKS`). Use the same dispatch shape as Step 8. Wait for all re-dispatched workers to return.
+### 3. Concerns handling (runs second)
 
-Apply Step 9 to the new responses. Then re-enter this gate (Step 9.5) with the new set of responses. The gate repeats until `BLOCKED_TASKS` is empty or the user picks `(x) Stop execution`. For tasks where `(s) Split into sub-tasks` was chosen, the sub-tasks' responses replace the original task's slot; if any sub-task returns `BLOCKED`, it appears in `BLOCKED_TASKS` on the next gate pass.
+**Precondition:** §2 has exited (i.e., `BLOCKED_TASKS` is empty); every task in the wave is `DONE` or `DONE_WITH_CONCERNS`.
 
-Each pass counts toward the per-task retry budget (Step 12, 3 retries, shared with Step 9.7 and Step 10 retries). When a task exhausts its budget while still `BLOCKED`, present only the §4 intervention choices (never a skip option) — the gate cannot exit successfully until every `BLOCKED` task yields `DONE` or `DONE_WITH_CONCERNS`, or the user picks `(x)`.
+If `CONCERNED_TASKS` is empty, skip to §4 (gate exit) and proceed directly to Step 10.
 
-### 6. Gate exit
-
-Exit this gate only when every task in the wave has a non-`BLOCKED` Step 9 status achieved by actual worker completion — i.e., the worker returned `DONE` or `DONE_WITH_CONCERNS`. A task is never transitioned out of `BLOCKED` by being skipped. At that point the wave is eligible to proceed to Step 9.7 (the wave-level concerns checkpoint), which then gates entry into Step 10. The control-flow path out of this gate is always `Step 9.5 -> Step 9.7 -> Step 10`; never advance directly from Step 9.5 to Step 10. Do not run Step 10 or Step 11 before both this gate and Step 9.7 have exited. The only alternative exit from the gate is `(x) Stop execution`, which halts the plan entirely (Step 13) and does NOT run Step 9.7, Step 10, or Step 11 for this wave.
-
-## Step 9.7: Wave-level concerns checkpoint
-
-Run this gate once per wave after Step 9.5 has exited and before Step 10, whenever at least one task has Step 9 status `DONE_WITH_CONCERNS`. **Precondition:** Step 9.5 has exited; every task in the wave is `DONE` or `DONE_WITH_CONCERNS`.
-
-### 1. Collect concerned tasks
-
-Build `CONCERNED_TASKS` = the ordered list of every task in the wave whose Step 9 status was `DONE_WITH_CONCERNS`. For each entry, carry along the task id, the task title, the worker's `## Concerns / Needs / Blocker` bullet lines verbatim (freeform — no `Type:` prefixes), and the list of files the task modified (`## Files Changed`). If `CONCERNED_TASKS` is empty, skip this gate entirely and proceed to Step 10.
-
-### 2. Present one combined view
-
-Do not prompt one-task-at-a-time. Wait until the wave is fully drained and Step 9.5 has exited, then present every concerned task together in a single combined message:
+Otherwise, present every concerned task together in a single combined message — do not prompt one-task-at-a-time:
 
 ```
 ⚠️ Wave <N>: <M> task(s) returned DONE_WITH_CONCERNS. Review before verification.
@@ -478,21 +457,19 @@ Options:
   (x) Stop execution                      — halt the plan; committed waves are preserved as checkpoints
 ```
 
-### 3. Apply the user's choice
+- **(c) Continue to verification.** Exit §3. Leave every concerned task's Step 9 status as `DONE_WITH_CONCERNS` and proceed to §4; the verifier is the next gate and will judge the work on its own terms.
+- **(r) Remediate selected task(s).** Prompt the user for (a) the task numbers to remediate (one or more from `CONCERNED_TASKS`) and (b) a single freeform guidance block that applies to those tasks. Re-dispatch each selected task to a fresh `coder` worker using the same task spec, with the worker's original concerns block and the user's guidance appended under a `## Concerns To Address` section in the worker prompt. Each re-dispatch counts against that task's retry budget (see Step 12). When the re-dispatches return, apply Step 9 again. If any re-dispatched task comes back `BLOCKED`, return to §2 with that task. Otherwise rebuild `CONCERNED_TASKS` from the new wave state and re-enter §3 from its top; a task that returns `DONE` after remediation is removed from `CONCERNED_TASKS`, and a task that returns `DONE_WITH_CONCERNS` again re-appears in the next combined view. Tasks that were not selected for remediation keep their prior Step 9 status and re-appear unchanged in the next view.
+- **(x) Stop execution.** Halt immediately. Do NOT run Step 10 or Step 11 for this wave. Report partial progress via Step 13. All prior wave commits remain as checkpoints.
 
-- **(c) Continue to verification.** Exit the gate. Leave every concerned task's Step 9 status as `DONE_WITH_CONCERNS` and proceed to Step 10; the verifier is the next gate and will judge the work on its own terms.
-- **(r) Remediate selected task(s).** Prompt the user for (a) the task numbers to remediate (one or more from `CONCERNED_TASKS`) and (b) a single freeform guidance block that applies to those tasks. Re-dispatch each selected task to a fresh `coder` worker using the same task spec, with the worker's original concerns block and the user's guidance appended under a `## Concerns To Address` section in the worker prompt. Each re-dispatch counts against that task's Step 12 retry budget (shared counter described in Step 12). When the re-dispatches return, apply Step 9 again. If any re-dispatched task comes back `BLOCKED`, return to Step 9.5 with that task. Otherwise rebuild `CONCERNED_TASKS` from the new wave state and re-enter this gate from §1; a task that returns `DONE` after remediation is removed from `CONCERNED_TASKS`, and a task that returns `DONE_WITH_CONCERNS` again re-appears in the next combined view. Tasks that were not selected for remediation keep their prior Step 9 status and re-appear unchanged in the next view.
-- **(x) Stop execution.** Halt immediately via Step 13. Do NOT run Step 10 or Step 11 for this wave. All prior wave commits remain as checkpoints.
-
-Repeat §2–§3 until `CONCERNED_TASKS` is empty (either because the user picked `(c)` or because every concerned task has been remediated to `DONE`) or the user picks `(x)`.
+Repeat §3 until `CONCERNED_TASKS` is empty (either because the user picked `(c)` or because every concerned task has been remediated to `DONE`) or the user picks `(x)`.
 
 ### 4. Gate exit
 
-Exit when (a) the user picked `(c) Continue to verification` or (b) every task is `DONE` after remediation — the wave then enters Step 10; tasks still `DONE_WITH_CONCERNS` flow in as-is (the verifier's verdict is authoritative). The only other exit is `(x) Stop execution` via Step 13.
+This gate exits when `BLOCKED_TASKS` is empty and `CONCERNED_TASKS` is either empty or the user picked `(c) Continue to verification`. Every task in the wave is then `DONE` or `DONE_WITH_CONCERNS` and the wave proceeds to Step 10. Tasks still `DONE_WITH_CONCERNS` flow into Step 10 as-is; the verifier's verdict is authoritative. Selecting `(x) Stop execution` from either the blocked-handling phase (§2) or the concerns-handling phase (§3) halts the entire plan via Step 13 and does NOT run Step 10 or Step 11 for this wave.
 
 ## Step 10: Verify wave output
 
-**Precondition:** Step 9.5 and Step 9.7 must have exited. Verification for each task runs in a fresh-context `verifier` subagent via `agent/skills/execute-plan/verify-task-prompt.md`; the orchestrator only collects command evidence and routes the verifier's verdict.
+**Precondition:** Step 9.5 (wave gate) must have exited. Verification for each task runs in a fresh-context `verifier` subagent via `agent/skills/execute-plan/verify-task-prompt.md`; the orchestrator only collects command evidence and routes the verifier's verdict.
 
 **Protocol-error stop — missing `Verify:` recipes:** Before dispatching the verifier, check that every acceptance criterion for the task has an attached `Verify:` recipe in the plan. If any acceptance criterion is missing a `Verify:` recipe at execute time, STOP execution for this wave. Report the offending task number and criterion text to the user, recommend re-running `generate-plan` to regenerate the plan, and do not dispatch the verifier, do not treat the task as passing, and do not silently skip verification. A plan without complete `Verify:` recipes is a protocol error from generate-plan and must be regenerated before execution can continue.
 
@@ -558,7 +535,7 @@ Route the parsed result:
 
 ## Step 11: Post-wave commit and integration tests
 
-**Precondition:** Step 9.5 and Step 9.7 must have exited and Step 10 must report `VERDICT: PASS` for every task in the wave. If any precondition is unmet, return to the responsible gate (Step 9.5 for BLOCKED, Step 9.7 for unresolved concerns, Step 12's retry loop for `VERDICT: FAIL`). Both the post-wave commit and the integration-test run are withheld until the wave completes successfully.
+**Precondition:** Step 9.5 (wave gate) must have exited and Step 10 must report `VERDICT: PASS` for every task in the wave. If any precondition is unmet, return to the responsible gate (Step 9.5 for BLOCKED or unresolved concerns, Step 12's retry loop for `VERDICT: FAIL`). Both the post-wave commit and the integration-test run are withheld until the wave completes successfully.
 
 After wave verification (Step 10) completes successfully for a wave, perform the following steps in order.
 
@@ -666,14 +643,14 @@ Shared by Step 11 (post-wave integration failures) and Step 15 (final integratio
 ## Step 12: Handle failures and retries
 
 If a worker produces empty, missing, or incorrect output:
-1. Retry automatically up to **3 times** (with improvements to the task prompt if possible). Note: re-dispatch passes through the Step 9.5 blocked-task gate also count toward this per-task budget (see Step 9.5 §5). **Shared counter:** All re-dispatches from Step 9.5 §5 (blocked-task re-dispatch), Step 9.7 `(r)` remediation (concerned-task re-dispatch), and Step 10 failure routing (verifier `VERDICT: FAIL`) share a single per-task retry counter. Exhaustion in one path exhausts it for all paths — a task that has been re-dispatched twice through Step 9.5 and once through Step 9.7 has used all 3 retries, and any subsequent Step 10 `VERDICT: FAIL` for that task goes directly to the user-prompt in step 2 below rather than triggering another automatic retry. **Sub-task split budget rule:** Choosing `(s) Split into sub-tasks` in Step 9.5 §5 consumes 1 retry against the parent task's budget, and each resulting sub-task inherits the parent's remaining retry count rather than a fresh 3-retry budget. This closes the bypass where an exhausted parent could be split to obtain additional effective retries.
+1. Retry automatically up to **3 times** (with improvements to the task prompt if possible). **Shared counter:** All re-dispatches from Step 9.5 §2 (blocked-task re-dispatch), Step 9.5 §3 `(r)` remediation (concerned-task re-dispatch), and Step 10 failure routing (verifier `VERDICT: FAIL`) share a single per-task retry counter. Exhaustion in one path exhausts it for all paths — a task that has been re-dispatched twice through Step 9.5 §2 and once through Step 9.5 §3 has used all 3 retries, and any subsequent Step 10 `VERDICT: FAIL` for that task goes directly to the user-prompt in step 2 below rather than triggering another automatic retry. **Sub-task split budget rule:** Choosing `(s) Split into sub-tasks` in Step 9.5 §2 consumes 1 retry against the parent task's budget, and each resulting sub-task inherits the parent's remaining retry count rather than a fresh 3-retry budget. This closes the bypass where an exhausted parent could be split to obtain additional effective retries.
 2. If still failing after 3 retries, **notify the user at the end of the wave** and ask:
-   - Retry again (optionally with a different model or more context). Choosing `Retry again` **resets the per-task 3-retry budget for that task** — the user has explicitly authorized a fresh remediation window, so the shared counter described in step 1 (blocked-task re-dispatch + Step 9.7 `(r)` re-dispatch + Step 10 `VERDICT: FAIL` retries) is cleared back to 3 for this task only. A subsequent failure on that task re-enters the automatic-retry loop at the top of step 1 with a full budget.
+   - Retry again (optionally with a different model or more context). Choosing `Retry again` **resets the per-task 3-retry budget for that task** — the user has explicitly authorized a fresh remediation window, so the shared counter described in step 1 (blocked-task re-dispatch + Step 9.5 §3 `(r)` re-dispatch + Step 10 `VERDICT: FAIL` retries) is cleared back to 3 for this task only. A subsequent failure on that task re-enters the automatic-retry loop at the top of step 1 with a full budget.
    - Stop the entire plan
 
    There is no option to skip a failed task. A wave with any unresolved failure — including a verifier `VERDICT: FAIL` from Step 10 treated as a task failure — must either be retried to resolution or stopped. `VERDICT: FAIL` from Step 10 is routed through this same failure-handling path with no skip option.
 
-Apply wave pacing from Step 3. These options only govern the cadence of waves that contain no `BLOCKED` results, where Step 9.7 has already exited via `(c) Continue` or remediation, and where every task in the wave has `VERDICT: PASS`. If the wave contains any `BLOCKED` results, Step 9.5 has already paused execution; if Step 9.7 has not yet exited via `(c) Continue` or remediation, Step 9.7 has paused execution; if any task has `VERDICT: FAIL` from Step 10, Step 12's retry loop has already paused execution. Pacing (including option (b) auto-collect) does not apply to any of these pauses — `VERDICT: FAIL` waves are never eligible for option (b) deferral.
+Apply wave pacing from Step 3. These options only govern the cadence of waves where Step 9.5 (wave gate) has already exited and every task in the wave has `VERDICT: PASS`. If the wave contains any `BLOCKED` results or unresolved concerns, Step 9.5 has already paused execution; if any task has `VERDICT: FAIL` from Step 10, Step 12's retry loop has already paused execution. Pacing (including option (b) auto-collect) does not apply to any of these pauses — `VERDICT: FAIL` waves are never eligible for option (b) deferral.
 
 - **(a)** Always pause and report before the next wave starts
 - **(b)** Never pause; collect all failures and report at the very end
