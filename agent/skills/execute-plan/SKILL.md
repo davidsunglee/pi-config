@@ -746,3 +746,7 @@ Invoke the `finishing-a-development-branch` skill, which verifies tests, determi
 Branch completion is offered even if review issues are pending — the user may want to keep the branch and fix later, or create a PR with known issues noted.
 
 **When on main/master (no branch):** Skip branch completion. Just report the summary from step 3.
+
+
+
+
