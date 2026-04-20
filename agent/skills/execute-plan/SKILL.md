@@ -269,7 +269,7 @@ TEST_EXIT=$?
 
 #### Identifier-extraction contract
 
-Baseline capture and every post-wave integration classification (Step 11) use the SAME rule for turning test-runner output into a set of failing-test identifiers. Do not use failure counts, exit-code deltas, or any other heuristic — the three-set model in Step 11 requires exact identifier equality, so Step 7 and Step 11 must extract identifiers identically.
+Baseline capture and every post-wave integration classification (Step 12) use the SAME rule for turning test-runner output into a set of failing-test identifiers. Do not use failure counts, exit-code deltas, or any other heuristic — the three-set model in Step 12 requires exact identifier equality, so Step 7 and Step 12 must extract identifiers identically.
 
 A "test identifier" is the suite-native unique name for a single failing test, taken verbatim from the test runner's failure output. Examples by runner:
 
@@ -292,7 +292,7 @@ Apply the identifier-extraction contract above to the baseline test output and r
 ⚠️ Baseline: N tests already failing before execution.
 New failures only will be flagged after each wave.
 ```
-`baseline_failures` is frozen at this point and never mutated for the rest of the plan run — subsequent waves only compare against it, never modify it. Proceed with execution; pre-existing failures are excluded from the pass/fail decision after each wave via the Step 11 three-set classification.
+`baseline_failures` is frozen at this point and never mutated for the rest of the plan run — subsequent waves only compare against it, never modify it. Proceed with execution; pre-existing failures are excluded from the pass/fail decision after each wave via the Step 12 three-set classification.
 
 #### Integration regression model
 
@@ -352,22 +352,22 @@ The filled template becomes the task prompt for the `coder` subagent. The templa
 
 After each wave completes, process each worker response:
 
-- **DONE** → proceed to verification (Step 10).
-- **DONE_WITH_CONCERNS** → record the worker's freeform concerns with the task. Do NOT resolve the checkpoint inline. Let the wave drain, then Step 9.5 (wave gate) presents a single combined wave-level concerns checkpoint for every `DONE_WITH_CONCERNS` task in the wave before Step 10 runs. Concerns do not need type labels and are not preclassified by severity.
+- **DONE** → proceed to verification (Step 11).
+- **DONE_WITH_CONCERNS** → record the worker's freeform concerns with the task. Do NOT resolve the checkpoint inline. Let the wave drain, then Step 10 (wave gate) presents a single combined wave-level concerns checkpoint for every `DONE_WITH_CONCERNS` task in the wave before Step 11 runs. Concerns do not need type labels and are not preclassified by severity.
 - **NEEDS_CONTEXT** → provide the missing context and re-dispatch the task immediately.
-- **BLOCKED** → do NOT recover inline. Record the worker's blocker details with the task, leave the task marked `BLOCKED`, and let the wave drain. The combined escalation is handled in Step 9.5 (wave gate), which surfaces every blocked task in the wave to the user before Step 10, Step 11, or any subsequent wave runs. The four canonical interventions (more context, better model, split into sub-tasks, stop execution) live in Step 9.5.
+- **BLOCKED** → do NOT recover inline. Record the worker's blocker details with the task, leave the task marked `BLOCKED`, and let the wave drain. The combined escalation is handled in Step 10 (wave gate), which surfaces every blocked task in the wave to the user before Step 11, Step 12, or any subsequent wave runs. The four canonical interventions (more context, better model, split into sub-tasks, stop execution) live in Step 10.
 
-After the wave drains (i.e., every dispatched worker in the wave has returned and been classified), Step 9.5 runs to handle any `BLOCKED` tasks first and then any `DONE_WITH_CONCERNS` tasks. Only after the wave gate exits does Step 10 (verification) run.
+After the wave drains (i.e., every dispatched worker in the wave has returned and been classified), Step 10 runs to handle any `BLOCKED` tasks first and then any `DONE_WITH_CONCERNS` tasks. Only after the wave gate exits does Step 11 (verification) run.
 
 **Never ignore an escalation or re-dispatch the same task to the same model without changes.**
 
-## Step 9.5: Wave gate: blocked and concerns handling
+## Step 10: Wave gate: blocked and concerns handling
 
-Run this gate once per wave after every dispatched worker has been classified by Step 9. It handles both `STATUS: BLOCKED` and `STATUS: DONE_WITH_CONCERNS` in a fixed order: blocked handling runs first, then concerns handling, then the wave exits to verification (Step 10). Any wave with at least one `BLOCKED` response pauses here before any later wave, before Step 10, and before Step 11. A wave with no `BLOCKED` and no `DONE_WITH_CONCERNS` passes through this gate without user interaction and proceeds directly to Step 10.
+Run this gate once per wave after every dispatched worker has been classified by Step 9. It handles both `STATUS: BLOCKED` and `STATUS: DONE_WITH_CONCERNS` in a fixed order: blocked handling runs first, then concerns handling, then the wave exits to verification (Step 11). Any wave with at least one `BLOCKED` response pauses here before any later wave, before Step 11, and before Step 12. A wave with no `BLOCKED` and no `DONE_WITH_CONCERNS` passes through this gate without user interaction and proceeds directly to Step 11.
 
 ### 1. Drain the current wave
 
-Wait for every dispatched worker to return and Step 9 to classify each response before proceeding; the wave is then "drained." Do not start the next wave or run Step 10/Step 11 yet. Build `BLOCKED_TASKS` = every task whose most recent Step 9 status is `BLOCKED` and `CONCERNED_TASKS` = every task whose most recent Step 9 status is `DONE_WITH_CONCERNS`.
+Wait for every dispatched worker to return and Step 9 to classify each response before proceeding; the wave is then "drained." Do not start the next wave or run Step 11/Step 12 yet. Build `BLOCKED_TASKS` = every task whose most recent Step 9 status is `BLOCKED` and `CONCERNED_TASKS` = every task whose most recent Step 9 status is `DONE_WITH_CONCERNS`.
 
 ### 2. Blocked handling (runs first)
 
@@ -385,22 +385,15 @@ If `BLOCKED_TASKS` is non-empty, present a single combined escalation view for a
 Example layout:
 
 ~~~
-🚫 Wave 2: 2 task(s) BLOCKED. Execution paused before any later wave.
+🚫 Wave 2: 1 task(s) BLOCKED. Execution paused before any later wave.
 
 Wave outcomes:
   - Task 3: Add baseline test capture           DONE
   - Task 4: Add main-branch confirmation guard  BLOCKED
-  - Task 5: Wire final-review invocation        DONE_WITH_CONCERNS
-  - Task 6: Add commit-after-wave step          BLOCKED
 
 Blocked tasks:
 
 [Task 4] Add main-branch confirmation guard
-  Files: agent/skills/execute-plan/SKILL.md
-  Blocker:
-    <full blocker text from the worker report>
-
-[Task 6] Add commit-after-wave step
   Files: agent/skills/execute-plan/SKILL.md
   Blocker:
     <full blocker text from the worker report>
@@ -421,18 +414,18 @@ These are the canonical intervention options for blocked tasks. Do not invent ne
 
 - **(c) More context:** prompt the user for the additional context (free-form text). Re-dispatch this single task to a `coder` worker with the original task spec plus the supplied context appended under a `## Additional Context` section in the worker prompt. Keep the task's existing model tier unless the user also picks (m) for the same task on a subsequent pass.
 - **(m) Better model:** only offered when the task's current tier is `cheap` or `standard`. Re-dispatch this single task to a `coder` worker using the next tier up (`cheap` → `standard`, `standard` → `capable`). Resolve the concrete model string via `~/.pi/agent/model-tiers.json` as described in Step 6.
-- **(s) Split into sub-tasks:** decompose the task into smaller sub-tasks in-session. Each sub-task must keep the same output file(s) and acceptance criteria coverage between them (no criterion may be dropped). Dispatch the sub-tasks as a mini-wave bounded by the pi-subagent `MAX_PARALLEL_TASKS` cap (see Step 5). If there is a natural ordering between sub-tasks, run them sequentially instead. The parent task's slot is replaced by the sub-tasks for all subsequent tracking; each sub-task is treated as an independent task in this wave for Step 9 classification and gate re-entry. ⚠ Sub-task dispatches run pre-commit: their changes must remain in the working tree (uncommitted) at the point Step 10 dispatches the verifier. See Step 10.2 for the fallback diff range if this is violated. Retry budget: see Step 12.
-- **(x) Stop execution:** halt execution immediately. Do NOT perform Step 10 or Step 11 for this wave. Report partial progress via Step 13. All prior wave commits are preserved as checkpoints.
+- **(s) Split into sub-tasks:** decompose the task into smaller sub-tasks in-session. Each sub-task must keep the same output file(s) and acceptance criteria coverage between them (no criterion may be dropped). Dispatch the sub-tasks as a mini-wave bounded by the pi-subagent `MAX_PARALLEL_TASKS` cap (see Step 5). If there is a natural ordering between sub-tasks, run them sequentially instead. The parent task's slot is replaced by the sub-tasks for all subsequent tracking; each sub-task is treated as an independent task in this wave for Step 9 classification and gate re-entry. ⚠ Sub-task dispatches run pre-commit: their changes must remain in the working tree (uncommitted) at the point Step 11 dispatches the verifier. See Step 11.2 for the fallback diff range if this is violated. Retry budget: see Step 13.
+- **(x) Stop execution:** halt execution immediately. Do NOT perform Step 11 or Step 12 for this wave. Report partial progress via Step 14. All prior wave commits are preserved as checkpoints.
 
 If the user picks `(x) Stop execution` for any blocked task, stop the whole plan regardless of outstanding choices for other blocked tasks. Do not continue asking about the remaining blocked tasks.
 
-After collecting a non-stop intervention for every task in `BLOCKED_TASKS`, re-dispatch all of them together (in parallel, subject to `MAX_PARALLEL_TASKS`). Use the same dispatch shape as Step 8. Wait for all re-dispatched workers to return. Apply Step 9 to the new responses. Rebuild `BLOCKED_TASKS` and `CONCERNED_TASKS` from the updated wave state, then re-enter §2 with the new `BLOCKED_TASKS`. The blocked phase repeats until `BLOCKED_TASKS` is empty or the user picks `(x) Stop execution`. For tasks where `(s) Split into sub-tasks` was chosen, the sub-tasks' responses replace the original task's slot; if any sub-task returns `BLOCKED`, it appears in `BLOCKED_TASKS` on the next pass. Each re-dispatch counts toward the per-task retry budget (see Step 12). When a task exhausts its budget while still `BLOCKED`, present only the intervention choices (never a skip option) — the gate cannot exit successfully until every `BLOCKED` task yields `DONE` or `DONE_WITH_CONCERNS`, or the user picks `(x)`.
+After collecting a non-stop intervention for every task in `BLOCKED_TASKS`, re-dispatch all of them together (in parallel, subject to `MAX_PARALLEL_TASKS`). Use the same dispatch shape as Step 8. Wait for all re-dispatched workers to return. Apply Step 9 to the new responses. Rebuild `BLOCKED_TASKS` and `CONCERNED_TASKS` from the updated wave state, then re-enter §2 with the new `BLOCKED_TASKS`. The blocked phase repeats until `BLOCKED_TASKS` is empty or the user picks `(x) Stop execution`. For tasks where `(s) Split into sub-tasks` was chosen, the sub-tasks' responses replace the original task's slot; if any sub-task returns `BLOCKED`, it appears in `BLOCKED_TASKS` on the next pass. Each re-dispatch counts toward the per-task retry budget (see Step 13). When a task exhausts its budget while still `BLOCKED`, present only the intervention choices (never a skip option) — the gate cannot exit successfully until every `BLOCKED` task yields `DONE` or `DONE_WITH_CONCERNS`, or the user picks `(x)`.
 
 ### 3. Concerns handling (runs second)
 
 **Precondition:** §2 has exited (i.e., `BLOCKED_TASKS` is empty); every task in the wave is `DONE` or `DONE_WITH_CONCERNS`.
 
-If `CONCERNED_TASKS` is empty, skip to §4 (gate exit) and proceed directly to Step 10.
+If `CONCERNED_TASKS` is empty, skip to §4 (gate exit) and proceed directly to Step 11.
 
 Otherwise, present every concerned task together in a single combined message — do not prompt one-task-at-a-time:
 
@@ -444,36 +437,31 @@ Otherwise, present every concerned task together in a single combined message �
   Concerns:
     - <worker concern, verbatim>
     - <worker concern, verbatim>
-
-── Task 5: <short title> ──────────────────────────────────
-  Files: <path/one>
-  Concerns:
-    - <worker concern, verbatim>
 ───────────────────────────────────────────────────────────
 
 Options:
-  (c) Continue to verification            — proceed to Step 10 with all tasks as-is
+  (c) Continue to verification            — proceed to Step 11 with all tasks as-is
   (r) Remediate selected task(s)          — specify task number(s) and guidance; re-dispatch those tasks
   (x) Stop execution                      — halt the plan; committed waves are preserved as checkpoints
 ```
 
 - **(c) Continue to verification.** Exit §3. Leave every concerned task's Step 9 status as `DONE_WITH_CONCERNS` and proceed to §4; the verifier is the next gate and will judge the work on its own terms.
-- **(r) Remediate selected task(s).** Prompt the user for (a) the task numbers to remediate (one or more from `CONCERNED_TASKS`) and (b) a single freeform guidance block that applies to those tasks. Re-dispatch each selected task to a fresh `coder` worker using the same task spec, with the worker's original concerns block and the user's guidance appended under a `## Concerns To Address` section in the worker prompt. Each re-dispatch counts against that task's retry budget; see Step 12. When the re-dispatches return, apply Step 9 again. If any re-dispatched task comes back `BLOCKED`, return to §2 with that task. Otherwise rebuild `CONCERNED_TASKS` from the new wave state and re-enter §3 from its top; a task that returns `DONE` after remediation is removed from `CONCERNED_TASKS`, and a task that returns `DONE_WITH_CONCERNS` again re-appears in the next combined view. Tasks that were not selected for remediation keep their prior Step 9 status and re-appear unchanged in the next view.
-- **(x) Stop execution.** Halt immediately. Do NOT run Step 10 or Step 11 for this wave. Report partial progress via Step 13. All prior wave commits remain as checkpoints.
+- **(r) Remediate selected task(s).** Prompt the user for (a) the task numbers to remediate (one or more from `CONCERNED_TASKS`) and (b) a single freeform guidance block that applies to those tasks. Re-dispatch each selected task to a fresh `coder` worker using the same task spec, with the worker's original concerns block and the user's guidance appended under a `## Concerns To Address` section in the worker prompt. Each re-dispatch counts against that task's retry budget; see Step 13. When the re-dispatches return, apply Step 9 again. If any re-dispatched task comes back `BLOCKED`, return to §2 with that task. Otherwise rebuild `CONCERNED_TASKS` from the new wave state and re-enter §3 from its top; a task that returns `DONE` after remediation is removed from `CONCERNED_TASKS`, and a task that returns `DONE_WITH_CONCERNS` again re-appears in the next combined view. Tasks that were not selected for remediation keep their prior Step 9 status and re-appear unchanged in the next view.
+- **(x) Stop execution.** Halt immediately. Do NOT run Step 11 or Step 12 for this wave. Report partial progress via Step 14. All prior wave commits remain as checkpoints.
 
 Repeat §3 until `CONCERNED_TASKS` is empty (either because the user picked `(c)` or because every concerned task has been remediated to `DONE`) or the user picks `(x)`.
 
 ### 4. Gate exit
 
-This gate exits when `BLOCKED_TASKS` is empty and `CONCERNED_TASKS` is either empty or the user picked `(c) Continue to verification`. Every task in the wave is then `DONE` or `DONE_WITH_CONCERNS` and the wave proceeds to Step 10. Tasks still `DONE_WITH_CONCERNS` flow into Step 10 as-is; the verifier's verdict is authoritative. Selecting `(x) Stop execution` from either the blocked-handling phase (§2) or the concerns-handling phase (§3) halts the entire plan via Step 13 and does NOT run Step 10 or Step 11 for this wave.
+This gate exits when `BLOCKED_TASKS` is empty and `CONCERNED_TASKS` is either empty or the user picked `(c) Continue to verification`. Every task in the wave is then `DONE` or `DONE_WITH_CONCERNS` and the wave proceeds to Step 11. Tasks still `DONE_WITH_CONCERNS` flow into Step 11 as-is; the verifier's verdict is authoritative. Selecting `(x) Stop execution` from either the blocked-handling phase (§2) or the concerns-handling phase (§3) halts the entire plan via Step 14 and does NOT run Step 11 or Step 12 for this wave.
 
-## Step 10: Verify wave output
+## Step 11: Verify wave output
 
-**Precondition:** Step 9.5 (wave gate) must have exited. Verification for each task runs in a fresh-context `verifier` subagent via `agent/skills/execute-plan/verify-task-prompt.md`; the orchestrator only collects command evidence and routes the verifier's verdict.
+**Precondition:** Step 10 (wave gate) must have exited. Verification for each task runs in a fresh-context `verifier` subagent via `agent/skills/execute-plan/verify-task-prompt.md`; the orchestrator only collects command evidence and routes the verifier's verdict.
 
 **Protocol-error stop — missing `Verify:` recipes:** Before dispatching the verifier, check that every acceptance criterion for the task has an attached `Verify:` recipe in the plan. If any acceptance criterion is missing a `Verify:` recipe at execute time, STOP execution for this wave. Report the offending task number and criterion text to the user, recommend re-running `generate-plan` to regenerate the plan, and do not dispatch the verifier, do not treat the task as passing, and do not silently skip verification. A plan without complete `Verify:` recipes is a protocol error from generate-plan and must be regenerated before execution can continue.
 
-### Step 10.1: Orchestrator collects command evidence
+### Step 11.1: Orchestrator collects command evidence
 
 For every acceptance criterion whose `Verify:` recipe is a shell command (e.g. `grep ...`, `cat ...`, `test -f ...`, `go vet ./...`), the orchestrator — NOT the verifier — runs the command and captures:
 
@@ -486,32 +474,32 @@ For every acceptance criterion whose `Verify:` recipe is a shell command (e.g. `
 
 Emit one evidence block per command-style recipe, with the header `[Evidence for Criterion N]` where `N` is the 1-based criterion number in plan order. Each block contains `command: <exact command>`, `exit_code: <status>`, `stdout:` (fenced), and `stderr:` (fenced), in that order, after the truncation rule. If a criterion has no command-style recipe, no evidence block is emitted for it (gaps in numbering are expected and correct). These blocks are what the orchestrator passes as `{ORCHESTRATOR_COMMAND_EVIDENCE}` in the verifier prompt; the verifier cites them by criterion number (e.g. `evidence: Evidence for Criterion 2`).
 
-File-inspection and prose-inspection recipes (e.g. "read Step 10.2 and confirm …", "confirm the file contains section X") are NOT executed by the orchestrator. The verifier evaluates them directly against the named files.
+File-inspection and prose-inspection recipes (e.g. "read Step 11.2 and confirm …", "confirm the file contains section X") are NOT executed by the orchestrator. The verifier evaluates them directly against the named files.
 
-### Step 10.2: Dispatch the verifier
+### Step 11.2: Dispatch the verifier
 
-For each task in the wave (regardless of its Step 9 status, except `BLOCKED` which is already handled in Step 9.5), dispatch a fresh `verifier` subagent using the template at `agent/skills/execute-plan/verify-task-prompt.md`. The verifier does NOT run commands. It reads the command-evidence blocks produced in Step 10.1, reads only the files listed under `## Verifier-Visible Files` (plus any files explicitly named by a recipe), and returns per-criterion verdicts.
+For each task in the wave (regardless of its Step 9 status, except `BLOCKED` which is already handled in Step 10), dispatch a fresh `verifier` subagent using the template at `agent/skills/execute-plan/verify-task-prompt.md`. The verifier does NOT run commands. It reads the command-evidence blocks produced in Step 11.1, reads only the files listed under `## Verifier-Visible Files` (plus any files explicitly named by a recipe), and returns per-criterion verdicts.
 
-Verifier dispatches for the wave run in parallel, bounded by the pi-subagent `MAX_PARALLEL_TASKS` cap (see Step 5). Do not verify sequentially — issue all verifier subagents concurrently up to the cap and wait for all of them to return before parsing in Step 10.3.
+Verifier dispatches for the wave run in parallel, bounded by the pi-subagent `MAX_PARALLEL_TASKS` cap (see Step 5). Do not verify sequentially — issue all verifier subagents concurrently up to the cap and wait for all of them to return before parsing in Step 11.3.
 
 Fill the template's placeholders as follows:
 
 - `{TASK_SPEC}` — the task block from the plan, verbatim.
 - `{ACCEPTANCE_CRITERIA_WITH_VERIFY}` — the acceptance criteria list for the task, each paired with its `Verify:` recipe, numbered starting at 1.
-- `{ORCHESTRATOR_COMMAND_EVIDENCE}` — the evidence blocks collected in Step 10.1, in criterion order. If the task has no command-style recipes, leave this section empty.
+- `{ORCHESTRATOR_COMMAND_EVIDENCE}` — the evidence blocks collected in Step 11.1, in criterion order. If the task has no command-style recipes, leave this section empty.
 - `{MODIFIED_FILES}` — the orchestrator-assembled verifier-visible file set, as a newline-separated, deduplicated list of paths. The orchestrator MUST compute this set as the union of three inputs so that the worker being judged cannot narrow its own verification surface:
   1. **Task-declared scope.** Every path listed in the plan task's `**Files:**` section, verbatim. A task that declares a file is on the hook for that file regardless of whether the worker reported touching it.
   2. **Worker-reported changes.** The paths listed in the worker's `## Files Changed` section. These are informative but NOT authoritative on their own — a worker that omits a file it actually modified cannot hide that file from the verifier.
   3. **Orchestrator-observed diff state.** The paths surfaced by `git status --porcelain` (working tree and index, relative to the last commit) for the wave, plus any files present in the wave's `git diff HEAD` output. In parallel-wave dispatch where multiple tasks share the working tree, scope this to files that plausibly belong to this task — at minimum include every path from inputs 1 and 2 that also appears in the orchestrator-observed set, and include any additional orchestrator-observed paths that fall under the task's declared `**Files:**` directories. Include all orchestrator-observed paths when the wave contains only this task.
   Deduplicate the union and present it as the verifier-visible file set. Explicitly record in the prompt that this set is orchestrator-assembled so the verifier knows it is not simply the worker's self-report.
-- `{DIFF_CONTEXT}` — the uncommitted wave diff against `HEAD`, produced as follows. For tracked files modified in this wave, use `git diff HEAD -- <modified files>`. For newly created (untracked) files, `git diff HEAD` does not produce output; instead, generate a diff for each new file via `git diff --no-index /dev/null -- <file>` (which produces a unified diff showing the entire file as added). Concatenate both outputs into a single diff block. To identify which files are new vs. modified, check `git status --porcelain -- <modified files>`: entries prefixed with `??` are untracked/new; all others are tracked modifications. This reflects the working tree vs. the last commit, which is where wave changes live before Step 11's commit. Do NOT substitute a committed-range diff (e.g. a diff between `HEAD` and a prior commit) or a `--staged` diff; wave changes have not been committed yet. **Diff truncation rule.** If the combined diff output exceeds 500 lines or 40 KB, truncate it by keeping the first 300 lines and the last 100 lines, separated by a single marker line that records the pre-truncation line count and byte count (e.g., `[diff truncated — <N> lines, <B> bytes total; verifier should note this and fall back to reading the named files for file-inspection criteria whose relevant code may lie in the truncated window]`). Never silently drop diff output. If a file-inspection criterion cannot be judged because the relevant hunk is inside the truncated window, the verifier should read the named file(s) directly from `## Verifier-Visible Files` rather than guessing. **Sub-task dispatch carve-out:** Sub-task dispatches from the Blocked handling phase of Step 9.5 (split-into-sub-tasks) MUST occur pre-commit — their changes must remain in the working tree at Step 10 time so `git diff HEAD` captures them alongside the rest of the wave. Step 11's commit is the only sanctioned transition from working tree to committed state for wave changes, and it runs after Step 10. If for any reason a sub-task's changes were committed before Step 10 runs for this wave (a protocol violation that should not normally occur), substitute `git diff <pre-subtask-commit>..HEAD -- <modified files>` for those criteria so the verifier still sees the sub-task's changes; otherwise file-inspection criteria will fail for insufficient evidence even though the work was done.
+- `{DIFF_CONTEXT}` — the uncommitted wave diff against `HEAD`, produced as follows. For tracked files modified in this wave, use `git diff HEAD -- <modified files>`. For newly created (untracked) files, `git diff HEAD` does not produce output; instead, generate a diff for each new file via `git diff --no-index /dev/null -- <file>` (which produces a unified diff showing the entire file as added). Concatenate both outputs into a single diff block. To identify which files are new vs. modified, check `git status --porcelain -- <modified files>`: entries prefixed with `??` are untracked/new; all others are tracked modifications. This reflects the working tree vs. the last commit, which is where wave changes live before Step 12's commit. Do NOT substitute a committed-range diff (e.g. a diff between `HEAD` and a prior commit) or a `--staged` diff; wave changes have not been committed yet. **Diff truncation rule.** If the combined diff output exceeds 500 lines or 40 KB, truncate it by keeping the first 300 lines and the last 100 lines, separated by a single marker line that records the pre-truncation line count and byte count (e.g., `[diff truncated — <N> lines, <B> bytes total; verifier should note this and fall back to reading the named files for file-inspection criteria whose relevant code may lie in the truncated window]`). Never silently drop diff output. If a file-inspection criterion cannot be judged because the relevant hunk is inside the truncated window, the verifier should read the named file(s) directly from `## Verifier-Visible Files` rather than guessing. **Sub-task dispatch carve-out:** Sub-task dispatches from the Blocked handling phase of Step 10 (split-into-sub-tasks) MUST occur pre-commit — their changes must remain in the working tree at Step 11 time so `git diff HEAD` captures them alongside the rest of the wave. Step 12's commit is the only sanctioned transition from working tree to committed state for wave changes, and it runs after Step 11. If for any reason a sub-task's changes were committed before Step 11 runs for this wave (a protocol violation that should not normally occur), substitute `git diff <pre-subtask-commit>..HEAD -- <modified files>` for those criteria so the verifier still sees the sub-task's changes; otherwise file-inspection criteria will fail for insufficient evidence even though the work was done.
 - `{WORKING_DIR}` — the plan's working directory.
 
 **Verifier model tier:** Default the verifier's model to `standard`. If the verified task itself ran at `capable`, upgrade the verifier to `capable` so its judgment matches the task's complexity. Never downgrade below `standard`.
 
 Dispatch the subagent with `agent: "verifier"`, using the Step 6 model-tier resolution to map `standard`/`capable` to the concrete model and dispatch strings.
 
-### Step 10.3: Parse verifier output and gate the wave
+### Step 11.3: Parse verifier output and gate the wave
 
 The verifier returns a report with two sections: `## Per-Criterion Verdicts` and `## Overall Verdict`. Parse as follows:
 
@@ -527,17 +515,15 @@ The verifier output MUST satisfy `S == {1..K}` — exactly one header per criter
 Route the parsed result:
 
 - `VERDICT: PASS` — the task passes wave verification.
-- `VERDICT: FAIL` — route the task into Step 12's retry loop, including the per-criterion `FAIL` entries and their `reason:` text so the retry has concrete remediation targets.
+- `VERDICT: FAIL` — route the task into Step 13's retry loop, including the per-criterion `FAIL` entries and their `reason:` text so the retry has concrete remediation targets.
 
-**Protocol-error routing.** Any malformed verifier output — missing or extra criterion blocks, duplicate criterion numbers, out-of-range numbers, a `verdict:` prefix, lowercase verdict tokens, or an unparseable overall verdict line — is treated exactly as `VERDICT: FAIL` for the task. The orchestrator routes it into Step 12's retry loop with a concrete description of the protocol violation (e.g. "missing [Criterion 3]", "duplicate [Criterion 2]", "out-of-range [Criterion 5] when K=4") so the re-dispatched verifier has a concrete target to fix. Protocol errors never pass the wave gate and are never silently interpreted as `PASS`.
+**Protocol-error routing.** Any malformed verifier output — missing or extra criterion blocks, duplicate criterion numbers, out-of-range numbers, a `verdict:` prefix, lowercase verdict tokens, or an unparseable overall verdict line — is treated exactly as `VERDICT: FAIL` for the task. The orchestrator routes it into Step 13's retry loop with a concrete description of the protocol violation (e.g. "missing [Criterion 3]", "duplicate [Criterion 2]", "out-of-range [Criterion 5] when K=4") so the re-dispatched verifier has a concrete target to fix. Protocol errors never pass the wave gate and are never silently interpreted as `PASS`.
 
-**Wave gate exit:** The wave exits Step 10 successfully only when every task in the wave has `VERDICT: PASS`. If any task has `VERDICT: FAIL`, the wave is not verified and Step 11 MUST NOT run until Step 12's retry loop produces a `VERDICT: PASS` for every failed task.
+**Wave gate exit:** The wave exits Step 11 successfully only when every task in the wave has `VERDICT: PASS`. If any task has `VERDICT: FAIL`, the wave is not verified and Step 12 MUST NOT run until Step 13's retry loop produces a `VERDICT: PASS` for every failed task.
 
-## Step 11: Post-wave commit and integration tests
+## Step 12: Post-wave commit and integration tests
 
-**Precondition:** Step 9.5 (wave gate) must have exited and Step 10 must report `VERDICT: PASS` for every task in the wave. If any precondition is unmet, return to the responsible gate (Step 9.5 for BLOCKED or unresolved concerns, Step 12's retry loop for `VERDICT: FAIL`). Both the post-wave commit and the integration-test run are withheld until the wave completes successfully.
-
-After wave verification (Step 10) completes successfully for a wave, perform the following steps in order.
+**Precondition:** Step 10 (wave gate) must have exited and Step 11 must report `VERDICT: PASS` for every task in the wave. If any precondition is unmet, return to the responsible gate (Step 10 for BLOCKED or unresolved concerns, Step 13's retry loop for `VERDICT: FAIL`). Both the post-wave commit and the integration-test run are withheld until the wave completes successfully.
 
 ### 1. Commit wave changes
 
@@ -569,8 +555,6 @@ TEST_OUTPUT=$(<test_command> 2>&1)
 TEST_EXIT=$?
 ```
 
-#### Classification
-
 Apply the integration regression model from [`integration-regression-model.md`](integration-regression-model.md). Pass if `new_regressions_after_deferment` is empty; fail if non-empty.
 
 #### Menu
@@ -586,9 +570,9 @@ Options:
 (c) Stop execution                  — halt plan execution; committed waves are preserved as checkpoints
 ```
 
-- **(a) Debug failures:** Run the `Debugger-first flow` (below) with the **Step 11 (post-wave)** parameter row, scoped to the tests in `new_regressions_after_deferment`. Do NOT undo the wave commit up front; the debugging dispatch inspects the committed state. This path counts as a retry toward the 3-retry limit in Step 12.
+- **(a) Debug failures:** Run the `Debugger-first flow` (below) with the **Step 12 (post-wave)** parameter row, scoped to the tests in `new_regressions_after_deferment`. Do NOT undo the wave commit up front; the debugging dispatch inspects the committed state. This path counts as a retry toward the 3-retry limit in Step 13.
 - **(b) Defer integration debugging:** Compute `additions := new_regressions_after_deferment \ baseline_failures` (preserving disjointness with `baseline_failures`) and set `deferred_integration_regressions := deferred_integration_regressions ∪ additions`. The wave commit remains. Warn: "⚠️ Proceeding with deferred integration regressions. Final plan completion is BLOCKED until every deferred regression is resolved — the final wave's menu will not offer a defer option, so these failures must be debugged (or explicitly accepted via `Stop execution`) before the plan can report success." Then proceed to wave `<N+1>`.
-- **(c) Stop execution:** Halt execution. All prior wave commits are preserved as checkpoints. Report partial progress (Step 13). The user can resume or fix manually.
+- **(c) Stop execution:** Halt execution. All prior wave commits are preserved as checkpoints. Report partial progress (Step 14). The user can resume or fix manually.
 
 **Final-wave menu** (wave `<N>` where `<N> == total_waves`):
 
@@ -600,63 +584,61 @@ Options:
 
 The defer option is intentionally removed on the final wave: there is no subsequent wave to carry deferred regressions into, and the precondition that final completion is blocked until all plan-introduced regressions are resolved forbids silently shipping them. On the final wave, the user MUST either debug or stop.
 
-- **(a) Debug failures:** Same as the intermediate-wave `(a)` — run the `Debugger-first flow` (below) with the **Step 11 (post-wave)** parameter row, scoped to `new_regressions_after_deferment`, counting toward the Step 12 retry limit. Deferred regressions from prior waves are NOT handled here; they are cleared by Step 15's "Final integration regression gate (precondition)" before the plan can report success. The same final gate also catches any regression introduced after this final wave (e.g. by Step 14 review/remediation) via the same three-set classification used here.
-- **(c) Stop execution:** Halt execution. Prior wave commits are preserved as checkpoints. Report partial progress (Step 13).
+- **(a) Debug failures:** Same as the intermediate-wave `(a)` — run the `Debugger-first flow` (below) with the **Step 12 (post-wave)** parameter row, scoped to `new_regressions_after_deferment`, counting toward the Step 13 retry limit. Deferred regressions from prior waves are NOT handled here; they are cleared by Step 16's "Final integration regression gate (precondition)" before the plan can report success. The same final gate also catches any regression introduced after this final wave (e.g. by Step 15 review/remediation) via the same three-set classification used here.
+- **(c) Stop execution:** Halt execution. Prior wave commits are preserved as checkpoints. Report partial progress (Step 14).
 
 ### Debugger-first flow
 
-Shared by Step 11 (post-wave integration failures) and Step 15 (final integration regression gate). When the caller's `(a) Debug failures` option is chosen, do NOT re-dispatch every task in scope. Instead, follow the parameterized flow below with the caller's parameter row.
-
-**Caller parameters** (see table below for values by caller)
+Shared by Step 12 (post-wave integration failures) and Step 16 (final integration regression gate). When the caller's `(a) Debug failures` option is chosen, do NOT re-dispatch every task in scope. Instead, follow the parameterized flow below with the caller's parameter row.
 
 **Parameter values by caller**
 
-| Parameter | Step 11 (post-wave) | Step 15 (final-gate) |
+| Parameter | Step 12 (post-wave) | Step 16 (final-gate) |
 |---|---|---|
-| Scope | Triggered by Step 11's post-wave integration-test menu, while a current wave `<N>` exists. | Triggered by Step 15's "Final integration regression gate (precondition)" after all waves and any Step 14 remediation. No current wave exists; `HEAD` may be a Step 14 commit. |
+| Scope | Triggered by Step 12's post-wave integration-test menu, while a current wave `<N>` exists. | Triggered by Step 16's "Final integration regression gate (precondition)" after all waves and any Step 15 remediation. No current wave exists; `HEAD` may be a Step 15 commit. |
 | Range / changed-file universe | The wave commit: use `git show HEAD --stat` and `git show HEAD` to enumerate the files introduced by the wave. | The plan execution range: `BASE_SHA` = `PRE_EXECUTION_SHA` (recorded in Step 8, immediately before the first wave dispatched); `HEAD_SHA` = `git rev-parse HEAD` at this moment. Use `git diff --name-only BASE_SHA HEAD_SHA` — NOT `git show HEAD`, since HEAD at final-gate time is not guaranteed to be a wave commit. |
 | Suspect task universe | Wave `<N>`'s tasks whose modified files appear in the failing stack traces or whose behavior the failing tests cover. If the mapping is ambiguous, include every wave task. | Every plan task whose declared `**Files:**` scope (from the plan file) intersects the failing stack traces or whose behavior the failing tests cover. If the mapping is ambiguous, include every plan task whose `**Files:**` scope intersects `git diff --name-only BASE_SHA HEAD_SHA` — i.e., every task whose output was touched by plan execution. Do NOT constrain to a single wave. |
-| Success condition | On re-running the test command and applying the Step 7 reconciliation algorithm, `new_regressions_after_deferment` is empty. Pre-existing baseline failures and previously-deferred regressions may remain; incidentally-cleared deferred regressions are reported under "Cleared deferred regressions" via the normal reconciliation rule. On success, proceed to the next wave. | On re-entering the Step 15 gate at its step 1 (re-run the suite, re-reconcile, recompute both sets), **both** `still_failing_deferred` and `new_regressions_after_deferment` are empty. Pre-existing baseline failures may remain. Unlike the wave-scoped case, the final gate must also clear any `still_failing_deferred` carried from prior waves. On success, the gate passes and normal completion proceeds. |
-| Commit template / undo behavior | Remediation commit message: `fix(plan): wave <N> regression — <short summary>`. **Commit-undo fallback is available**: if targeted remediation also fails and the user chooses to retry again, offer to undo the wave commit with `git reset HEAD~1` (working-tree changes preserved unstaged) before a broader retry. Do not undo proactively. | Remediation commit message: `fix(plan): final-gate regression — <short summary>`. **Commit-undo fallback is NOT available**: `HEAD` is not guaranteed to be a wave commit, and prior wave commits must remain as checkpoints for the `(c) Stop execution` exit path. On repeated failure, the only exits are another debugging attempt (costing a Step 12 retry) or `(c) Stop execution`. |
+| Success condition | On re-running the test command and applying the Step 7 reconciliation algorithm, `new_regressions_after_deferment` is empty. Pre-existing baseline failures and previously-deferred regressions may remain; incidentally-cleared deferred regressions are reported under "Cleared deferred regressions" via the normal reconciliation rule. On success, proceed to the next wave. | On re-entering the Step 16 gate at its step 1 (re-run the suite, re-reconcile, recompute both sets), **both** `still_failing_deferred` and `new_regressions_after_deferment` are empty. Pre-existing baseline failures may remain. Unlike the wave-scoped case, the final gate must also clear any `still_failing_deferred` carried from prior waves. On success, the gate passes and normal completion proceeds. |
+| Commit template / undo behavior | Remediation commit message: `fix(plan): wave <N> regression — <short summary>`. **Commit-undo fallback is available**: if targeted remediation also fails and the user chooses to retry again, offer to undo the wave commit with `git reset HEAD~1` (working-tree changes preserved unstaged) before a broader retry. Do not undo proactively. | Remediation commit message: `fix(plan): final-gate regression — <short summary>`. **Commit-undo fallback is NOT available**: `HEAD` is not guaranteed to be a wave commit, and prior wave commits must remain as checkpoints for the `(c) Stop execution` exit path. On repeated failure, the only exits are another debugging attempt (costing a Step 13 retry) or `(c) Stop execution`. |
 
 **Flow** (applies to both callers; substitute the parameter values from the row above):
 
-1. **Identify suspects from the failure output.** Inspect the new failing test names, file paths in stack traces, and the diff of the caller's **range / changed-file universe**. Build a short suspect list drawn from the caller's **suspect task universe**, including each candidate task's title (and, for Step 15, its declared `**Files:**` scope). If the mapping is ambiguous, fall back to the "include every …" rule spelled out for the caller.
+1. **Identify suspects from the failure output.** Inspect the new failing test names, file paths in stack traces, and the diff of the caller's **range / changed-file universe**. Build a short suspect list drawn from the caller's **suspect task universe**, including each candidate task's title (and, for Step 16, its declared `**Files:**` scope). If the mapping is ambiguous, fall back to the "include every …" rule spelled out for the caller.
 
 2. **Dispatch a single debugging pass** using the `coder` agent with a prompt that follows the `systematic-debugging` skill. The prompt MUST include:
-   - The failing test output (full, not truncated). For Step 15, provide this for the union `still_failing_deferred ∪ new_regressions_after_deferment`, with a labeled breakdown of which identifiers were previously deferred vs. first surfaced at the final gate so the diagnosis can reason about cause (e.g., long-deferred regressions vs. regressions newly introduced by Step 14 remediation).
-   - The range identifier from the caller's parameter row (Step 11: the wave commit SHA; Step 15: `BASE_SHA..HEAD_SHA`) and the list of files changed across it.
+   - The failing test output (full, not truncated). For Step 16, provide this for the union `still_failing_deferred ∪ new_regressions_after_deferment`, with a labeled breakdown of which identifiers were previously deferred vs. first surfaced at the final gate so the diagnosis can reason about cause (e.g., long-deferred regressions vs. regressions newly introduced by Step 15 remediation).
+   - The range identifier from the caller's parameter row (Step 12: the wave commit SHA; Step 16: `BASE_SHA..HEAD_SHA`) and the list of files changed across it.
    - The suspect task list from step 1, with each task's title.
    - An explicit instruction: "Follow the `systematic-debugging` skill. Complete Phase 1 (root cause investigation) before proposing any fix. If the root cause is a clear, localized defect in one or two files, you MAY apply the fix in this same dispatch — follow TDD (write a failing test reproducing the regression, then fix). If the root cause spans multiple tasks or requires design judgment, return a diagnosis only and do NOT modify code."
    - The required report shape: either `STATUS: DONE` with the fix applied and RED/GREEN evidence for the regression test, or `STATUS: DONE_WITH_CONCERNS` containing a `## Diagnosis` section naming the implicated task(s), the root cause, and the minimal change needed.
 
 3. **Handle the debugging pass result.** Judge success by the caller's **success condition**.
 
-   - **Diagnosed and fixed (`STATUS: DONE`):** Commit any applied fix using the caller's **commit template** (skip the commit if the dispatch returned `DONE` without file changes). Then evaluate the success condition: for Step 11, re-run the test command and apply the Step 7 reconciliation algorithm; for Step 15, re-enter the gate at step 1 (re-run the suite, re-reconcile, recompute both sets). If the condition holds, the remediation succeeded — proceed per the caller's "on success" behavior. If it does not hold, treat this as a failed debugging pass (below).
+   - **Diagnosed and fixed (`STATUS: DONE`):** Commit any applied fix using the caller's **commit template** (skip the commit if the dispatch returned `DONE` without file changes). Then evaluate the success condition: for Step 12, re-run the test command and apply the Step 7 reconciliation algorithm; for Step 16, re-enter the gate at step 1 (re-run the suite, re-reconcile, recompute both sets). If the condition holds, the remediation succeeded — proceed per the caller's "on success" behavior. If it does not hold, treat this as a failed debugging pass (below).
    - **Diagnosis only (`STATUS: DONE_WITH_CONCERNS` with `## Diagnosis`):** Use the diagnosis to dispatch a **targeted remediation** — a second `coder` dispatch scoped to only the implicated task(s)/files from the diagnosis. Include the diagnosis text, the failing test output, and the original task spec(s) for the implicated task(s) from the plan file. After that dispatch returns, commit its changes using the caller's **commit template** (skip if no files changed) and evaluate the caller's success condition as above. If it holds, the remediation succeeded. If it does not, treat this as a failed debugging pass.
-   - **Failed debugging pass** (blocker, or the success condition still does not hold): re-present the caller's menu — Step 11's wave-appropriate menu (intermediate-wave `(a)`/`(b)`/`(c)` or final-wave `(a)`/`(c)`) or Step 15's `(a)`/`(c)` menu. Count this attempt toward the Step 12 retry limit for the implicated tasks.
+   - **Failed debugging pass** (blocker, or the success condition still does not hold): re-present the caller's menu — Step 12's wave-appropriate menu (intermediate-wave `(a)`/`(b)`/`(c)` or final-wave `(a)`/`(c)`) or Step 16's `(a)`/`(c)` menu. Count this attempt toward the Step 13 retry limit for the implicated tasks.
 
 4. **Do NOT blanket re-dispatch tasks outside the diagnosis.** Avoiding re-runs of unaffected tasks is the point of this flow — only the tasks explicitly implicated by the diagnosis are re-dispatched.
 
-5. **Commit-undo fallback** availability is governed by the caller's **commit template / undo behavior** parameter. When available (Step 11), it is used only after targeted remediation has also failed and the user chooses to retry again — never proactively. When not available (Step 15), the only exits on repeated failure are another debugging attempt (costing a Step 12 retry) or `(c) Stop execution`.
+5. **Commit-undo fallback** availability is governed by the caller's **commit template / undo behavior** parameter. When available (Step 12), it is used only after targeted remediation has also failed and the user chooses to retry again — never proactively. When not available (Step 16), the only exits on repeated failure are another debugging attempt (costing a Step 13 retry) or `(c) Stop execution`.
 
-## Step 12: Handle failures and retries
+## Step 13: Handle failures and retries
 
 If a worker produces empty, missing, or incorrect output:
-1. Retry automatically up to **3 times** (with improvements to the task prompt if possible). **Shared counter:** All re-dispatches from the Blocked handling phase (Step 9.5), the Concerns handling phase `(r)` remediation (Step 9.5), and Step 10 failure routing (verifier `VERDICT: FAIL`) share a single per-task retry counter. Exhaustion in one path exhausts it for all paths — a task that has been re-dispatched twice through the Blocked handling phase and once through the Concerns handling phase has used all 3 retries, and any subsequent Step 10 `VERDICT: FAIL` for that task goes directly to the user-prompt in step 2 below rather than triggering another automatic retry. **Sub-task split budget rule:** Choosing `(s) Split into sub-tasks` in the Blocked handling phase (Step 9.5) consumes 1 retry against the parent task's budget, and each resulting sub-task inherits the parent's remaining retry count rather than a fresh 3-retry budget. This closes the bypass where an exhausted parent could be split to obtain additional effective retries.
+1. Retry automatically up to **3 times** (with improvements to the task prompt if possible). **Shared counter:** All re-dispatches from the Blocked handling phase (Step 10), the Concerns handling phase `(r)` remediation (Step 10), and Step 11 failure routing (verifier `VERDICT: FAIL`) share a single per-task retry counter. Exhaustion in one path exhausts it for all paths — a task that has been re-dispatched twice through the Blocked handling phase and once through the Concerns handling phase has used all 3 retries, and any subsequent Step 11 `VERDICT: FAIL` for that task goes directly to the user-prompt in step 2 below rather than triggering another automatic retry. **Sub-task split budget rule:** Choosing `(s) Split into sub-tasks` in the Blocked handling phase (Step 10) consumes 1 retry against the parent task's budget, and each resulting sub-task inherits the parent's remaining retry count rather than a fresh 3-retry budget. This closes the bypass where an exhausted parent could be split to obtain additional effective retries.
 2. If still failing after 3 retries, **notify the user at the end of the wave** and ask:
-   - Retry again (optionally with a different model or more context). Choosing `Retry again` **resets the per-task 3-retry budget for that task** — the user has explicitly authorized a fresh remediation window, so the shared counter described in step 1 (Blocked handling phase re-dispatch + Concerns handling phase `(r)` re-dispatch + Step 10 `VERDICT: FAIL` retries) is cleared back to 3 for this task only. A subsequent failure on that task re-enters the automatic-retry loop at the top of step 1 with a full budget.
+   - Retry again (optionally with a different model or more context). Choosing `Retry again` **resets the per-task 3-retry budget for that task** — the user has explicitly authorized a fresh remediation window, so the shared counter described in step 1 (Blocked handling phase re-dispatch + Concerns handling phase `(r)` re-dispatch + Step 11 `VERDICT: FAIL` retries) is cleared back to 3 for this task only. A subsequent failure on that task re-enters the automatic-retry loop at the top of step 1 with a full budget.
    - Stop the entire plan
 
-   There is no option to skip a failed task. A wave with any unresolved failure — including a verifier `VERDICT: FAIL` from Step 10 treated as a task failure — must either be retried to resolution or stopped. `VERDICT: FAIL` from Step 10 is routed through this same failure-handling path with no skip option.
+   There is no option to skip a failed task. A wave with any unresolved failure — including a verifier `VERDICT: FAIL` from Step 11 treated as a task failure — must either be retried to resolution or stopped. `VERDICT: FAIL` from Step 11 is routed through this same failure-handling path with no skip option.
 
-Apply wave pacing from Step 3. These options only govern the cadence of waves where Step 9.5 (wave gate) has already exited and every task in the wave has `VERDICT: PASS`. If the wave contains any `BLOCKED` results or unresolved concerns, Step 9.5 has already paused execution; if any task has `VERDICT: FAIL` from Step 10, Step 12's retry loop has already paused execution. Pacing (including option (b) auto-collect) does not apply to any of these pauses — `VERDICT: FAIL` waves are never eligible for option (b) deferral.
+Apply wave pacing from Step 3. These options only govern the cadence of waves where Step 10 (wave gate) has already exited and every task in the wave has `VERDICT: PASS`. If the wave contains any `BLOCKED` results or unresolved concerns, Step 10 has already paused execution; if any task has `VERDICT: FAIL` from Step 11, Step 13's retry loop has already paused execution. Pacing (including option (b) auto-collect) does not apply to any of these pauses — `VERDICT: FAIL` waves are never eligible for option (b) deferral.
 
 - **(a)** Always pause and report before the next wave starts
 - **(b)** Never pause; collect all failures and report at the very end
 - **(c)** Pause only when a wave produced failures; otherwise auto-continue
 
-## Step 13: Report partial progress
+## Step 14: Report partial progress
 
 **Execution stopped early (user request or unrecoverable failure):**
 - Leave the plan file in `.pi/plans/` so it can be resumed.
@@ -674,7 +656,7 @@ They remain unresolved and must be addressed before this branch is considered sh
 
 **Persistence note:** If execution resumes in a new session, do NOT reconstruct `deferred_integration_regressions` from the prior partial-progress report — re-run the full integration suite to re-derive the current failing/deferred state fresh.
 
-## Step 14: Request code review
+## Step 15: Request code review
 
 After all waves complete successfully (and if the user chose review in Step 3):
 
@@ -691,22 +673,19 @@ After all waves complete successfully (and if the user chose review in Step 3):
 
 3. **Handle the result:**
 
-   **`clean`:** Include the review summary (iteration count, review file path) in the Step 15 completion report. Proceed to Step 15.
+   **`clean`:** Include the review summary (iteration count, review file path) in the Step 16 completion report. Proceed to Step 16.
 
-   **`max_iterations_reached`:** Present remaining findings to the user. Offer:
-   - **(a) Keep iterating** — re-invoke refine-code, budget resets
-   - **(b) Proceed with issues** — continue to completion with findings noted
-   - **(c) Stop execution** — skip completion, report partial progress
+   **`max_iterations_reached`:** Present remaining findings to the user; offer: **(a)** keep iterating (budget resets), **(b)** proceed with issues noted, or **(c)** stop execution.
 
-   **Review disabled** (user chose to disable in Step 3): Skip directly to Step 15.
+   **Review disabled** (user chose to disable in Step 3): Skip directly to Step 16.
 
-## Step 15: Complete
+## Step 16: Complete
 
 ### Final integration regression gate (precondition)
 
 **Skip if:** Integration tests are disabled (Step 3 settings) or no test command is available.
 
-Otherwise, always run this gate: re-run the full integration suite and confirm no plan-introduced regression (deferred or freshly surfaced by Step 14 remediation) remains before moving the plan to done.
+Otherwise, always run this gate: re-run the full integration suite and confirm no plan-introduced regression (deferred or freshly surfaced by Step 15 remediation) remains before moving the plan to done.
 
 **Gate protocol:**
 
@@ -722,15 +701,15 @@ Otherwise, always run this gate: re-run the full integration suite and confirm n
 
    ```
    Options:
-   (a) Debug failures now — run the `Debugger-first flow` (defined in Step 11) with the Step 15 (final-gate) parameter row, against the plan-introduced regressions (deferred ∪ new); on success, re-enter this gate.
+   (a) Debug failures now — run the `Debugger-first flow` (defined in Step 12) with the Step 16 (final-gate) parameter row, against the plan-introduced regressions (deferred ∪ new); on success, re-enter this gate.
    (c) Stop execution     — halt plan execution; all committed wave commits are preserved as checkpoints.
    ```
 
-   Empty lists render as `(none)`. The menu mirrors the Step 11 **final-wave menu** — there is no `(b) Defer` option here by design, matching the final-wave rule that plan-introduced regressions cannot be silently deferred past the point where the plan reports success.
+   Empty lists render as `(none)`. The menu mirrors the Step 12 **final-wave menu** — there is no `(b) Defer` option here by design, matching the final-wave rule that plan-introduced regressions cannot be silently deferred past the point where the plan reports success.
 
 4. **Menu actions:**
-   - **(a) Debug failures now:** Run the shared `Debugger-first flow` (defined under Step 11) with the **Step 15 (final-gate)** parameter row, scoped to `still_failing_deferred ∪ new_regressions_after_deferment`. That flow judges success by re-entering this gate at step 1 (re-run the suite, re-reconcile, recompute both sets), so a remediation attempt succeeds when both `still_failing_deferred` and `new_regressions_after_deferment` are empty on the re-run. Repeat until both sets are empty or the user picks `(c)`. Each debugging attempt counts toward the Step 12 retry budget for the implicated tasks.
-   - **(c) Stop execution:** Halt execution. Report partial progress via Step 13 so the user has a complete picture of plan-introduced failures left on the branch: list any non-empty `deferred_integration_regressions` under the deferred-regressions heading, and list the still-unresolved `new_regressions_after_deferment` separately as newly discovered final-gate regressions — do NOT fold them under the deferred-regressions heading, since they were never deferred by the user. Do NOT move the plan file, close the todo, or run branch completion.
+   - **(a) Debug failures now:** Run the shared `Debugger-first flow` (defined under Step 12) with the **Step 16 (final-gate)** parameter row, scoped to `still_failing_deferred ∪ new_regressions_after_deferment`. That flow judges success by re-entering this gate at step 1 (re-run the suite, re-reconcile, recompute both sets), so a remediation attempt succeeds when both `still_failing_deferred` and `new_regressions_after_deferment` are empty on the re-run. Repeat until both sets are empty or the user picks `(c)`. Each debugging attempt counts toward the Step 13 retry budget for the implicated tasks.
+   - **(c) Stop execution:** Halt execution. Report partial progress via Step 14 so the user has a complete picture of plan-introduced failures left on the branch: list any non-empty `deferred_integration_regressions` under the deferred-regressions heading, and list the still-unresolved `new_regressions_after_deferment` separately as newly discovered final-gate regressions — do NOT fold them under the deferred-regressions heading, since they were never deferred by the user. Do NOT move the plan file, close the todo, or run branch completion.
 
 **Blocking guarantee:** Steps `### 1. Move plan to done`, `### 2. Close linked todo`, and `### 4. Branch completion` MUST NOT execute while `still_failing_deferred ∪ new_regressions_after_deferment` is non-empty. The only exits from this gate are: (a) both sets become empty (gate passes), or (b) the user selects `(c) Stop execution`.
 
@@ -756,20 +735,13 @@ Scan the plan file for a line matching `**Source:** TODO-<id>`. This line appear
 
 ### 3. Report summary
 
-Report: number of tasks completed, any concerns noted, review status/notes (if review was performed), and total time taken.
-
-If a linked todo was closed in step 2, include it in the summary (e.g., "Closed TODO-5735f43b").
+Report: number of tasks completed, concerns noted, review status/notes (if performed), total time taken, and any closed todo (e.g., "Closed TODO-5735f43b").
 
 ### 4. Branch completion (if applicable)
 
 **Only when running in a worktree or on a feature branch** (i.e., not on main/master/develop):
 
-Invoke the `finishing-a-development-branch` skill, which:
-1. Verifies tests pass
-2. Determines base branch
-3. Presents 4 options: merge locally, create PR, keep as-is, discard
-4. Executes the chosen option
-5. Cleans up worktree if applicable
+Invoke the `finishing-a-development-branch` skill, which verifies tests, determines base branch, presents merge/PR/keep/discard options, executes the chosen option, and cleans up worktree if applicable.
 
 Branch completion is offered even if review issues are pending — the user may want to keep the branch and fix later, or create a PR with known issues noted.
 
