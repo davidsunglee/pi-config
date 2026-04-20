@@ -152,7 +152,7 @@ Ready to execute: (s)tart / (c)ustomize / (q)uit
 **Workspace values:**
 - Already on a feature branch or in a worktree, and reuse was accepted in Step 0 (clean workspace, or dirty with `(c) Continue`): `current workspace (on <BRANCH_LABEL>)`
 - On main/master/develop and not in a worktree (default): `new worktree (branch: <suggested-branch>)`
-- Already on a feature branch or in a worktree, but the user declined reuse in Step 0 by choosing `(n) Create a new worktree instead`: `new worktree (branch: <suggested-branch>)` — identical to the main-branch default. Step 0's detected reuse state is discarded for the remainder of execution; for Step 3 and everything that follows, treat this case exactly like the main-branch new-worktree path, including customization rules (see below).
+- Already on a feature branch or in a worktree, but the user declined reuse in Step 0: treated identically to the main-branch new-worktree default above. See Step 0 for the reuse-decision rules.
 
 **Integration test value:** When enabled and a test command is available, include the command: `enabled (<command>)`. When no test command is available: `disabled (no test command)`.
 
@@ -160,7 +160,7 @@ Ready to execute: (s)tart / (c)ustomize / (q)uit
 
 | Setting | Default | Notes |
 |---------|---------|-------|
-| Workspace | new worktree | Non-customizable only when Step 0 auto-detected reuse and the user accepted it; otherwise shows `new worktree (branch: <suggested-branch>)` and is customizable. |
+| Workspace | new worktree | See Step 0 for the reuse-vs-new-worktree decision rules. |
 | TDD | enabled | Can disable for non-code plans (docs, config, content) |
 | Execution | parallel, pause on failure | Can customize to sequential, or change pacing |
 | Integration test | enabled | If a test command is available, show `enabled (<command>)`. If no test command, show `disabled (no test command)` |
