@@ -1,6 +1,6 @@
 # Integration regression model
 
-This document is the single canonical definition of the three-set integration tracking model, the reconciliation algorithm, and the user-facing summary format used during plan execution. It is referenced by Step 7 (baseline capture), Step 11 (post-wave integration tests), and Step 15 (final integration regression gate) — those steps use this model verbatim rather than restating it.
+This document is the single canonical definition of the three-set integration tracking model, the reconciliation algorithm, and the user-facing summary format used during plan execution. It is referenced by Step 7 (baseline capture), Step 12 (post-wave integration tests), and Step 16 (final integration regression gate) — those steps use this model verbatim rather than restating it.
 
 ## The three tracked sets
 
@@ -21,7 +21,7 @@ The post-wave integration run is classified against three explicitly tracked set
 
 ## Reconciliation algorithm
 
-After every integration test run (post-wave in Step 11, and the final gate in Step 15), and before classifying pass/fail, compute the transient `current_failing` from the run output and reconcile `deferred_integration_regressions` against it, then derive `new_regressions_after_deferment`:
+After every integration test run (post-wave in Step 12, and the final gate in Step 16), and before classifying pass/fail, compute the transient `current_failing` from the run output and reconcile `deferred_integration_regressions` against it, then derive `new_regressions_after_deferment`:
 
 1. Compute `current_failing` := the set of failing-test identifiers reported by the just-completed integration run, extracted via the Step 7 identifier-extraction contract so the identifiers are directly comparable with `baseline_failures` and `deferred_integration_regressions`. This value is transient — used only as input to steps 2–4 below and discarded after this reconciliation.
 2. Compute `still_failing_deferred := deferred_integration_regressions ∩ current_failing` — deferred regressions that are still failing.
@@ -34,12 +34,12 @@ After every integration test run (post-wave in Step 11, and the final gate in St
 
 ## Pass/fail classification
 
-**Post-wave (Step 11):**
+**Post-wave (Step 12):**
 
 - **Pass:** `new_regressions_after_deferment` is empty. Proceed to the next wave. Format the user-facing summary per the [User-facing summary format](#user-facing-summary-format) section below.
-- **Fail:** `new_regressions_after_deferment` is non-empty. Present the three-section report followed by the Step 11 failure menu.
+- **Fail:** `new_regressions_after_deferment` is non-empty. Present the three-section report followed by the Step 12 failure menu.
 
-Step 15's final gate uses a stricter condition — it gates on the union `still_failing_deferred ∪ new_regressions_after_deferment` — but uses the same reconciliation algorithm and the same three-section report format defined here.
+Step 16's final gate uses a stricter condition — it gates on the union `still_failing_deferred ∪ new_regressions_after_deferment` — but uses the same reconciliation algorithm and the same three-section report format defined here.
 
 ## User-facing summary format
 
