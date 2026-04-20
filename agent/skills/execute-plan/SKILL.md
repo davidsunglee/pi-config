@@ -304,67 +304,7 @@ New failures only will be flagged after each wave.
 
 #### Integration regression model
 
-This subsection is the single canonical definition of the three-set integration tracking model, the reconciliation algorithm, and the user-facing summary format. Step 11 (post-wave integration tests) and Step 15 (final integration regression gate) both reference this subsection rather than restating it.
-
-**The three tracked sets.** The post-wave integration run is classified against three explicitly tracked sets of test identifiers. A "test identifier" is the suite-native unique name for a failing test (e.g. file path plus test name, or fully qualified symbol), taken verbatim from the test runner's failure output per the identifier-extraction contract above.
-
-1. **`baseline_failures`** — the set of tests that failed in the Step 7 baseline run. Captured once, before any wave executes, and never mutated after baseline capture. A test in this set represents a pre-existing failure the plan did not introduce.
-2. **`deferred_integration_regressions`** — the set of tests the user has chosen to debug later via `(b) Defer integration debugging` in a prior wave's intermediate-wave menu. Starts empty at plan start. Grows only when the user selects `(b)` on an intermediate wave, and is reconciled on every subsequent integration run (see reconciliation algorithm below). These are regressions caused by this plan that the user has explicitly deferred — not pre-existing failures.
-3. **`new_regressions_after_deferment`** — the set of tests that are failing in the just-completed integration run AND are not in `baseline_failures` AND are not in the post-reconciliation `deferred_integration_regressions`. Recomputed from scratch on every post-wave integration run (it does not persist across waves). This set names the plan-introduced regressions that first surface in the current run — i.e. the ones the user has not already chosen to defer and that were not pre-existing. It is the authoritative driver of the pass/fail classification below and the target scope of the `(a) Debug failures` and `(b) Defer integration debugging` menu actions.
-
-`current_failing` is NOT one of the three tracked sets. It is a transient per-run value: the set of tests failing in the just-completed integration run, recomputed from scratch on every run, and used solely as input to the reconciliation step that derives the post-reconciliation `deferred_integration_regressions` and the fresh `new_regressions_after_deferment`. Once reconciliation computes those two tracked sets, `current_failing` is not referenced further and is not persisted across waves.
-
-**Disjointness and transition rules:**
-
-- `baseline_failures` and `deferred_integration_regressions` MUST remain disjoint. When adding a test to `deferred_integration_regressions`, first subtract `baseline_failures` from the candidate set; a test cannot simultaneously be a pre-existing baseline failure and a deferred regression.
-- `new_regressions_after_deferment` is disjoint from both `baseline_failures` and `deferred_integration_regressions` by construction (see reconciliation step 4). A test can be in at most one of the three tracked sets at any moment.
-- A test transitions out of `deferred_integration_regressions` only via the reconciliation rule below (when it is no longer failing). It never transitions into `baseline_failures` — the baseline is frozen at Step 7.
-- Only `baseline_failures` and `deferred_integration_regressions` are carried across waves. `new_regressions_after_deferment` is recomputed fresh each run (via reconciliation), and `current_failing` is purely ephemeral input to that computation.
-
-**Reconciliation algorithm.** After every integration test run (post-wave in Step 11, and the final gate in Step 15), and before classifying pass/fail, compute the transient `current_failing` from the run output and reconcile `deferred_integration_regressions` against it, then derive `new_regressions_after_deferment`:
-
-1. Compute `current_failing` := the set of failing-test identifiers reported by the just-completed integration run, extracted via the Step 7 identifier-extraction contract so the identifiers are directly comparable with `baseline_failures` and `deferred_integration_regressions`. This value is transient — used only as input to steps 2–4 below and discarded after this reconciliation.
-2. Compute `still_failing_deferred := deferred_integration_regressions ∩ current_failing` — deferred regressions that are still failing.
-3. Compute `cleared_deferred := deferred_integration_regressions \ current_failing` — deferred regressions that are no longer failing (either the wave's changes fixed them, or the suite's output no longer includes them). Report these briefly in the pass/fail output as "Cleared deferred regressions: <list>".
-4. Set `deferred_integration_regressions := still_failing_deferred`. Any deferred regression not in the current failing set is removed from the tracked set — the orchestrator does NOT carry stale identifiers forward.
-5. Assign `new_regressions_after_deferment := current_failing \ (baseline_failures ∪ deferred_integration_regressions)`. This set is empty when every currently failing test is either a pre-existing baseline failure or a previously deferred regression; it is populated when the just-completed run includes at least one failure that was neither in the baseline nor previously deferred. `new_regressions_after_deferment` is the authoritative source for:
-   - the user-facing "New regressions in this wave" section,
-   - the pass/fail classification below, and
-   - the `(a) Debug failures` and `(b) Defer integration debugging` menu actions (which operate only on the tests in this set).
-
-**Pass/fail classification (post-wave, Step 11):**
-
-- **Pass:** `new_regressions_after_deferment` is empty. Proceed to the next wave. The user-facing summary is formatted per the rules below (brief on a fully-clean suite; three-section block otherwise).
-- **Fail:** `new_regressions_after_deferment` is non-empty. Present the three-section report followed by the Step 11 failure menu.
-
-Step 15's final gate uses a stricter condition — it gates on the union `still_failing_deferred ∪ new_regressions_after_deferment` — but uses the same reconciliation algorithm and the same three-section report format defined here.
-
-**User-facing summary format.** The user-facing summary uses one of two formats, depending on whether the suite is clean:
-
-- **Fully-clean suite** — `baseline_failures ∩ current_failing`, post-reconciliation `deferred_integration_regressions`, and `new_regressions_after_deferment` are ALL empty. Report briefly, without the three-section block:
-
-  ```
-  ✅ Integration tests pass after wave <N> (no failures).
-  ```
-
-- **Not fully clean** — any of the three sets above is non-empty (including the pass path where `new_regressions_after_deferment` is empty but baseline failures or deferred regressions remain). Present exactly these three separately-headed sections, in this order, regardless of whether the overall classification is pass or fail:
-
-  ```
-  <header line — see below>
-
-  ### Baseline failures
-  <list of tests in baseline_failures ∩ current_failing — pre-existing, not plan-introduced>
-
-  ### Deferred integration regressions
-  <list of tests in deferred_integration_regressions (post-reconciliation) — plan-introduced regressions the user chose to defer>
-
-  ### New regressions in this wave
-  <list of tests in new_regressions_after_deferment — plan-introduced regressions first observed in this run>
-  ```
-
-  The header line is `✅ Integration tests pass after wave <N> (no new regressions; baseline and/or deferred failures remain — see below).` on the pass path, and `❌ Integration tests failed after wave <N>.` on the fail path.
-
-  Each of the three sections MUST be present even if its list is empty (render an empty list as `(none)`), and the section headings MUST be the exact strings `Baseline failures`, `Deferred integration regressions`, and `New regressions in this wave`. On the pass path, the "New regressions in this wave" section is rendered as `(none)` by construction. The `(a)` and `(b)` menu actions — which only appear on the fail path — operate only on the "New regressions in this wave" list (i.e. on `new_regressions_after_deferment`).
+See [`integration-regression-model.md`](integration-regression-model.md) for the single canonical definition of the three tracked sets (`baseline_failures`, `deferred_integration_regressions`, `new_regressions_after_deferment`), the disjointness and transition rules, the reconciliation algorithm, the pass/fail classification, and the user-facing summary format. Step 11 and Step 15 reference that document rather than restating the model.
 
 ## Step 8: Execute waves
 
@@ -412,72 +352,7 @@ Read [execute-task-prompt.md](execute-task-prompt.md) in this directory once (be
   - What was completed in prior waves (task names and key outputs, not full details)
   - Any dependencies this task has and what those tasks produced
 - `{WORKING_DIR}` — the absolute path to the working directory (the worktree path if using a worktree, otherwise the project root)
-- `{TDD_BLOCK}` — if TDD is enabled (Step 3 settings), fill with:
-
-  ```
-  ## Test-Driven Development
-
-  **Iron Law:** NO PRODUCTION CODE WITHOUT A FAILING TEST FIRST. If you write production code before a test, delete it and start over. "Delete means delete" — do not keep it as reference, do not adapt it while writing tests.
-
-  **Consult the full skill.** For any implementation or bug-fix work in this task, consult the `test-driven-development` skill before writing code. This block is a summary, not a substitute — the full skill has the rationalization-prevention table, red-flags list, verification checklist, and when-stuck troubleshooting you will need if you get tempted to skip a step.
-
-  ### Red-Green-Refactor cycle
-
-  For every new behavior, bug fix, or change in this task:
-
-  1. **RED — Write one failing test** that describes the desired behavior. One behavior per test, clear name, real code (no mocks unless unavoidable).
-  2. **Verify RED — run the test and watch it fail.** MANDATORY. Confirm: test fails (does not error on a typo), and the failure message matches the expected "feature missing" reason. If the test passes, you are testing existing behavior — fix the test. If it errors, fix the error and re-run until it fails correctly.
-  3. **GREEN — write the minimal code to pass.** Just enough to make this test pass. No extra options, no speculative features, no "while I'm here" refactors.
-  4. **Verify GREEN — run the test and watch it pass.** MANDATORY. Confirm: the new test passes, all other tests still pass, output is pristine (no errors or warnings).
-  5. **Refactor — clean up while green.** Remove duplication, improve names, extract helpers. Keep tests green. Do not add behavior.
-
-  Repeat for the next behavior. If the task lists test files, follow this cycle for each behavior those tests cover.
-
-  ### Rationalizations to reject
-
-  If you catch yourself thinking any of these, STOP and follow TDD — these are the excuses the full skill explicitly calls out:
-
-  - "Too simple to test" / "I'll test after" / "Already manually tested"
-  - "Keep the code as reference while I write tests" (you will adapt it — delete it)
-  - "Deleting X hours of work is wasteful" (sunk cost — unverified code is technical debt)
-  - "TDD will slow me down" / "Manual test is faster"
-  - "Tests-after achieves the same goals" (no — tests-after asks "what does this do?"; tests-first asks "what should this do?")
-  - "It's about spirit, not ritual" / "I'm being pragmatic" / "This is different because…"
-
-  ### Red flags — if any of these are true, stop and start over
-
-  - You wrote production code before the test
-  - The test passed on the first run (you are testing existing behavior)
-  - You cannot explain why the test failed in the RED step
-  - You plan to add tests "later"
-  - You kept pre-existing unverified code as "reference" and adapted it
-
-  ### Verification checklist (before reporting DONE)
-
-  - [ ] Every new function or method has a test
-  - [ ] You watched each test fail before implementing
-  - [ ] Each test failed for the expected reason (feature missing, not a typo)
-  - [ ] You wrote minimal code to pass each test
-  - [ ] All tests pass, not just the new ones
-  - [ ] Output is pristine — no errors, no warnings
-  - [ ] Tests exercise real code (mocks only when unavoidable)
-  - [ ] Edge cases and error paths are covered
-
-  If you cannot check every box, you skipped TDD — start over before reporting.
-
-  ### When stuck
-
-  - "I do not know how to test this" → write the wished-for API in the test first, then implement to match. If still stuck, report NEEDS_CONTEXT.
-  - "The test is too complicated" → the design is too complicated. Simplify the interface.
-  - "I have to mock everything" → the code is too coupled. Use dependency injection.
-  - "The setup is huge" → extract helpers; if still complex, simplify the design.
-
-  ### Bug fixes
-
-  Reproduce the bug with a failing test first. Only then fix. The test proves the fix and prevents regression. Never fix a bug without a test.
-  ```
-
-  If TDD is disabled, fill `{TDD_BLOCK}` with an empty string.
+- `{TDD_BLOCK}` — if TDD is enabled (Step 3 settings), read `agent/skills/execute-plan/tdd-block.md` and substitute its full contents verbatim. If TDD is disabled, substitute the empty string.
 
 The filled template becomes the task prompt for the `coder` subagent. The template already includes self-review instructions, escalation guidance, code organization guidance, and the report format — do not add these separately.
 
@@ -754,12 +629,7 @@ TEST_EXIT=$?
 
 #### Classification
 
-Apply the **Integration regression model** defined in Step 7 — specifically the Step 7 reconciliation algorithm — to the just-completed integration run. That subsection is the single canonical definition of the three tracked sets (`baseline_failures`, `deferred_integration_regressions`, `new_regressions_after_deferment`), the disjointness and transition rules, the reconciliation algorithm, and the user-facing summary format. Use it verbatim here; do not restate.
-
-After reconciliation:
-
-- **Pass** if `new_regressions_after_deferment` is empty. Render the user-facing summary per Step 7's format (brief on a fully-clean suite; three-section block otherwise) and proceed to the next wave.
-- **Fail** if `new_regressions_after_deferment` is non-empty. Render Step 7's three-section report and present the menu below.
+Apply the integration regression model from [`integration-regression-model.md`](integration-regression-model.md) to classify this run — covering the three tracked sets, reconciliation algorithm, pass/fail rules, and user-facing summary format. Pass if `new_regressions_after_deferment` is empty; fail if non-empty.
 
 #### Menu
 
@@ -892,28 +762,15 @@ Before moving the plan file, closing the linked todo, or running branch completi
 
 1. **Re-run the full integration suite** using the same test command from Step 3. Apply the Step 7 identifier-extraction contract to the runner's failure output so identifiers are directly comparable with `baseline_failures` and `deferred_integration_regressions`.
 
-2. **Apply the Step 7 reconciliation algorithm** to the run output. That algorithm is the single canonical definition of how to compute `current_failing`, reconcile `deferred_integration_regressions` (reporting any `cleared_deferred`), and derive `new_regressions_after_deferment`. Reuse it verbatim here so the final gate cannot silently miss a regression that a post-wave Step 11 classification would have surfaced. On this gate, a non-empty `new_regressions_after_deferment` typically means Step 14 review/remediation (or another post-final-wave change) introduced a fresh regression that no wave's integration menu had a chance to surface.
+2. **Apply the reconciliation algorithm** from [`integration-regression-model.md`](integration-regression-model.md) to compute `current_failing`, reconcile `deferred_integration_regressions`, and derive `new_regressions_after_deferment`. A non-empty `new_regressions_after_deferment` here typically means Step 14 review/remediation introduced a fresh regression.
 
 3. **Gate on the union `still_failing_deferred ∪ new_regressions_after_deferment`:**
    - If **both** sets are empty: the gate passes. Proceed to `### 1. Move plan to done`.
    - If **either** `still_failing_deferred` or `new_regressions_after_deferment` is non-empty: the plan cannot be marked complete while either set is non-empty. Present the report and menu below.
 
-   Report format (always use the Step 7 three-section block — do NOT collapse it, even if one section is empty, so the user sees the full final-state picture):
+   Use the three-section format defined in the [User-facing summary format](integration-regression-model.md#user-facing-summary-format) section of `integration-regression-model.md` with the header `⚠️ Final completion blocked: plan-introduced integration regressions remain.` and a trailing note `These regressions were introduced by this plan. They must be resolved before the plan can be marked complete.` followed by this menu:
 
    ```
-   ⚠️ Final completion blocked: plan-introduced integration regressions remain.
-
-   ### Baseline failures
-   <list of tests in baseline_failures ∩ current_failing — pre-existing, not plan-introduced>
-
-   ### Deferred integration regressions
-   <list of tests in deferred_integration_regressions (post-reconciliation) — plan-introduced regressions the user chose to defer>
-
-   ### New regressions in this wave
-   <list of tests in new_regressions_after_deferment — on Step 15 this section represents plan-introduced regressions first observed at this final check (typically introduced by Step 14 remediation), reported under the same Step 11 heading so the three-section contract is identical>
-
-   These regressions were introduced by this plan. They must be resolved before the plan can be marked complete.
-
    Options:
    (a) Debug failures now — run the final-gate debugger-first flow (below) against the plan-introduced regressions (deferred ∪ new); on success, re-enter this gate.
    (c) Stop execution     — halt plan execution; all committed wave commits are preserved as checkpoints.
