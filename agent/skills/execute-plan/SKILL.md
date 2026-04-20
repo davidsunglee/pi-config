@@ -543,7 +543,7 @@ The verifier returns a report with two sections: `## Per-Criterion Verdicts` and
 
 Acceptance criteria are binary: each criterion is either `PASS` or `FAIL`. No "partial pass", no "pass with concerns", no soft verdicts. A single `[Criterion N] FAIL` causes `VERDICT: FAIL` for the task.
 
-**Full-coverage requirement.** Let `K` be the total number of acceptance criteria for the task (numbered `1..K` in plan order, the same numbering passed in via `{ACCEPTANCE_CRITERIA_WITH_VERIFY}`). The verifier output MUST contain exactly one `[Criterion N]` header for every `N ∈ {1..K}` — no more, no less. Parse the set of criterion numbers `S := { N : the output contains a header "[Criterion N] <PASS|FAIL>" }` and check all four conditions:
+**Full-coverage requirement.** Let `K` be the total number of acceptance criteria for the task (numbered `1..K` in plan order, the same numbering passed in via `{ACCEPTANCE_CRITERIA_WITH_VERIFY}`). The verifier output MUST contain exactly one `[Criterion N]` header for every `N ∈ {1..K}` — no more, no less. Parse the set of criterion numbers `S := { N : the output contains a header "[Criterion N] <PASS|FAIL>" }` (S is a deduplicated set — duplicate headers for the same N do not expand it) and check:
 
 The verifier output MUST satisfy `S == {1..K}` — exactly one header per criterion number, no gaps and no out-of-range numbers. In addition, no criterion number may appear in two or more `[Criterion N]` headers; duplicates are a protocol error even when both duplicates agree on `PASS`/`FAIL`.
 
@@ -673,7 +673,7 @@ If a worker produces empty, missing, or incorrect output:
 
    There is no option to skip a failed task. A wave with any unresolved failure — including a verifier `VERDICT: FAIL` from Step 10 treated as a task failure — must either be retried to resolution or stopped. `VERDICT: FAIL` from Step 10 is routed through this same failure-handling path with no skip option.
 
-Apply wave pacing from Step 3. These options only govern the cadence of waves that contain no `BLOCKED` results and where Step 9.7 has already exited via `(c) Continue` or remediation. If the wave contains any `BLOCKED` results, Step 9.5 has already paused execution; if Step 9.7 has not yet exited via `(c) Continue` or remediation, Step 9.7 has paused execution. Pacing does not apply to either of these pauses.
+Apply wave pacing from Step 3. These options only govern the cadence of waves that contain no `BLOCKED` results, where Step 9.7 has already exited via `(c) Continue` or remediation, and where every task in the wave has `VERDICT: PASS`. If the wave contains any `BLOCKED` results, Step 9.5 has already paused execution; if Step 9.7 has not yet exited via `(c) Continue` or remediation, Step 9.7 has paused execution; if any task has `VERDICT: FAIL` from Step 10, Step 12's retry loop has already paused execution. Pacing (including option (b) auto-collect) does not apply to any of these pauses — `VERDICT: FAIL` waves are never eligible for option (b) deferral.
 
 - **(a)** Always pause and report before the next wave starts
 - **(b)** Never pause; collect all failures and report at the very end
