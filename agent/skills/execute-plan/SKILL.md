@@ -569,10 +569,7 @@ Acceptance criteria are binary: each criterion is either `PASS` or `FAIL`. No "p
 
 **Full-coverage requirement.** Let `K` be the total number of acceptance criteria for the task (numbered `1..K` in plan order, the same numbering passed in via `{ACCEPTANCE_CRITERIA_WITH_VERIFY}`). The verifier output MUST contain exactly one `[Criterion N]` header for every `N ∈ {1..K}` — no more, no less. Parse the set of criterion numbers `S := { N : the output contains a header "[Criterion N] <PASS|FAIL>" }` and check all four conditions:
 
-1. **Count.** `|S| == K` — every criterion has a verdict block.
-2. **Coverage.** `S == {1..K}` — no criterion number in `1..K` is missing.
-3. **Uniqueness.** No criterion number appears in two or more `[Criterion N]` headers (duplicates are a protocol error even if both duplicates agree on `PASS`/`FAIL`).
-4. **Range.** No `[Criterion N]` header appears with `N < 1` or `N > K` (out-of-range criterion numbers are a protocol error).
+The verifier output MUST satisfy `S == {1..K}` — exactly one header per criterion number, no gaps and no out-of-range numbers. In addition, no criterion number may appear in two or more `[Criterion N]` headers; duplicates are a protocol error even when both duplicates agree on `PASS`/`FAIL`.
 
 Route the parsed result:
 
