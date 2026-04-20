@@ -37,6 +37,7 @@ The current file also repeats the worktree-reuse decision logic across Step 0 an
 - No observable behavior change is allowed. Menu options, gate semantics, retry-budget values, control-flow ordering, and verification entry conditions must remain the same in effect.
 - The per-task retry budget remains 3 retries; this work may only centralize and de-duplicate the rule, not alter it.
 - The user-visible Step 3 settings UI must remain unchanged in shape and content; only redundant explanatory prose may be reduced.
+- After implementation is complete, `agent/skills/execute-plan/SKILL.md` must be no longer than 750 lines.
 - Major-step numbering must become simpler, not more elaborate: top-level inserted labels such as `9.5` and `9.7` should be eliminated in favor of a single integer sequence.
 - Lower-level decimal subsection numbering may remain where it improves local clarity and cross-reference precision.
 - This spec should not be treated as permission to revise sibling docs, extracted reference files, or the broader execute-plan architecture unless such changes are strictly required by the `SKILL.md` restructuring.
@@ -58,6 +59,7 @@ The current file also repeats the worktree-reuse decision logic across Step 0 an
 - The canonical description of the shared per-task retry counter appears exactly once in `agent/skills/execute-plan/SKILL.md`, in Step 12.
 - The merged wave-gate section and any other non-Step-12 reference sites use only a brief pointer to Step 12 for retry-budget semantics rather than restating the rule.
 - The Step 12 canonical retry-budget text still states that the budget is 3 retries per task and that splitting into sub-tasks does not bypass the budget because children inherit the parent's remaining retries.
+- `agent/skills/execute-plan/SKILL.md` is no longer than 750 lines in the final committed state after all planned edits are complete.
 - Every top-level `## Step ...` heading in `agent/skills/execute-plan/SKILL.md` uses an integer step number only; no top-level major section uses `x.y` numbering.
 - Internal references to major steps are updated so there are no stale references to obsolete decimal-numbered top-level major sections.
 - Lower-level procedural subsections such as `### Step 10.1` may remain if still useful; their continued presence does not violate the renumbering requirement.
