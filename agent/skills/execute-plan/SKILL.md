@@ -33,9 +33,7 @@ fi
 # Current branch (empty string if detached HEAD)
 CURRENT_BRANCH=$(git branch --show-current)
 
-# Branch label used in reuse logs and Step 3 summary. When CURRENT_BRANCH is
-# empty (detached HEAD), substitute the short SHA so `<branch-name>` is always
-# a concrete, printable identifier.
+# Branch label: use branch name, or short SHA if detached HEAD.
 if [ -n "$CURRENT_BRANCH" ]; then
   BRANCH_LABEL="$CURRENT_BRANCH"
 else
@@ -62,7 +60,7 @@ esac
    - Else (`IS_WORKTREE=0` and `IS_FEATURE_BRANCH=1`) — emit the feature-branch message:
      `Reusing current workspace: <WORKSPACE_PATH> (reason: already on feature branch '<BRANCH_LABEL>')`
 
-   `<BRANCH_LABEL>` is the value computed above: the branch name when on a branch, or `detached HEAD at <short-sha>` when `CURRENT_BRANCH` is empty. Note that `IS_FEATURE_BRANCH=0` when detached, so the feature-branch message only fires with a real branch name; the worktree message may fire with either form.
+   `<BRANCH_LABEL>` is the value computed in the auto-detect block above (branch name, or `detached HEAD at <short-sha>` for detached HEAD).
 
    This log is mandatory for every reuse, including both feature-branch reuse and worktree reuse.
 
@@ -93,8 +91,6 @@ esac
    - **(c) Continue:** proceed to Step 1 in the current workspace.
    - **(q) Quit:** stop with `Plan execution cancelled.`
    - **(n) New worktree instead:** fall through to the new-worktree flow below (the same flow used when starting from main/master/develop), including the usual suggested branch name derived from the plan filename. The settings summary (Step 3) will then show `new worktree (branch: <suggested-branch>)`.
-
-This reuse logging and dirty-check behavior is identical for feature-branch reuse and worktree reuse.
 
 Once reuse is accepted (clean, or dirty with `(c) Continue`), the settings summary (Step 3) reflects it as:
 ```
@@ -164,7 +160,7 @@ Ready to execute: (s)tart / (c)ustomize / (q)uit
 
 | Setting | Default | Notes |
 |---------|---------|-------|
-| Workspace | new worktree | If Step 0 auto-detected reuse and the user accepted it (clean, or dirty with `(c) Continue`), the line shows the reused workspace and is not a customizable option. If the user chose `(n) Create a new worktree instead` in Step 0, or reuse never applied, the line shows `new worktree (branch: <suggested-branch>)` and IS customizable just like the main-branch default. |
+| Workspace | new worktree | Non-customizable only when Step 0 auto-detected reuse and the user accepted it; otherwise shows `new worktree (branch: <suggested-branch>)` and is customizable. |
 | TDD | enabled | Can disable for non-code plans (docs, config, content) |
 | Execution | parallel, pause on failure | Can customize to sequential, or change pacing |
 | Integration test | enabled | If a test command is available, show `enabled (<command>)`. If no test command, show `disabled (no test command)` |
@@ -183,7 +179,7 @@ Ready to execute: (s)tart / (c)ustomize / (q)uit
 **If `s`:** Accept all defaults and proceed to Step 4.
 
 **If `c`:** Ask each setting individually:
-1. Workspace — New worktree / Current workspace. Skip this question only when Step 0 auto-detected reuse AND the user accepted it (clean, or dirty with `(c) Continue`); in that case the reused workspace is fixed. In all other cases — including when the user chose `(n) Create a new worktree instead` in Step 0 — ask this question normally.
+1. Workspace — New worktree / Current workspace. Skip only when Step 0 auto-detected reuse and the user accepted it (reused workspace is then fixed); ask normally in all other cases.
 2. TDD — Enabled / Disabled
 3. Execution mode — Sequential / Parallel
 4. Wave pacing (if parallel) — Pause between waves / Auto-continue / Auto-continue unless failures
@@ -193,8 +189,6 @@ Ready to execute: (s)tart / (c)ustomize / (q)uit
 After customization, show the final settings summary for confirmation.
 
 **If `q`:** Cancel execution and stop with: `Plan execution cancelled.`
-
-If Step 0 auto-detected reuse AND the user accepted it (clean workspace, or dirty with `(c) Continue`), the workspace line shows the reused state and is not a customizable option. If the user chose `(n) Create a new worktree instead` in Step 0, the auto-detected reuse state is discarded and the workspace line behaves like the main-branch default — shown as `new worktree (branch: <suggested-branch>)` and fully customizable.
 
 After settings are confirmed, if Worktree was selected and Step 0 hasn't executed worktree setup yet, execute it now.
 
@@ -300,8 +294,6 @@ New failures only will be flagged after each wave.
 ```
 `baseline_failures` is frozen at this point and never mutated for the rest of the plan run — subsequent waves only compare against it, never modify it. Proceed with execution; pre-existing failures are excluded from the pass/fail decision after each wave via the Step 11 three-set classification.
 
-**How new failures are distinguished from pre-existing ones:** Step 11's reconciliation uses exact set operations on identifiers extracted via the same contract above (`baseline_failures`, `deferred_integration_regressions`, `current_failing`). There is no count-based or heuristic fallback — a test is a new regression if and only if its identifier appears in the current run and is not in either tracked set. Step 7 and Step 11 MUST use the same extraction logic so the sets are comparable.
-
 #### Integration regression model
 
 See [`integration-regression-model.md`](integration-regression-model.md) for the definition of the three tracked sets (`baseline_failures`, `deferred_integration_regressions`, `new_regressions_after_deferment`), the disjointness and transition rules, the reconciliation algorithm, the pass/fail classification, and the user-facing summary format.
@@ -371,15 +363,11 @@ After the wave drains (i.e., every dispatched worker in the wave has returned an
 
 ## Step 9.5: Blocked-task escalation gate
 
-Run this gate once per wave after every dispatched worker in the wave has returned and Step 9 has classified each response. It sits between worker handling and wave verification.
-
-**Purpose:** Treat `STATUS: BLOCKED` as an immediate escalation — independent of the wave pacing choice from Step 3. Any wave that contains at least one `BLOCKED` worker response pauses here before any later wave is started, before wave verification (Step 10), and before the post-wave commit or integration-test (Step 11).
+Run this gate once per wave after every dispatched worker has been classified by Step 9. **Purpose:** Treat `STATUS: BLOCKED` as an immediate escalation — independent of wave pacing. Any wave with at least one `BLOCKED` response pauses here before any later wave, before Step 10, and before Step 11.
 
 ### 1. Drain the current wave
 
-Do not cancel or interrupt any worker that is still running in the current wave. Wait for every dispatched worker in the wave to return and for Step 9 to classify each response before proceeding. Do not advance until all workers have returned. Once every worker response has been received and Step 9 has been applied, the wave is "drained."
-
-Do not start the next wave. Do not run Step 10 or Step 11 for this wave yet.
+Wait for every dispatched worker to return and Step 9 to classify each response before proceeding; the wave is then "drained." Do not start the next wave or run Step 10/Step 11 yet.
 
 ### 2. Collect blocked tasks
 
@@ -388,13 +376,9 @@ After draining, collect the set `BLOCKED_TASKS` = every task in the wave whose m
 - If `BLOCKED_TASKS` is empty, skip this entire step and proceed to Step 9.7 (which then gates entry to Step 10). Never advance directly from Step 9.5 to Step 10.
 - If `BLOCKED_TASKS` is non-empty, proceed to step 3 below.
 
-Tasks already re-dispatched and resolved in Step 9 via `NEEDS_CONTEXT` do not appear here — this gate only triggers on terminal `BLOCKED` outcomes for the wave.
-
 ### 3. Present the combined escalation view
 
-Present a single combined escalation view covering every task in `BLOCKED_TASKS`. Do NOT present blocked tasks one at a time. The user must see the full list before choosing which to address first.
-
-The view MUST include:
+Present a single combined escalation view for all `BLOCKED_TASKS` — do NOT present blocked tasks one at a time. The view MUST include:
 
 1. A header line naming the wave, e.g., `🚫 Wave <N>: <count> task(s) BLOCKED. Execution paused before any later wave.`
 2. A "Wave outcomes" summary block listing every task in the wave and its Step 9 status: `DONE`, `DONE_WITH_CONCERNS`, or `BLOCKED`. Include task number and task title for each. Successful same-wave tasks MUST appear here so the user can see what completed alongside the blockers.
@@ -443,7 +427,7 @@ Task <N>: <task_title> (current tier: <tier>) — choose an intervention:
 These options mirror the recovery paths previously inlined in Step 9's `BLOCKED` bullet and are the canonical intervention set for this gate. Do not invent new options. The `(m) Better model` option is suppressed (not offered, and not selectable) whenever the task's current model tier is already `capable`, because there is no higher tier to escalate to and re-dispatching to the same model would violate the Step 9 rule "Never ignore an escalation or re-dispatch the same task to the same model without changes." When `(m)` is suppressed, the user must pick `(c)`, `(s)`, or `(x)` for that task; a tier upgrade is not a valid same-tier "meaningful change" for `capable`-tier tasks.
 
 - **(c) More context:** prompt the user for the additional context (free-form text). Re-dispatch this single task to a `coder` worker with the original task spec plus the supplied context appended under a `## Additional Context` section in the worker prompt. Keep the task's existing model tier unless the user also picks (m) for the same task on a subsequent pass.
-- **(m) Better model:** only offered when the task's current tier is `cheap` or `standard`. Re-dispatch this single task to a `coder` worker using the next tier up from the task's current tier (`cheap` → `standard`, `standard` → `capable`). Resolve the concrete model string via `~/.pi/agent/model-tiers.json` as described in Step 6. If the task's current tier is `capable`, do NOT offer this option and do NOT re-dispatch to `capable` again under the guise of a "better model" — that would re-dispatch the same task to the same model with no change, which the Step 9 rule forbids. The user must instead pick `(c)` (which adds new context, satisfying the "with changes" requirement) or `(s)` (which restructures the task itself), or `(x)`.
+- **(m) Better model:** only offered when the task's current tier is `cheap` or `standard`. Re-dispatch this single task to a `coder` worker using the next tier up (`cheap` → `standard`, `standard` → `capable`). Resolve the concrete model string via `~/.pi/agent/model-tiers.json` as described in Step 6.
 - **(s) Split into sub-tasks:** decompose the task into smaller sub-tasks in-session. Each sub-task must keep the same output file(s) and acceptance criteria coverage between them (no criterion may be dropped). Dispatch the sub-tasks as a mini-wave bounded by the pi-subagent `MAX_PARALLEL_TASKS` cap (see Step 5). If there is a natural ordering between sub-tasks, run them sequentially instead. The parent task's slot is replaced by the sub-tasks for all subsequent tracking; each sub-task is treated as an independent task in this wave for Step 9 classification and gate re-entry. **Retry budget:** Splitting a task counts as 1 retry against the parent task's Step 12 budget. Each sub-task inherits the parent task's remaining retry count (not a fresh 3-retry budget) — e.g., if the parent had 2 retries remaining at the point of split, each sub-task starts with 2 retries remaining. This prevents retry-budget bypass via repeated splits. ⚠ Sub-task dispatches run pre-commit: their changes must remain in the working tree (uncommitted) at the point Step 10 dispatches the verifier. See Step 10.2 for the fallback diff range if this is violated.
 - **(x) Stop execution:** halt execution immediately. Do NOT perform Step 10 or Step 11 for this wave. Report partial progress via Step 13. All prior wave commits are preserved as checkpoints.
 
@@ -455,7 +439,7 @@ After collecting a non-stop intervention for every task in `BLOCKED_TASKS`, re-d
 
 Apply Step 9 to the new responses. Then re-enter this gate (Step 9.5) with the new set of responses. The gate repeats until `BLOCKED_TASKS` is empty or the user picks `(x) Stop execution`. For tasks where `(s) Split into sub-tasks` was chosen, the sub-tasks' responses replace the original task's slot; if any sub-task returns `BLOCKED`, it appears in `BLOCKED_TASKS` on the next gate pass.
 
-Each pass through the gate counts toward the per-task retry budget defined in Step 12 (3 retries per task). This cap is shared across both `BLOCKED` re-dispatch passes through this gate and `DONE`-verification retries through Step 12's verification loop for the same task — e.g., if a task has been re-dispatched twice through this gate and once via Step 12's verification retry, the combined count of 3 exhausts the budget. When a task exhausts its retry budget while still reporting `BLOCKED`, skip is not a valid exit — skipping would leave the wave with a permanently-unresolved blocker, and the spec forbids treating such a wave as successfully completed. The only ways out of this gate for a `BLOCKED` task are: (a) the user selects a non-stop intervention and re-dispatch eventually yields `DONE` or `DONE_WITH_CONCERNS` for that task, or (b) the user selects `(x) Stop execution`, which halts the entire plan via Step 13. When a budget-exhausted `BLOCKED` task surfaces to the user, present only the §4 intervention choices — retry with different model/context, or stop the entire plan — never a skip option. The gate does not exit successfully to Step 10/11 until every `BLOCKED` task is actually resolved.
+Each pass counts toward the per-task retry budget (Step 12, 3 retries, shared with Step 9.7 and Step 10 retries). When a task exhausts its budget while still `BLOCKED`, present only the §4 intervention choices (never a skip option) — the gate cannot exit successfully until every `BLOCKED` task yields `DONE` or `DONE_WITH_CONCERNS`, or the user picks `(x)`.
 
 ### 6. Gate exit
 
@@ -463,9 +447,7 @@ Exit this gate only when every task in the wave has a non-`BLOCKED` Step 9 statu
 
 ## Step 9.7: Wave-level concerns checkpoint
 
-Run this gate once per wave after Step 9.5 has exited and before Step 10, whenever at least one task in the drained wave has Step 9 status `DONE_WITH_CONCERNS`. Its job is to surface every concerned task to the user in a single combined view and let the user decide how to proceed for the wave as a whole.
-
-**Precondition:** Step 9.5 has exited. Every task in the wave has a Step 9 status of `DONE` or `DONE_WITH_CONCERNS`.
+Run this gate once per wave after Step 9.5 has exited and before Step 10, whenever at least one task has Step 9 status `DONE_WITH_CONCERNS`. **Precondition:** Step 9.5 has exited; every task in the wave is `DONE` or `DONE_WITH_CONCERNS`.
 
 ### 1. Collect concerned tasks
 
@@ -496,8 +478,6 @@ Options:
   (x) Stop execution                      — halt the plan; committed waves are preserved as checkpoints
 ```
 
-This is the whole user interaction for the gate. There is no per-concern menu, no severity routing, and no "acknowledge" step. The user decides for the wave as a whole, with per-task granularity available only inside the `(r)` path.
-
 ### 3. Apply the user's choice
 
 - **(c) Continue to verification.** Exit the gate. Leave every concerned task's Step 9 status as `DONE_WITH_CONCERNS` and proceed to Step 10; the verifier is the next gate and will judge the work on its own terms.
@@ -508,15 +488,11 @@ Repeat §2–§3 until `CONCERNED_TASKS` is empty (either because the user picke
 
 ### 4. Gate exit
 
-Exit this gate when either (a) the user picked `(c) Continue to verification` on the most recent view, or (b) every task in the wave has Step 9 status `DONE` after remediation. The wave is then eligible for Step 10. The only other exit is `(x) Stop execution`, which halts the plan via Step 13.
-
-When `(c)` is the exit, tasks whose status is still `DONE_WITH_CONCERNS` flow into Step 10 unchanged — the verifier judges them against acceptance criteria the same way it judges `DONE` tasks. The orchestrator does not treat `DONE_WITH_CONCERNS` as an automatic fail into Step 10; the verifier's verdict is authoritative.
+Exit when (a) the user picked `(c) Continue to verification` or (b) every task is `DONE` after remediation — the wave then enters Step 10; tasks still `DONE_WITH_CONCERNS` flow in as-is (the verifier's verdict is authoritative). The only other exit is `(x) Stop execution` via Step 13.
 
 ## Step 10: Verify wave output
 
-**Precondition:** Step 9.5 (BLOCKED) and Step 9.7 (DONE_WITH_CONCERNS) must have exited before Step 10 runs. If either gate is unresolved, return to that gate first; Step 10 is the next gate only after both have exited. Tasks exiting Step 9.7 with status `DONE_WITH_CONCERNS` flow into verification as-is — the verifier's per-criterion verdict is authoritative.
-
-Verification for each task in the wave runs in a fresh-context `verifier` subagent dispatched via `agent/skills/execute-plan/verify-task-prompt.md`. The orchestrator does NOT read code and judge acceptance criteria directly; it only collects command evidence and routes the verifier's verdict.
+**Precondition:** Step 9.5 and Step 9.7 must have exited. Verification for each task runs in a fresh-context `verifier` subagent via `agent/skills/execute-plan/verify-task-prompt.md`; the orchestrator only collects command evidence and routes the verifier's verdict.
 
 **Protocol-error stop — missing `Verify:` recipes:** Before dispatching the verifier, check that every acceptance criterion for the task has an attached `Verify:` recipe in the plan. If any acceptance criterion is missing a `Verify:` recipe at execute time, STOP execution for this wave. Report the offending task number and criterion text to the user, recommend re-running `generate-plan` to regenerate the plan, and do not dispatch the verifier, do not treat the task as passing, and do not silently skip verification. A plan without complete `Verify:` recipes is a protocol error from generate-plan and must be regenerated before execution can continue.
 
@@ -603,14 +579,6 @@ git commit -m "feat(plan): wave <N> - <plan_goal_summary>
 - **Blank line** after the subject (standard git convention).
 - **Body:** One line per task completed in the wave, formatted as `- Task <X>: <task_title>` where `<X>` is the task number and `<task_title>` is the task's heading from the plan. List all tasks in the wave, one per line.
 
-**Example:** For wave 2 of a plan with goal "Add execution checkpoints to execute-plan" containing Tasks 3 and 4:
-```
-feat(plan): wave 2 - Add execution checkpoints to execute-plan
-
-- Task 3: Add baseline test capture step to execute-plan SKILL.md
-- Task 4: Add main-branch confirmation guard to Step 8 of execute-plan SKILL.md
-```
-
 **If `git add -A` stages nothing** (wave produced no file changes): skip the commit silently. This can happen if a wave's tasks were verification-only.
 
 ### 2. Run integration tests
@@ -626,7 +594,7 @@ TEST_EXIT=$?
 
 #### Classification
 
-Apply the integration regression model from [`integration-regression-model.md`](integration-regression-model.md) to classify this run — covering the three tracked sets, reconciliation algorithm, pass/fail rules, and user-facing summary format. Pass if `new_regressions_after_deferment` is empty; fail if non-empty.
+Apply the integration regression model from [`integration-regression-model.md`](integration-regression-model.md). Pass if `new_regressions_after_deferment` is empty; fail if non-empty.
 
 #### Menu
 
@@ -662,15 +630,7 @@ The defer option is intentionally removed on the final wave: there is no subsequ
 
 Shared by Step 11 (post-wave integration failures) and Step 15 (final integration regression gate). When the caller's `(a) Debug failures` option is chosen, do NOT re-dispatch every task in scope. Instead, follow the parameterized flow below with the caller's parameter row.
 
-**Caller parameters**
-
-Each caller supplies concrete values for these five parameters:
-
-1. **Scope** — which caller is invoking the flow and under what context.
-2. **Range / changed-file universe** — the git range whose diff enumerates candidate-modified files.
-3. **Suspect task universe** — the set of plan tasks eligible to be suspected.
-4. **Success condition** — the reconciliation predicate that determines when a remediation attempt has succeeded.
-5. **Commit template / undo behavior** — the `fix(plan): …` message for remediation commits, and whether commit-undo (`git reset HEAD~1`) is available as a fallback.
+**Caller parameters** (see table below for values by caller)
 
 **Parameter values by caller**
 
@@ -719,8 +679,6 @@ Apply wave pacing from Step 3. These options only govern the cadence of waves th
 - **(b)** Never pause; collect all failures and report at the very end
 - **(c)** Pause only when a wave produced failures; otherwise auto-continue
 
-Under any of (a), (b), or (c), a wave that contains at least one `BLOCKED` task, has a Step 9.7 checkpoint that has not yet exited via `(c) Continue` or remediation, or has any task with Step 10 `VERDICT: FAIL` is not eligible to be "collected and reported at the end" — such waves are surfaced via Step 9.5, Step 9.7, or Step 12's retry loop respectively before the next wave starts.
-
 ## Step 13: Report partial progress
 
 **Execution stopped early (user request or unrecoverable failure):**
@@ -737,7 +695,7 @@ These regressions were introduced by this plan and deferred during intermediate 
 They remain unresolved and must be addressed before this branch is considered shippable.
 ```
 
-**Persistence note:** Persisting `deferred_integration_regressions` across sessions (e.g., to a file on disk) is out of scope. If execution resumes in a new session, do NOT attempt to reconstruct the deferred set from the prior partial-progress report — those identifiers may be stale. Instead, re-run the full integration suite on resume and re-derive the current failing/deferred state fresh from that run before integration test classification can resume correctly.
+**Persistence note:** If execution resumes in a new session, do NOT reconstruct `deferred_integration_regressions` from the prior partial-progress report — re-run the full integration suite to re-derive the current failing/deferred state fresh.
 
 ## Step 14: Request code review
 
@@ -777,7 +735,7 @@ Otherwise, always run this gate: re-run the full integration suite and confirm n
 
 1. **Re-run the full integration suite** using the same test command from Step 3. Apply the Step 7 identifier-extraction contract to the runner's failure output so identifiers are directly comparable with `baseline_failures` and `deferred_integration_regressions`.
 
-2. **Apply the reconciliation algorithm** from [`integration-regression-model.md`](integration-regression-model.md) to compute `current_failing`, reconcile `deferred_integration_regressions`, and derive `new_regressions_after_deferment`. A non-empty `new_regressions_after_deferment` here typically means Step 14 review/remediation introduced a fresh regression.
+2. **Apply the reconciliation algorithm** from [`integration-regression-model.md`](integration-regression-model.md) to compute `current_failing`, reconcile `deferred_integration_regressions`, and derive `new_regressions_after_deferment`.
 
 3. **Gate on the union `still_failing_deferred ∪ new_regressions_after_deferment`:**
    - If **both** sets are empty: the gate passes. Proceed to `### 1. Move plan to done`.
@@ -797,14 +755,7 @@ Otherwise, always run this gate: re-run the full integration suite and confirm n
    - **(a) Debug failures now:** Run the shared `Debugger-first flow` (defined under Step 11) with the **Step 15 (final-gate)** parameter row, scoped to `still_failing_deferred ∪ new_regressions_after_deferment`. That flow judges success by re-entering this gate at step 1 (re-run the suite, re-reconcile, recompute both sets), so a remediation attempt succeeds when both `still_failing_deferred` and `new_regressions_after_deferment` are empty on the re-run. Repeat until both sets are empty or the user picks `(c)`. Each debugging attempt counts toward the Step 12 retry budget for the implicated tasks.
    - **(c) Stop execution:** Halt execution. Report partial progress via Step 13 so the user has a complete picture of plan-introduced failures left on the branch: list any non-empty `deferred_integration_regressions` under the deferred-regressions heading, and list the still-unresolved `new_regressions_after_deferment` separately as newly discovered final-gate regressions — do NOT fold them under the deferred-regressions heading, since they were never deferred by the user. Do NOT move the plan file, close the todo, or run branch completion.
 
-### Final-gate debugger-first flow — parameters
-
-This subsection is a call-through into the shared `### Debugger-first flow` defined under Step 11. When Step 15's `(a) Debug failures now` is chosen, run that flow with the **Step 15 (final-gate)** row of the "Parameter values by caller" table. Two caller-specific reminders:
-
-- **Gate re-entry:** success is judged by re-entering this Step 15 gate at step 1 (re-run the suite, re-reconcile, recompute both `still_failing_deferred` and `new_regressions_after_deferment`) — not by proceeding to a next wave. The attempt succeeds only when **both** sets are empty on the re-run. If either set is non-empty after the re-run, the Step 15 menu (`(a) Debug failures now`, `(c) Stop execution`) is re-presented; there is no defer option at the final gate.
-- **No commit-undo:** the `git reset HEAD~1` fallback that Step 11 makes available is NOT available at the final gate — `HEAD` is not guaranteed to be a wave commit, and prior wave commits must remain as checkpoints for the `(c) Stop execution` exit path. On repeated failure, the only exits are another debugging attempt (costing a Step 12 retry) or `(c) Stop execution`.
-
-**Blocking guarantee:** Steps `### 1. Move plan to done`, `### 2. Close linked todo`, and `### 4. Branch completion` MUST NOT execute while `still_failing_deferred ∪ new_regressions_after_deferment` is non-empty. The only exits from this gate are: (a) both sets become empty (gate passes), or (b) the user selects `(c) Stop execution`. Silent success on the final gate is NOT an option when Step 14 remediation has introduced a regression — the same classification model used after every wave is reused here, so any plan-introduced regression still present at Step 15 blocks normal completion regardless of whether it was previously deferred.
+**Blocking guarantee:** Steps `### 1. Move plan to done`, `### 2. Close linked todo`, and `### 4. Branch completion` MUST NOT execute while `still_failing_deferred ∪ new_regressions_after_deferment` is non-empty. The only exits from this gate are: (a) both sets become empty (gate passes), or (b) the user selects `(c) Stop execution`.
 
 ### 1. Move plan to done
 
