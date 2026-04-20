@@ -304,7 +304,7 @@ New failures only will be flagged after each wave.
 
 #### Integration regression model
 
-See [`integration-regression-model.md`](integration-regression-model.md) for the single canonical definition of the three tracked sets (`baseline_failures`, `deferred_integration_regressions`, `new_regressions_after_deferment`), the disjointness and transition rules, the reconciliation algorithm, the pass/fail classification, and the user-facing summary format. Step 11 and Step 15 reference that document rather than restating the model.
+See [`integration-regression-model.md`](integration-regression-model.md) for the definition of the three tracked sets (`baseline_failures`, `deferred_integration_regressions`, `new_regressions_after_deferment`), the disjointness and transition rules, the reconciliation algorithm, the pass/fail classification, and the user-facing summary format.
 
 ## Step 8: Execute waves
 
