@@ -7,7 +7,7 @@
     "refactor",
     "documentation"
   ],
-  "status": "open",
+  "status": "done",
   "created_at": "2026-04-19T00:00:00.000Z"
 }
 
@@ -103,3 +103,5 @@ The three structural-consolidation items below are tracked in TODO-86666846 ("St
 ## Notes
 - This is a docs-and-structure refactor, not a protocol change. Acceptance criteria deliberately use grep/file-existence assertions rather than test runs because the skill has no test suite.
 - The deferred items (4, 5, 8) are tracked together in TODO-86666846 — they are independently valuable but not prerequisites for this work.
+
+Completed via plan: .pi/plans/done/2026-04-19-execute-plan-skill-shortening-follow-up.md
