@@ -123,6 +123,33 @@ export async function loadSavedMode(filePath: string): Promise<WorkingIndicatorM
   return isWorkingIndicatorMode(wi.mode) ? wi.mode : undefined;
 }
 
+export async function saveMode(filePath: string, mode: WorkingIndicatorMode): Promise<void> {
+  let settings: Record<string, unknown> = {};
+
+  let raw: string | undefined;
+  try {
+    raw = await fs.readFile(filePath, "utf8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+  }
+
+  if (raw !== undefined) {
+    const parsed: unknown = JSON.parse(raw);
+    if (!isPlainObject(parsed)) {
+      throw new Error(`${filePath}: top-level JSON must be an object`);
+    }
+    settings = { ...parsed };
+  }
+
+  const current = settings.workingIndicator;
+  const wi: Record<string, unknown> = isPlainObject(current) ? { ...current } : {};
+  wi.mode = mode;
+  settings.workingIndicator = wi;
+
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  await fs.writeFile(filePath, `${JSON.stringify(settings, null, 2)}\n`, "utf8");
+}
+
 export function createExtension(settingsPath: string = DEFAULT_SETTINGS_PATH) {
   return function (pi: ExtensionAPI): void {
     let mode: WorkingIndicatorMode = "default";
