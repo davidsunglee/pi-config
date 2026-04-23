@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile, chmod } from "node:fs/promises
 import os from "node:os";
 import path from "node:path";
 
-import { loadSavedMode, saveMode } from "./working-indicator.ts";
+import { createExtension, loadSavedMode, saveMode } from "./working-indicator.ts";
 
 async function makeTmpDir(): Promise<string> {
   return mkdtemp(path.join(os.tmpdir(), "pi-working-indicator-"));
@@ -192,5 +192,135 @@ test("saveMode persists \"default\" (emitted by /working-indicator reset)", asyn
     await saveMode(filePath, "default");
     const parsed = JSON.parse(await readFile(filePath, "utf8"));
     assert.deepEqual(parsed, { workingIndicator: { mode: "default" } });
+  });
+});
+
+type SessionHandler = (event: any, ctx: any) => Promise<void> | void;
+type CommandDef = { description: string; handler: (args: string, ctx: any) => Promise<void> | void };
+
+interface Captured {
+  sessionStart: SessionHandler;
+  command: CommandDef;
+}
+
+function bootExtension(settingsPath: string): Captured {
+  let sessionStart: SessionHandler | undefined;
+  let command: CommandDef | undefined;
+
+  const stubPi = {
+    on(event: string, cb: SessionHandler) {
+      if (event === "session_start") sessionStart = cb;
+    },
+    registerCommand(name: string, def: CommandDef) {
+      if (name === "working-indicator") command = def;
+    },
+  };
+
+  createExtension(settingsPath)(stubPi as any);
+  assert.ok(sessionStart, "session_start handler should be registered");
+  assert.ok(command, "working-indicator command should be registered");
+  return { sessionStart, command };
+}
+
+interface CtxStub {
+  indicatorCalls: Array<unknown>;
+  statusCalls: Array<[string, unknown]>;
+  notifications: Array<{ message: string; level: string }>;
+  ctx: any;
+}
+
+function makeCtx(): CtxStub {
+  const indicatorCalls: Array<unknown> = [];
+  const statusCalls: Array<[string, unknown]> = [];
+  const notifications: Array<{ message: string; level: string }> = [];
+  const ctx = {
+    ui: {
+      setWorkingIndicator(options: unknown) {
+        indicatorCalls.push(options);
+      },
+      setStatus(key: string, value: unknown) {
+        statusCalls.push([key, value]);
+      },
+      notify(message: string, level: string) {
+        notifications.push({ message, level });
+      },
+    },
+  };
+  return { indicatorCalls, statusCalls, notifications, ctx };
+}
+
+test("session_start applies the saved mode silently", async () => {
+  await withTmpFile(async (filePath) => {
+    await writeFile(filePath, JSON.stringify({ workingIndicator: { mode: "dot" } }), "utf8");
+    const { sessionStart } = bootExtension(filePath);
+    const { ctx, indicatorCalls, statusCalls, notifications } = makeCtx();
+
+    await sessionStart({ reason: "startup" }, ctx);
+
+    assert.equal(indicatorCalls.length, 1, "indicator applied once");
+    assert.ok(indicatorCalls[0], "dot produces an indicator option object");
+    assert.deepEqual(
+      statusCalls,
+      [["working-indicator", undefined]],
+      "stale footer status is cleared",
+    );
+    assert.deepEqual(notifications, [], "no toast on startup");
+  });
+});
+
+test("session_start falls back to default spinner when file is missing", async () => {
+  await withTmpFile(async (filePath) => {
+    const { sessionStart } = bootExtension(filePath);
+    const { ctx, indicatorCalls, statusCalls, notifications } = makeCtx();
+
+    await sessionStart({ reason: "startup" }, ctx);
+
+    assert.deepEqual(indicatorCalls, [undefined], "pi default spinner via undefined");
+    assert.deepEqual(statusCalls, [["working-indicator", undefined]]);
+    assert.deepEqual(notifications, []);
+  });
+});
+
+test("session_start falls back silently when JSON is malformed and does not rewrite the file", async () => {
+  await withTmpFile(async (filePath) => {
+    await writeFile(filePath, "{broken", "utf8");
+    const { sessionStart } = bootExtension(filePath);
+    const { ctx, indicatorCalls, statusCalls, notifications } = makeCtx();
+
+    await sessionStart({ reason: "startup" }, ctx);
+
+    assert.deepEqual(indicatorCalls, [undefined]);
+    assert.deepEqual(notifications, [], "no toast when startup falls back");
+    assert.deepEqual(statusCalls, [["working-indicator", undefined]]);
+    assert.equal(await readFile(filePath, "utf8"), "{broken", "file is not auto-repaired");
+  });
+});
+
+test("session_start falls back silently when mode is unrecognized", async () => {
+  await withTmpFile(async (filePath) => {
+    await writeFile(
+      filePath,
+      JSON.stringify({ workingIndicator: { mode: "sparkles" } }),
+      "utf8",
+    );
+    const { sessionStart } = bootExtension(filePath);
+    const { ctx, indicatorCalls, notifications } = makeCtx();
+
+    await sessionStart({ reason: "reload" }, ctx);
+
+    assert.deepEqual(indicatorCalls, [undefined]);
+    assert.deepEqual(notifications, []);
+  });
+});
+
+test("session_start restores \"default\" as a valid persisted mode", async () => {
+  await withTmpFile(async (filePath) => {
+    await writeFile(filePath, JSON.stringify({ workingIndicator: { mode: "default" } }), "utf8");
+    const { sessionStart } = bootExtension(filePath);
+    const { ctx, indicatorCalls } = makeCtx();
+
+    await sessionStart({ reason: "new", previousSessionFile: "/tmp/x" }, ctx);
+
+    assert.deepEqual(indicatorCalls, [undefined], "\"default\" resolves to undefined indicator options");
   });
 });
