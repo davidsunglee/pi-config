@@ -324,3 +324,162 @@ test("session_start restores \"default\" as a valid persisted mode", async () =>
     assert.deepEqual(indicatorCalls, [undefined], "\"default\" resolves to undefined indicator options");
   });
 });
+
+async function triggerCommand(
+  command: CommandDef,
+  args: string,
+): Promise<{ indicatorCalls: Array<unknown>; statusCalls: Array<[string, unknown]>; notifications: Array<{ message: string; level: string }> }> {
+  const { ctx, indicatorCalls, statusCalls, notifications } = makeCtx();
+  await command.handler(args, ctx);
+  return { indicatorCalls, statusCalls, notifications };
+}
+
+test("command with no args reports the current mode and does not write", async () => {
+  await withTmpFile(async (filePath) => {
+    const { command } = bootExtension(filePath);
+    const { indicatorCalls, notifications } = await triggerCommand(command, "");
+
+    assert.deepEqual(indicatorCalls, []);
+    assert.equal(notifications.length, 1);
+    assert.match(notifications[0]!.message, /^Working indicator:/);
+    assert.equal(notifications[0]!.level, "info");
+    await assert.rejects(() => readFile(filePath, "utf8"));
+  });
+});
+
+test("command 'dot' applies and persists", async () => {
+  await withTmpFile(async (filePath) => {
+    const { command } = bootExtension(filePath);
+    const result = await triggerCommand(command, "dot");
+
+    assert.equal(result.indicatorCalls.length, 1);
+    assert.ok(result.indicatorCalls[0], "dot maps to defined indicator options");
+    assert.deepEqual(result.notifications, [
+      { message: "Working indicator set to: static dot", level: "info" },
+    ]);
+    const parsed = JSON.parse(await readFile(filePath, "utf8"));
+    assert.deepEqual(parsed, { workingIndicator: { mode: "dot" } });
+  });
+});
+
+test("command 'reset' persists \"default\" and creates the file when missing", async () => {
+  await withTmpFile(async (filePath) => {
+    const { command } = bootExtension(filePath);
+    const result = await triggerCommand(command, "reset");
+
+    assert.deepEqual(result.indicatorCalls, [undefined], "default indicator is undefined");
+    assert.equal(result.notifications.length, 1);
+    assert.equal(result.notifications[0]!.level, "info");
+    assert.match(result.notifications[0]!.message, /pi default spinner/);
+    const parsed = JSON.parse(await readFile(filePath, "utf8"));
+    assert.deepEqual(parsed, { workingIndicator: { mode: "default" } });
+  });
+});
+
+test("command 'default' is rejected with the usage toast", async () => {
+  await withTmpFile(async (filePath) => {
+    const { command } = bootExtension(filePath);
+    const result = await triggerCommand(command, "default");
+
+    assert.deepEqual(result.indicatorCalls, []);
+    assert.equal(result.notifications.length, 1);
+    assert.equal(result.notifications[0]!.level, "error");
+    assert.match(result.notifications[0]!.message, /Usage: \/working-indicator/);
+    await assert.rejects(() => readFile(filePath, "utf8"));
+  });
+});
+
+test("command preserves unrelated top-level keys on save", async () => {
+  await withTmpFile(async (filePath) => {
+    await writeFile(
+      filePath,
+      JSON.stringify({ other: { a: 1 }, workingIndicator: { mode: "dot", extra: 7 } }),
+      "utf8",
+    );
+    const { command } = bootExtension(filePath);
+    await triggerCommand(command, "pulse");
+
+    const parsed = JSON.parse(await readFile(filePath, "utf8"));
+    assert.deepEqual(parsed, {
+      other: { a: 1 },
+      workingIndicator: { mode: "pulse", extra: 7 },
+    });
+  });
+});
+
+test("command normalizes an incompatible workingIndicator shape on save", async () => {
+  await withTmpFile(async (filePath) => {
+    await writeFile(
+      filePath,
+      JSON.stringify({ other: "keep", workingIndicator: "broken" }),
+      "utf8",
+    );
+    const { command } = bootExtension(filePath);
+    const result = await triggerCommand(command, "none");
+
+    assert.equal(result.notifications.length, 1);
+    assert.equal(result.notifications[0]!.level, "info", "normalization is a success, not an error");
+    const parsed = JSON.parse(await readFile(filePath, "utf8"));
+    assert.deepEqual(parsed, { other: "keep", workingIndicator: { mode: "none" } });
+  });
+});
+
+test("command applies session-only and emits only an error toast when JSON is malformed", async () => {
+  await withTmpFile(async (filePath) => {
+    await writeFile(filePath, "{broken", "utf8");
+    const { command } = bootExtension(filePath);
+    const result = await triggerCommand(command, "dot");
+
+    assert.equal(result.indicatorCalls.length, 1, "session indicator still updates");
+    assert.ok(result.indicatorCalls[0]);
+    assert.equal(result.notifications.length, 1, "exactly one toast, not two");
+    assert.equal(result.notifications[0]!.level, "error");
+    assert.equal(await readFile(filePath, "utf8"), "{broken", "malformed file is not silently overwritten");
+  });
+});
+
+test("command applies session-only and emits only an error toast when top level is not an object", async () => {
+  await withTmpFile(async (filePath) => {
+    await writeFile(filePath, JSON.stringify(["dot"]), "utf8");
+    const { command } = bootExtension(filePath);
+    const result = await triggerCommand(command, "spinner");
+
+    assert.equal(result.indicatorCalls.length, 1);
+    assert.equal(result.notifications.length, 1);
+    assert.equal(result.notifications[0]!.level, "error");
+    assert.equal(await readFile(filePath, "utf8"), JSON.stringify(["dot"]));
+  });
+});
+
+test("command applies session-only and emits only an error toast when the write fails", async () => {
+  const dir = await makeTmpDir();
+  try {
+    const readOnlyDir = path.join(dir, "locked");
+    await mkdir(readOnlyDir);
+    await chmod(readOnlyDir, 0o500); // read+execute, no write
+    const filePath = path.join(readOnlyDir, "working.json");
+    const { command } = bootExtension(filePath);
+    const result = await triggerCommand(command, "dot");
+
+    assert.equal(result.indicatorCalls.length, 1, "session indicator still updates");
+    assert.equal(result.notifications.length, 1, "exactly one toast");
+    assert.equal(result.notifications[0]!.level, "error");
+  } finally {
+    // Restore perms so rm can clean up.
+    await chmod(path.join(dir, "locked"), 0o700).catch(() => {});
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("command 'garbage' shows the usage toast and does not write", async () => {
+  await withTmpFile(async (filePath) => {
+    const { command } = bootExtension(filePath);
+    const result = await triggerCommand(command, "garbage");
+
+    assert.deepEqual(result.indicatorCalls, []);
+    assert.equal(result.notifications.length, 1);
+    assert.equal(result.notifications[0]!.level, "error");
+    assert.match(result.notifications[0]!.message, /Usage: \/working-indicator/);
+    await assert.rejects(() => readFile(filePath, "utf8"));
+  });
+});

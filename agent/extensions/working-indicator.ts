@@ -188,7 +188,14 @@ export function createExtension(settingsPath: string = DEFAULT_SETTINGS_PATH) {
 
         mode = nextMode === "reset" ? "default" : nextMode;
         applyIndicator(ctx);
-        ctx.ui.notify(`Working indicator set to: ${describeMode(mode)}`, "info");
+
+        try {
+          await saveMode(settingsPath, mode);
+          ctx.ui.notify(`Working indicator set to: ${describeMode(mode)}`, "info");
+        } catch (err) {
+          const reason = err instanceof Error ? err.message : String(err);
+          ctx.ui.notify(`Working indicator set to ${describeMode(mode)}, but could not save: ${reason}`, "error");
+        }
       },
     });
   };
