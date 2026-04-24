@@ -284,12 +284,178 @@ test("events arriving after turn_end do not mutate coordinator state", async () 
     await emit("turn_end", {}, {});
 
     await emit("message_update", { assistantMessageEvent: { type: "thinking_start" } }, {});
+    await emit("message_update", { assistantMessageEvent: { type: "toolcall_end", toolCall: { id: "late" } } }, {});
     await emit("tool_execution_start", { toolCallId: "late" }, {});
     await emit("tool_execution_update", { toolCallId: "late" }, {});
 
     const snapshot = coordinator.getSnapshot();
     assert.equal(snapshot.visible, false, "should remain hidden while idle");
     assert.equal(snapshot.state, "active", "no state transitions should occur between turns");
+  } finally {
+    resetWorkingCoordinatorForTests();
+  }
+});
+
+test("message_update toolcall_end promotes toolUse as soon as the model finalizes the call", async () => {
+  resetWorkingCoordinatorForTests();
+  try {
+    const coordinator = getWorkingCoordinator(path.join(os.tmpdir(), "pi-working-never-written-tce.json"));
+    const { pi, emit } = makePi();
+    coordinator.ensureRegistered(pi as any, false);
+
+    await emit("turn_start", {}, {});
+    assert.equal(coordinator.getSnapshot().state, "active");
+
+    await emit(
+      "message_update",
+      { assistantMessageEvent: { type: "toolcall_end", toolCall: { type: "toolCall", id: "t1", name: "bash", arguments: {} } } },
+      {},
+    );
+    assert.equal(coordinator.getSnapshot().state, "toolUse", "toolcall_end is the earliest reliable opener");
+  } finally {
+    resetWorkingCoordinatorForTests();
+  }
+});
+
+test("toolcall_end followed by tool_execution_start/end for the same id only resolves once (no double-count)", async () => {
+  resetWorkingCoordinatorForTests();
+  try {
+    const coordinator = getWorkingCoordinator(path.join(os.tmpdir(), "pi-working-never-written-dup.json"));
+    const { pi, emit } = makePi();
+    coordinator.ensureRegistered(pi as any, false);
+
+    await emit("turn_start", {}, {});
+    let emissions = 0;
+    coordinator.subscribe(() => {
+      emissions += 1;
+    });
+
+    await emit(
+      "message_update",
+      { assistantMessageEvent: { type: "toolcall_end", toolCall: { id: "same" } } },
+      {},
+    );
+    assert.equal(coordinator.getSnapshot().state, "toolUse");
+    const emissionsAfterOpener = emissions;
+
+    await emit("tool_execution_start", { toolCallId: "same" }, {});
+    await emit("tool_execution_update", { toolCallId: "same" }, {});
+    assert.equal(coordinator.getSnapshot().state, "toolUse", "still in flight");
+    assert.equal(
+      emissions,
+      emissionsAfterOpener,
+      "execution_start/update for an already-tracked id must not emit again",
+    );
+
+    await emit("tool_execution_end", { toolCallId: "same" }, {});
+    assert.equal(coordinator.getSnapshot().state, "active", "single close signal drops the invocation");
+    assert.equal(emissions, emissionsAfterOpener + 1, "single emit on final close");
+  } finally {
+    resetWorkingCoordinatorForTests();
+  }
+});
+
+test("toolcall_start and toolcall_delta alone do not promote toolUse", async () => {
+  resetWorkingCoordinatorForTests();
+  try {
+    const coordinator = getWorkingCoordinator(path.join(os.tmpdir(), "pi-working-never-written-partial.json"));
+    const { pi, emit } = makePi();
+    coordinator.ensureRegistered(pi as any, false);
+
+    await emit("turn_start", {}, {});
+    let emissions = 0;
+    coordinator.subscribe(() => {
+      emissions += 1;
+    });
+
+    await emit("message_update", { assistantMessageEvent: { type: "toolcall_start", contentIndex: 0 } }, {});
+    await emit(
+      "message_update",
+      { assistantMessageEvent: { type: "toolcall_delta", contentIndex: 0, delta: "{\"cmd\"" } },
+      {},
+    );
+
+    assert.equal(coordinator.getSnapshot().state, "active", "incomplete tool-call events are ignored");
+    assert.equal(emissions, 0, "incomplete tool-call events must not re-emit");
+  } finally {
+    resetWorkingCoordinatorForTests();
+  }
+});
+
+test("parallel tool calls with distinct ids require every close before returning to active", async () => {
+  resetWorkingCoordinatorForTests();
+  try {
+    const coordinator = getWorkingCoordinator(path.join(os.tmpdir(), "pi-working-never-written-parallel.json"));
+    const { pi, emit } = makePi();
+    coordinator.ensureRegistered(pi as any, false);
+
+    await emit("turn_start", {}, {});
+    await emit("message_update", { assistantMessageEvent: { type: "toolcall_end", toolCall: { id: "a" } } }, {});
+    await emit("message_update", { assistantMessageEvent: { type: "toolcall_end", toolCall: { id: "b" } } }, {});
+    assert.equal(coordinator.getSnapshot().state, "toolUse");
+
+    await emit("tool_execution_end", { toolCallId: "a" }, {});
+    assert.equal(coordinator.getSnapshot().state, "toolUse", "b is still in flight");
+
+    await emit("tool_execution_end", { toolCallId: "b" }, {});
+    assert.equal(coordinator.getSnapshot().state, "active");
+  } finally {
+    resetWorkingCoordinatorForTests();
+  }
+});
+
+test("tool events with missing or malformed ids are ignored", async () => {
+  resetWorkingCoordinatorForTests();
+  try {
+    const coordinator = getWorkingCoordinator(path.join(os.tmpdir(), "pi-working-never-written-bad-id.json"));
+    const { pi, emit } = makePi();
+    coordinator.ensureRegistered(pi as any, false);
+
+    await emit("turn_start", {}, {});
+    let emissions = 0;
+    coordinator.subscribe(() => {
+      emissions += 1;
+    });
+
+    // toolcall_end without a toolCall at all
+    await emit("message_update", { assistantMessageEvent: { type: "toolcall_end" } }, {});
+    // toolcall_end with an empty id
+    await emit("message_update", { assistantMessageEvent: { type: "toolcall_end", toolCall: { id: "" } } }, {});
+    // toolcall_end with a non-string id
+    await emit("message_update", { assistantMessageEvent: { type: "toolcall_end", toolCall: { id: 42 } } }, {});
+    // tool_execution_start with no toolCallId
+    await emit("tool_execution_start", {}, {});
+    // tool_execution_update with non-string id
+    await emit("tool_execution_update", { toolCallId: null }, {});
+    // tool_execution_end with no toolCallId (must not crash, must not emit)
+    await emit("tool_execution_end", {}, {});
+
+    assert.equal(coordinator.getSnapshot().state, "active");
+    assert.equal(emissions, 0, "malformed tool events are silently dropped");
+  } finally {
+    resetWorkingCoordinatorForTests();
+  }
+});
+
+test("thinking still overrides toolUse when the broadened lifecycle is active", async () => {
+  resetWorkingCoordinatorForTests();
+  try {
+    const coordinator = getWorkingCoordinator(path.join(os.tmpdir(), "pi-working-never-written-think-over.json"));
+    const { pi, emit } = makePi();
+    coordinator.ensureRegistered(pi as any, false);
+
+    await emit("turn_start", {}, {});
+    await emit("message_update", { assistantMessageEvent: { type: "toolcall_end", toolCall: { id: "t1" } } }, {});
+    assert.equal(coordinator.getSnapshot().state, "toolUse");
+
+    await emit("message_update", { assistantMessageEvent: { type: "thinking_start" } }, {});
+    assert.equal(coordinator.getSnapshot().state, "thinking", "thinking has priority over in-flight tool calls");
+
+    await emit("message_update", { assistantMessageEvent: { type: "thinking_end" } }, {});
+    assert.equal(coordinator.getSnapshot().state, "toolUse", "once thinking ends the invocation is still in flight");
+
+    await emit("tool_execution_end", { toolCallId: "t1" }, {});
+    assert.equal(coordinator.getSnapshot().state, "active");
   } finally {
     resetWorkingCoordinatorForTests();
   }
