@@ -62,6 +62,42 @@ test("hasUI false: publishes plain message without escape bytes", () => {
 
 // ─── Scenario B: hasUI === true styled path ──────────────────────────────────
 
+test("hasUI true: shine mode applies a blue foreground color", () => {
+  const { pi, handlers } = buildMockPi();
+  workingMessageFactory(pi as any);
+
+  const timerHandles: ReturnType<typeof setInterval>[] = [];
+  const originalSetInterval = globalThis.setInterval;
+  const originalClearInterval = globalThis.clearInterval;
+
+  globalThis.setInterval = ((...args: Parameters<typeof setInterval>) => {
+    const handle = originalSetInterval(...args);
+    timerHandles.push(handle);
+    return handle;
+  }) as typeof setInterval;
+
+  try {
+    const turnStart = handlers.get("turn_start")!;
+    assert.ok(turnStart, "turn_start handler should be registered");
+
+    const { ctx, calls } = makeCtx(true);
+    turnStart({}, ctx);
+
+    assert.ok(calls.length >= 1, "setWorkingMessage should be called at least once");
+    const styledCall = calls.find((c) => c !== undefined && /\x1b\[/.test(c));
+    assert.ok(styledCall !== undefined, "at least one call should contain an escape sequence");
+    assert.match(
+      styledCall,
+      /\x1b\[38;2;129;161;193m/,
+      "shine mode should use the Nord footer token blue instead of terminal default gray",
+    );
+  } finally {
+    globalThis.setInterval = originalSetInterval;
+    globalThis.clearInterval = originalClearInterval;
+    timerHandles.forEach((h) => originalClearInterval(h));
+  }
+});
+
 test("hasUI true: starts setInterval and publishes styled message with escapes", () => {
   const { pi, handlers } = buildMockPi();
   workingMessageFactory(pi as any);
