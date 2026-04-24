@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import {
+import footerFactory, {
 	buildCostString,
 	computeVisibility,
 	formatContextDenominator,
@@ -304,4 +304,33 @@ test("row 2 width budget accounts for 3-char ' · ' metric separators", () => {
 
 	const justUnder = computeVisibility(fw(69, fields));
 	assert.ok(!justUnder.showCost, "cost should drop when row 2 needs 70 but width is 69");
+});
+
+test("session_shutdown restores the built-in footer", async () => {
+	const handlers = new Map<string, (event: any, ctx: any) => void | Promise<void>>();
+	footerFactory({
+		on(event: string, handler: (event: any, ctx: any) => void | Promise<void>) {
+			handlers.set(event, handler);
+		},
+	} as any);
+
+	const sessionStart = handlers.get("session_start");
+	const sessionShutdown = handlers.get("session_shutdown");
+	assert.ok(sessionStart, "session_start handler should be registered");
+	assert.ok(sessionShutdown, "session_shutdown handler should be registered");
+
+	const footerCalls: unknown[] = [];
+	const ctx = {
+		ui: {
+			setFooter(footer: unknown) {
+				footerCalls.push(footer);
+			},
+		},
+	};
+
+	await sessionStart!({}, ctx);
+	await sessionShutdown!({ reason: "quit" }, ctx);
+
+	assert.equal(typeof footerCalls[0], "function", "session_start should install a custom footer");
+	assert.equal(footerCalls[1], undefined, "session_shutdown should restore the built-in footer");
 });

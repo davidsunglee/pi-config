@@ -239,3 +239,15 @@ After completing Steps 3 and 6, restore the original `agent/settings.json` (or s
 ```bash
 cd agent && npm run typecheck && npm test
 ```
+
+## Manual QA sign-off
+
+PASS nord shine-only — DSL 2026-04-23
+PASS nord thinking transition — DSL 2026-04-23
+PASS nord no-thinking turn — DSL 2026-04-23
+PASS light shine-only — DSL 2026-04-23
+PASS light thinking transition — DSL 2026-04-23
+PASS light no-thinking turn — DSL 2026-04-23
+PASS end-of-turn cleanup — DSL 2026-04-23
+PASS abort cleanup via `escape` — DSL 2026-04-23
+PASS shutdown cleanup via exit — DSL 2026-04-23
