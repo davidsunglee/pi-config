@@ -9,7 +9,7 @@
   "hideThinkingBlock": false,
   "theme": "nord",
   "packages": [
-    "~/Code/pi-subagent",
+    "~/Code/pi-interactive-subagent",
     "npm:pi-web-access",
     "npm:pi-token-burden"
   ],
