@@ -459,9 +459,9 @@ Highlights:
 
 This is a core piece of the workflow. The intent is to keep task state explicit, inspectable, and versioned.
 
-### `agent/extensions/whimsical.ts`
+### `agent/extensions/working-message.ts`
 
-Tiny quality-of-life extension that randomizes the working message while pi is thinking.
+Randomizes the working message each turn and renders it with an animated shine effect. While the model is emitting thinking content, the entire message switches to a rainbow palette + shine; otherwise the message stays shine-only. Falls back to the plain random message when the UI can't render escapes.
 
 Examples include things like “Baking...”, “Cogitating...”, “Wrangling...”, etc.
 

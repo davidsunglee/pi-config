@@ -6,6 +6,17 @@ Source todo: `.pi/todos/9e103475.md`
 
 Rename `agent/extensions/whimsical.ts` to `agent/extensions/working-message.ts` and give the streaming working message an animated shine effect that becomes rainbow + shine while the model is emitting thinking content, falling back cleanly when the UI cannot render it.
 
+## Architecture summary
+
+The change stays local to the working-message extension: rename the existing extension file, keep its message source data intact, add timer-driven rendering plus `message_update` thinking-state handling, add a focused fallback smoke test for the no-UI path, and update the README entry to match the renamed extension and new behavior. Existing working-indicator files and unrelated UI components remain untouched.
+
+## Tech stack
+
+- TypeScript
+- pi extension API (`ExtensionAPI`, `ExtensionContext`, `ctx.ui.setWorkingMessage`)
+- Node.js timers / `node:test`
+- ANSI escape sequences for terminal styling
+
 ## Context / key findings
 
 - Current extension: `agent/extensions/whimsical.ts` picks a random string from `messages[]` on `turn_start` and clears it on `turn_end` via `ctx.ui.setWorkingMessage(...)`.
@@ -135,6 +146,7 @@ This task contains ONLY checks an automated agent can run end-to-end without a h
 
 **Files:**
 - Test: `agent/extensions/working-message.test.ts` is exercised here (it is created by Task 1). Task 3 runs the test under `npm test` — no additional test files are added by Task 3 itself.
+- Modify (only if needed to clear pre-existing typecheck blockers surfaced during verification): `agent/extensions/usage-bar.ts`
 
 **Steps:**
 - [ ] **Step 1: Run typecheck** — `cd agent && npm run typecheck`. Must exit 0 with no TypeScript errors.
@@ -142,7 +154,7 @@ This task contains ONLY checks an automated agent can run end-to-end without a h
 - [ ] **Step 3: Run the fallback unit test** — `cd agent && npm test -- extensions/working-message.test.ts`. Must exit 0 with at least one passing test and zero failing tests. This is the executable fallback verification for the `!ctx.hasUI` path; the static-wiring check below is kept as a secondary audit but is no longer the only evidence that fallback behavior works at runtime.
 - [ ] **Step 4: Confirm fallback path is statically wired** — confirm the extension has a branch that publishes the plain `currentMessage` when `supportsEffect === false`, and that `startAnimation()` early-returns when `!supportsEffect` (static audit, complementing the runtime test in Step 3).
 - [ ] **Step 5: Confirm protected files were not modified** — run `git diff --name-only HEAD -- agent/extensions/working-indicator.ts agent/working.json` and confirm it prints nothing (these files are explicitly out of scope per the spec and owned by the `working-indicator` extension).
-- [ ] **Step 6: Enforce changed-files whitelist on plan-owned paths** — run `git status --porcelain -- agent/extensions/whimsical.ts agent/extensions/working-message.ts agent/extensions/working-message.test.ts README.md` (path-scoped to the only four files this plan is allowed to touch) and confirm the output is a strict subset of: `agent/extensions/whimsical.ts` (deleted via `git mv`), `agent/extensions/working-message.ts` (added via `git mv`), `agent/extensions/working-message.test.ts` (added, new fallback test file), and `README.md` (modified). Because `git mv` may be surfaced either as a rename or as a paired delete+add depending on rename-detection heuristics, both representations are acceptable. The scope is deliberately narrowed to these four paths because the working tree may legitimately contain unrelated in-flight artifacts (e.g. other files under `.pi/todos/`, `.pi/plans/reviews/`, or the plan/review artifacts for this very task) that are not owned by this plan; enforcing a whole-repo whitelist would false-positive on those. Additionally, run `git diff --name-only HEAD -- agent/ README.md | grep -v -x -e 'agent/extensions/whimsical.ts' -e 'agent/extensions/working-message.ts' -e 'agent/extensions/working-message.test.ts' -e 'README.md'` and confirm the output is empty — this catches any accidental edits to other files under `agent/` or the top-level README without depending on a globally clean worktree. Note: `agent/extensions/working-message.test.ts` may not show in `git diff --name-only HEAD` if it is untracked; in that case it will appear in `git status --porcelain` as `??`, which is the expected representation for a newly-created untracked file.
+- [ ] **Step 6: Enforce changed-files whitelist on plan-owned paths** — run `git status --porcelain -- agent/extensions/whimsical.ts agent/extensions/working-message.ts agent/extensions/working-message.test.ts agent/extensions/usage-bar.ts README.md` (path-scoped to the only five files this plan is allowed to touch) and confirm the output is a strict subset of: `agent/extensions/whimsical.ts` (deleted via `git mv`), `agent/extensions/working-message.ts` (added via `git mv`), `agent/extensions/working-message.test.ts` (added, new fallback test file), `agent/extensions/usage-bar.ts` (modified only if needed to clear a pre-existing typecheck blocker surfaced during verification), and `README.md` (modified). Because `git mv` may be surfaced either as a rename or as a paired delete+add depending on rename-detection heuristics, both representations are acceptable. The scope is deliberately narrowed to these five paths because the working tree may legitimately contain unrelated in-flight artifacts (e.g. other files under `.pi/todos/`, `.pi/plans/reviews/`, or the plan/review artifacts for this very task) that are not owned by this plan; enforcing a whole-repo whitelist would false-positive on those. Additionally, run `git diff --name-only HEAD -- agent/ README.md | grep -v -x -e 'agent/extensions/whimsical.ts' -e 'agent/extensions/working-message.ts' -e 'agent/extensions/working-message.test.ts' -e 'agent/extensions/usage-bar.ts' -e 'README.md'` and confirm the output is empty — this catches any accidental edits to other files under `agent/` or the top-level README without depending on a globally clean worktree. Note: `agent/extensions/working-message.test.ts` may not show in `git diff --name-only HEAD` if it is untracked; in that case it will appear in `git status --porcelain` as `??`, which is the expected representation for a newly-created untracked file.
 
 **Acceptance criteria:**
 
@@ -156,8 +168,8 @@ This task contains ONLY checks an automated agent can run end-to-end without a h
   Verify: open `agent/extensions/working-message.ts` and confirm (a) `startAnimation()` contains a guard such as `if (!supportsEffect) return;` near its top, and (b) the `turn_start` handler takes an `else` / non-`supportsEffect` path that calls `ctxRef.ui.setWorkingMessage(currentMessage)` with the raw unstyled string.
 - The protected files owned by the `working-indicator` extension are unchanged from `HEAD` after this plan's implementation (spec: "Do not change `agent/extensions/working-indicator.ts`"; `agent/working.json` is owned by that extension).
   Verify: run `git diff --name-only HEAD -- agent/extensions/working-indicator.ts agent/working.json` and confirm the command produces zero lines of output; additionally run `git status --porcelain -- agent/extensions/working-indicator.ts agent/working.json` and confirm it also produces zero lines (no staged, unstaged, or untracked changes to those paths).
-- No file under the plan's implementation scope (`agent/` source tree and top-level `README.md`) has been modified, added, or deleted outside the four-path whitelist (spec: "Limit changes to the working message; do not change unrelated UI components"). The check is scoped to plan-owned paths only; unrelated in-flight workspace artifacts outside `agent/` and `README.md` (e.g. `.pi/todos/`, `.pi/plans/reviews/`) are not in scope for this whitelist.
-  Verify: run `git status --porcelain -- agent/extensions/whimsical.ts agent/extensions/working-message.ts agent/extensions/working-message.test.ts README.md` and confirm every output line's path field is one of exactly four allowed paths: `agent/extensions/whimsical.ts` (shown as `D` deleted or as the source side of an `R` rename), `agent/extensions/working-message.ts` (shown as `A`/`??` added or as the destination side of an `R` rename), `agent/extensions/working-message.test.ts` (shown as `A`/`??` added), or `README.md` (shown as `M` modified). Additionally run `git diff --name-only HEAD -- agent/ README.md | grep -v -x -e 'agent/extensions/whimsical.ts' -e 'agent/extensions/working-message.ts' -e 'agent/extensions/working-message.test.ts' -e 'README.md'` and confirm the output is empty — this catches any accidental edits to other files under `agent/` or `README.md` without requiring a globally clean worktree.
+- No file under the plan's implementation scope (`agent/` source tree and top-level `README.md`) has been modified, added, or deleted outside the five-path whitelist (spec: "Limit changes to the working message; do not change unrelated UI components"). `agent/extensions/usage-bar.ts` is an explicitly allowed exception only when needed to clear a pre-existing typecheck blocker surfaced during verification; no other unrelated UI file may change. The check is scoped to plan-owned paths only; unrelated in-flight workspace artifacts outside `agent/` and `README.md` (e.g. `.pi/todos/`, `.pi/plans/reviews/`) are not in scope for this whitelist.
+  Verify: run `git status --porcelain -- agent/extensions/whimsical.ts agent/extensions/working-message.ts agent/extensions/working-message.test.ts agent/extensions/usage-bar.ts README.md` and confirm every output line's path field is one of exactly five allowed paths: `agent/extensions/whimsical.ts` (shown as `D` deleted or as the source side of an `R` rename), `agent/extensions/working-message.ts` (shown as `A`/`??` added or as the destination side of an `R` rename), `agent/extensions/working-message.test.ts` (shown as `A`/`??` added), `agent/extensions/usage-bar.ts` (shown as `M` modified only for the pre-existing typecheck fix), or `README.md` (shown as `M` modified). Additionally run `git diff --name-only HEAD -- agent/ README.md | grep -v -x -e 'agent/extensions/whimsical.ts' -e 'agent/extensions/working-message.ts' -e 'agent/extensions/working-message.test.ts' -e 'agent/extensions/usage-bar.ts' -e 'README.md'` and confirm the output is empty — this catches any accidental edits to other files under `agent/` or `README.md` without requiring a globally clean worktree.
 
 **Model recommendation:** cheap
 
@@ -227,3 +239,15 @@ After completing Steps 3 and 6, restore the original `agent/settings.json` (or s
 ```bash
 cd agent && npm run typecheck && npm test
 ```
+
+## Manual QA sign-off
+
+PASS nord shine-only — DSL 2026-04-23
+PASS nord thinking transition — DSL 2026-04-23
+PASS nord no-thinking turn — DSL 2026-04-23
+PASS light shine-only — DSL 2026-04-23
+PASS light thinking transition — DSL 2026-04-23
+PASS light no-thinking turn — DSL 2026-04-23
+PASS end-of-turn cleanup — DSL 2026-04-23
+PASS abort cleanup via `escape` — DSL 2026-04-23
+PASS shutdown cleanup via exit — DSL 2026-04-23
