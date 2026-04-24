@@ -198,6 +198,7 @@ const COLORS: [number, number, number][] = [
 	[157, 134, 195], // purple
 	[206, 130, 172], // pink
 ];
+const SHINE_COLOR: [number, number, number] = [129, 161, 193]; // Nord footer tokens blue
 const RESET = "\x1b[0m";
 const ANIM_INTERVAL_MS = 60;
 const CYCLE_LENGTH = 20;
@@ -231,7 +232,13 @@ function colorizeShineOnly(text: string, shinePos: number): string {
 	const chars = [...text];
 	for (let i = 0; i < chars.length; i++) {
 		const c = chars[i]!;
-		if (shinePos >= 0 && Math.abs(i - shinePos) <= 1) {
+		const dist = shinePos >= 0 ? Math.abs(i - shinePos) : -1;
+		let factor = 0;
+		if (dist === 0) factor = 0.45;
+		else if (dist === 1) factor = 0.2;
+
+		result += brighten(SHINE_COLOR, factor);
+		if (dist >= 0 && dist <= 1) {
 			result += `\x1b[1m${c}\x1b[22m`;
 		} else {
 			result += c;
