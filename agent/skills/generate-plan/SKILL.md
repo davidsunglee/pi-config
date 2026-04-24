@@ -142,6 +142,7 @@ The reviewer reads the generated plan, the task artifact, and the scout brief (i
    ]}
    ```
    If the cross-provider dispatch fails, retry with `capable` from model-tiers.json (re-resolving the `cli:` value from the `dispatch` map in `model-tiers.json` for the fallback model) and notify the user (see Step 2 fallback message).
+   Read the reviewer's output from results[0].finalMessage and write it to the versioned path in step 5.
 5. Write review output to the versioned path. Create `.pi/plans/reviews/` if it doesn't exist.
 
 ### 4.2: Assess review
