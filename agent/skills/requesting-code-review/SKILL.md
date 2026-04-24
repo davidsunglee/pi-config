@@ -49,19 +49,18 @@ Use the `capable` tier for the reviewer model. Resolve the dispatch target using
 
 ### 3. Dispatch the subagent
 
-Use pi's `subagent` tool to dispatch a `code-reviewer` agent:
+Use pi's `subagent_run_serial` tool to dispatch a `code-reviewer` agent:
 
 ```
-subagent {
-  agent: "code-reviewer",
-  task: "<filled review-code-prompt.md template>",
-  model: "<capable from model-tiers.json>",
-  dispatch: "<dispatch for capable>"
-}
+subagent_run_serial { tasks: [
+  { name: "code-reviewer", agent: "code-reviewer", task: "<filled review-code-prompt.md>", model: "<capable from model-tiers.json>", cli: "<dispatch for capable>" }
+]}
 ```
 
 Use the `capable` model from `model-tiers.json` in a fresh context — the reviewer must see
 the code without bias from the generation process.
+
+The reviewer's output is in `results[0].finalMessage`. Parse it for `[Approved]` or `[Issues Found]` to determine next steps.
 
 ### 4. Act on feedback
 

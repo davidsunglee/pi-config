@@ -61,17 +61,14 @@ Fill placeholders:
 ## Step 4: Dispatch code-refiner
 
 ```
-subagent {
-  agent: "code-refiner",
-  task: "<filled refine-code-prompt.md>",
-  model: "<standard from model matrix>",
-  dispatch: "<dispatch for standard>"
-}
+subagent_run_serial { tasks: [
+  { name: "code-refiner", agent: "code-refiner", task: "<filled refine-code-prompt.md>", model: "<standard from model-tiers.json>", cli: "<dispatch for standard>" }
+]}
 ```
 
 ## Step 5: Handle code-refiner result
 
-Parse the code-refiner's response for the STATUS line:
+Parse `results[0].finalMessage` from the code-refiner for the STATUS line:
 
 **`STATUS: clean`**
 - Report to caller: review passed, include iteration count and review file path

@@ -96,8 +96,11 @@ If `model-tiers.json` doesn't exist or is unreadable, stop with: "generate-plan 
    - `{SCOUT_BRIEF}` — `Scout brief: .pi/briefs/<filename>` if a scout brief was extracted from the file preamble and the brief file exists on disk, empty string otherwise.
 3. Dispatch `planner` agent synchronously:
    ```
-   subagent { agent: "planner", task: "<filled template>", model: "<capable from model-tiers.json>", dispatch: "<dispatch for capable>" }
+   subagent_run_serial { tasks: [
+     { name: "planner", agent: "planner", task: "<filled template>", model: "<capable from model-tiers.json>", cli: "<dispatch for capable>" }
+   ]}
    ```
+   Read the planner's output from results[0].finalMessage — the planner writes the plan to disk; this result is the return message.
 
 ## Step 4: Review-edit loop
 
@@ -128,14 +131,17 @@ The reviewer reads the generated plan, the task artifact, and the scout brief (i
 3. Determine review output path from the plan filename. For a plan at `.pi/plans/2026-04-13-my-feature.md`, the review path is `.pi/plans/reviews/2026-04-13-my-feature-plan-review-v1.md`.
 4. Dispatch `plan-reviewer`:
    ```
-   subagent {
-     agent: "plan-reviewer",
-     task: "<filled review-plan-prompt.md>",
-     model: "<crossProvider.capable from model-tiers.json>",
-     dispatch: "<dispatch for crossProvider.capable>"
-   }
+   subagent_run_serial { tasks: [
+     {
+       name: "plan-reviewer",
+       agent: "plan-reviewer",
+       task: "<filled review-plan-prompt.md>",
+       model: "<crossProvider.capable from model-tiers.json>",
+       cli: "<dispatch for crossProvider.capable>"
+     }
+   ]}
    ```
-   If the cross-provider dispatch fails, retry with `capable` from model-tiers.json (re-resolving dispatch for the fallback model) and notify the user (see Step 2 fallback message).
+   If the cross-provider dispatch fails, retry with `capable` from model-tiers.json (re-resolving the `cli:` value from the `dispatch` map in `model-tiers.json` for the fallback model) and notify the user (see Step 2 fallback message).
 5. Write review output to the versioned path. Create `.pi/plans/reviews/` if it doesn't exist.
 
 ### 4.2: Assess review
@@ -189,7 +195,9 @@ The planner edit pass reads the existing plan from disk (it will overwrite it at
 
 3. Dispatch `planner` with the filled template:
    ```
-   subagent { agent: "planner", task: "<filled edit-plan-prompt.md>", model: "<capable from model-tiers.json>", dispatch: "<dispatch for capable>" }
+   subagent_run_serial { tasks: [
+     { name: "planner", agent: "planner", task: "<filled edit-plan-prompt.md>", model: "<capable from model-tiers.json>", cli: "<dispatch for capable>" }
+   ]}
    ```
 4. The planner writes the edited plan back to the same path (overwriting the previous version).
 

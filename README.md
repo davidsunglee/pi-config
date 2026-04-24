@@ -55,7 +55,7 @@ Cross-provider reviews (e.g., OpenAI reviewing Anthropic-generated code) are use
 
 Three external packages are loaded via `settings.json`:
 
-- **`pi-subagent`** — subagent dispatch infrastructure (local fork at `~/Code/pi-subagent`)
+- **`pi-interactive-subagent`** — multi-tool subagent dispatch infrastructure, providing `subagent_run_serial` (blocking sequential), `subagent_run_parallel` (blocking parallel, default `maxConcurrency=4`, hard cap 8), and `subagent` (async) (local fork at `~/Code/pi-interactive-subagent`)
 - **`pi-web-access`** — web access tools
 - **`pi-token-burden`** — token burden tracking and visibility
 
@@ -156,6 +156,8 @@ The workflow uses six specialized subagents, each starting with **fresh context*
 - **Git diffs** carry code changes between review iterations
 
 This is deliberate. Fresh-context subagents are more focused, more independent (reviewers can't be biased by watching generation), more resumable (re-run with the same artifact), and more debuggable (every artifact is a readable file).
+
+Dispatch happens through the pi-interactive-subagent extension, which exposes `subagent_run_serial` (blocking sequential), `subagent_run_parallel` (blocking concurrent), and `subagent` (async). pi-config skills use only the two blocking tools; async is reserved for future work.
 
 ### Git isolation
 
@@ -553,7 +555,7 @@ This repo contains the **project-local config**, but not necessarily every part 
 In particular, some workflow logic may live outside this repo in:
 
 - globally installed pi packages
-- the `pi-subagent` local fork (at `~/Code/pi-subagent`)
+- the `pi-interactive-subagent` local fork (at `~/Code/pi-interactive-subagent`)
 - user-level keybindings or context files
 
 ## How I think about this config

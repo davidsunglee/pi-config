@@ -37,11 +37,11 @@ The model matrix above includes a `dispatch` map that maps provider prefixes to 
 1. Take the resolved model string (e.g., `anthropic/claude-opus-4-6`)
 2. Extract the provider prefix — the substring before the first `/` (e.g., `anthropic`)
 3. Look up `dispatch["<prefix>"]` in the model matrix (e.g., `dispatch["anthropic"]` → `"claude"`)
-4. Pass the result as `dispatch: "<value>"` in the subagent call
+4. Pass the result as `cli: "<value>"` in the subagent_run_serial task
 
 If the `dispatch` map is absent from the model matrix, or the provider has no entry, default to `"pi"`.
 
-Always pass `dispatch` explicitly on every subagent call, even when it resolves to `"pi"`.
+Always pass `cli` explicitly on every subagent_run_serial task, even when it resolves to `"pi"`.
 
 ## Protocol
 
@@ -57,14 +57,11 @@ Always pass `dispatch` explicitly on every subagent call, even when it resolves 
    - `{DESCRIPTION}` — the Plan Goal above (same as `{WHAT_WAS_IMPLEMENTED}`)
    - `{RE_REVIEW_BLOCK}` — empty string (first pass)
 
-3. **Dispatch `code-reviewer`** with model `crossProvider.capable` and corresponding `dispatch` from the model matrix:
+3. **Dispatch `code-reviewer`** with model `crossProvider.capable` and corresponding `cli` from the model matrix:
    ```
-   subagent {
-     agent: "code-reviewer",
-     task: "<filled template>",
-     model: "<crossProvider.capable from model matrix>",
-     dispatch: "<dispatch for crossProvider.capable>"
-   }
+   subagent_run_serial { tasks: [
+     { name: "code-reviewer", agent: "code-reviewer", task: "<filled review-code-prompt.md>", model: "<crossProvider.capable from model-tiers.json>", cli: "<dispatch for crossProvider.capable>" }
+   ]}
    ```
 
 4. **Write review** to versioned path: `<REVIEW_OUTPUT_PATH>-v<ERA>.md`
@@ -79,14 +76,11 @@ Always pass `dispatch` explicitly on every subagent call, even when it resolves 
    - Prefer smaller batches — one batch at a time, sequential dispatch
    - All Critical findings should be in early batches
 
-7. **Dispatch remediator** for one batch — use model `capable` and corresponding `dispatch` from the model matrix:
+7. **Dispatch remediator** for one batch — use model `capable` and corresponding `cli` from the model matrix:
    ```
-   subagent {
-     agent: "coder",
-     task: "Fix the following code review findings:\n\n<batched findings with file:line refs>\n\nContext:\n<relevant plan/spec sections>\n\nWorking directory: {WORKING_DIR}",
-     model: "<capable from model matrix>",
-     dispatch: "<dispatch for capable>"
-   }
+   subagent_run_serial { tasks: [
+     { name: "coder", agent: "coder", task: "<filled remediation prompt>", model: "<capable from model-tiers.json>", cli: "<dispatch for capable>" }
+   ]}
    ```
 
 8. **Commit remediation:**

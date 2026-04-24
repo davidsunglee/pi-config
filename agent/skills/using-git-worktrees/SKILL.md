@@ -1,6 +1,6 @@
 ---
 name: using-git-worktrees
-description: "Use when starting feature work that needs isolation from the current workspace. Guides manual worktree setup: directory selection, safety verification (gitignore check), project setup auto-detection, and baseline test verification. For automated parallel execution, use pi's built-in worktree:true subagent dispatch instead."
+description: "Use when starting feature work that needs isolation from the current workspace. Guides manual worktree setup: directory selection, safety verification (gitignore check), project setup auto-detection, and baseline test verification."
 ---
 
 # Using Git Worktrees
@@ -200,9 +200,6 @@ Ready to implement <feature-name>
 ## Integration
 
 This skill handles **manual worktree setup** for ad-hoc feature branch work.
-For automated parallel task execution, use pi's built-in `worktree: true`
-option in subagent dispatch — that handles worktree creation, execution,
-and diff collection automatically.
 
 **Pairs with:**
 - `finishing-a-development-branch` — for cleanup after work is complete
