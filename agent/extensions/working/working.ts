@@ -1,3 +1,23 @@
+/**
+ * Working Indicator and Message Extension
+ *
+ * Customizes the inline indicator and message shown while Pi is working. Settings
+ * are persisted globally in `~/.pi/agent/working.json` via the shared
+ * `indicatorShape`, `active`, `toolUse`, and `thinking` keys.
+ *
+ * Command:
+ *   /working
+ *   /working indicator=dot|pulse|spinner
+ *   /working active color=default|#RRGGBB
+ *   /working active gleam=on|off
+ *   /working active rainbow=on|off
+ *   /working tool-use color=default|#RRGGBB
+ *   /working tool-use gleam=on|off
+ *   /working tool-use rainbow=on|off
+ *   /working thinking color=default|#RRGGBB
+ *   /working thinking gleam=on|off
+ *   /working thinking rainbow=on|off
+ */
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -174,12 +194,22 @@ function describeSettings(settings: WorkingSettings): string {
   return `Working: indicatorShape=${settings.indicatorShape} | ${describe("active")} | ${describe("toolUse")} | ${describe("thinking")}`;
 }
 
+function extractToolCallId(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
 class WorkingCoordinator {
   private readonly settingsPath: string;
   private settings: WorkingSettings = cloneDefaultSettings();
   private activeTurn = false;
   private thinking = false;
-  private toolExecutionDepth = 0;
+  // Tracks the set of tool invocations that are currently in flight, keyed by
+  // `toolCallId`. A single invocation can surface through multiple event
+  // streams (`toolcall_end` from the model as the earliest opener, plus the
+  // `tool_execution_*` lifecycle as fallback). Keying by id — rather than
+  // using a plain depth counter — lets us collapse those into one in-flight
+  // unit so the same invocation is never double-counted.
+  private inflightToolCalls = new Set<string>();
   private listeners = new Set<(snapshot: WorkingSnapshot) => void>();
   private runtimeRegistered = false;
   private commandRegistered = false;
@@ -223,7 +253,7 @@ class WorkingCoordinator {
       pi.on("turn_start", () => {
         this.activeTurn = true;
         this.thinking = false;
-        this.toolExecutionDepth = 0;
+        this.inflightToolCalls.clear();
         this.emit();
       });
 
@@ -232,7 +262,9 @@ class WorkingCoordinator {
         // They would otherwise flip `thinking` on while we're idle and show
         // the working UI outside of an active turn.
         if (!this.activeTurn) return;
-        const payload = event as { assistantMessageEvent?: { type?: unknown } } | undefined;
+        const payload = event as
+          | { assistantMessageEvent?: { type?: unknown; toolCall?: { id?: unknown } } }
+          | undefined;
         const type = payload?.assistantMessageEvent?.type;
         if (type === "thinking_start") {
           this.thinking = true;
@@ -240,29 +272,40 @@ class WorkingCoordinator {
         } else if (type === "thinking_end") {
           this.thinking = false;
           this.emit();
+        } else if (type === "toolcall_end") {
+          // `toolcall_end` is the earliest reliable opener for the broadened
+          // `toolUse` state: the model has finalized the tool call, but the
+          // runtime may not have dispatched `tool_execution_start` yet. We
+          // deliberately ignore `toolcall_start` / `toolcall_delta` because
+          // partial / streaming call bodies do not yet constitute an
+          // in-flight invocation we can key off.
+          this.openToolCall(extractToolCallId(payload?.assistantMessageEvent?.toolCall?.id));
         }
       });
 
-      pi.on("tool_execution_start", () => {
+      pi.on("tool_execution_start", (event) => {
         if (!this.activeTurn) return;
-        this.toolExecutionDepth += 1;
-        this.emit();
+        // Fallback opener in case `toolcall_end` did not fire first (or we
+        // missed it). Keyed by `toolCallId` so it collapses with the
+        // `toolcall_end` opener — no double-counting for the same invocation.
+        this.openToolCall(extractToolCallId((event as { toolCallId?: unknown } | undefined)?.toolCallId));
       });
 
-      pi.on("tool_execution_update", () => {
+      pi.on("tool_execution_update", (event) => {
         if (!this.activeTurn) return;
-        if (this.toolExecutionDepth === 0) {
-          this.toolExecutionDepth = 1;
-          this.emit();
-        }
+        // Fallback opener for cases where neither `toolcall_end` nor
+        // `tool_execution_start` was observed before the first update.
+        this.openToolCall(extractToolCallId((event as { toolCallId?: unknown } | undefined)?.toolCallId));
       });
 
-      pi.on("tool_execution_end", () => {
+      pi.on("tool_execution_end", (event) => {
         if (!this.activeTurn) return;
-        // Guard against a stray `tool_execution_end` without a matching start
-        // (e.g. reconnect scenarios). Clamp at zero instead of going negative.
-        if (this.toolExecutionDepth > 0) {
-          this.toolExecutionDepth -= 1;
+        // Single close signal for the broadened lifecycle. Missing / malformed
+        // ids are dropped silently. Removing an id we never tracked (stray
+        // end) is a no-op — `Set#delete` returns false and we skip the emit.
+        const id = extractToolCallId((event as { toolCallId?: unknown } | undefined)?.toolCallId);
+        if (id === undefined) return;
+        if (this.inflightToolCalls.delete(id)) {
           this.emit();
         }
       });
@@ -270,14 +313,14 @@ class WorkingCoordinator {
       pi.on("turn_end", () => {
         this.activeTurn = false;
         this.thinking = false;
-        this.toolExecutionDepth = 0;
+        this.inflightToolCalls.clear();
         this.emit();
       });
 
       pi.on("session_shutdown", () => {
         this.activeTurn = false;
         this.thinking = false;
-        this.toolExecutionDepth = 0;
+        this.inflightToolCalls.clear();
         this.emit();
       });
     }
@@ -295,8 +338,17 @@ class WorkingCoordinator {
 
   private resolveState(): WorkingState {
     if (this.thinking) return "thinking";
-    if (this.activeTurn && this.toolExecutionDepth > 0) return "toolUse";
+    if (this.activeTurn && this.inflightToolCalls.size > 0) return "toolUse";
     return "active";
+  }
+
+  private openToolCall(id: string | undefined): void {
+    if (id === undefined) return;
+    // `Set#add` always sets, so gate on `has` to avoid re-emitting when the
+    // invocation was already tracked via another event stream.
+    if (this.inflightToolCalls.has(id)) return;
+    this.inflightToolCalls.add(id);
+    this.emit();
   }
 
   private emit(): void {
