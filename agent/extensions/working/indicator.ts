@@ -1,24 +1,3 @@
-/**
- * Working Indicator Extension
- *
- * Customizes the inline working indicator shown while Pi is working. Settings
- * are persisted globally in `~/.pi/agent/working.json` via the shared
- * `indicatorShape`, `active`, `toolUse`, and `thinking` keys.
- *
- * Command:
- *   /working
- *   /working indicator=dot|pulse|spinner
- *   /working active color=default|#RRGGBB
- *   /working active gleam=on|off
- *   /working active rainbow=on|off
- *   /working tool-use color=default|#RRGGBB
- *   /working tool-use gleam=on|off
- *   /working tool-use rainbow=on|off
- *   /working thinking color=default|#RRGGBB
- *   /working thinking gleam=on|off
- *   /working thinking rainbow=on|off
- */
-
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 
 import { buildWorkingIndicator } from "./effects.ts";
