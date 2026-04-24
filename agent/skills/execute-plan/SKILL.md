@@ -411,7 +411,7 @@ Task <N>: <task_title> (current tier: <tier>) — choose an intervention:
   (m) Better model      — re-dispatch this task with a more capable model tier
                             [omit this line if current tier is already `capable`]
   (s) Split into sub-tasks — break this task into smaller sub-tasks and dispatch them
-  (x) Stop execution    — halt the plan; committed waves are preserved as checkpoints
+  (x) Stop execution    — halt the plan; prior wave commits remain in git history
 ~~~
 
 These are the canonical intervention options for blocked tasks. Do not invent new options. The `(m) Better model` option is suppressed (not offered, and not selectable) whenever the task's current model tier is already `capable`, because there is no higher tier to escalate to and re-dispatching to the same model would violate the Step 9 rule "Never ignore an escalation or re-dispatch the same task to the same model without changes." When `(m)` is suppressed, the user must pick `(c)`, `(s)`, or `(x)` for that task.
@@ -419,7 +419,7 @@ These are the canonical intervention options for blocked tasks. Do not invent ne
 - **(c) More context:** prompt the user for the additional context (free-form text). Re-dispatch this single task to a `coder` worker with the original task spec plus the supplied context appended under a `## Additional Context` section in the worker prompt. Keep the task's existing model tier unless the user also picks (m) for the same task on a subsequent pass.
 - **(m) Better model:** only offered when the task's current tier is `cheap` or `standard`. Re-dispatch this single task to a `coder` worker using the next tier up (`cheap` → `standard`, `standard` → `capable`). Resolve the concrete model string via `~/.pi/agent/model-tiers.json` as described in Step 6.
 - **(s) Split into sub-tasks:** decompose the task into smaller sub-tasks in-session. Each sub-task must keep the same output file(s) and acceptance criteria coverage between them (no criterion may be dropped). Dispatch the sub-tasks as a mini-wave bounded by the pi-interactive-subagent `MAX_PARALLEL_HARD_CAP` cap (see Step 5). If there is a natural ordering between sub-tasks, run them sequentially instead. The parent task's slot is replaced by the sub-tasks for all subsequent tracking; each sub-task is treated as an independent task in this wave for Step 9 classification and gate re-entry. ⚠ Sub-task dispatches run pre-commit: their changes must remain in the working tree (uncommitted) at the point Step 11 dispatches the verifier. See Step 11.2 for the fallback diff range if this is violated. Retry budget: see Step 13.
-- **(x) Stop execution:** halt execution immediately. Do NOT perform Step 11 or Step 12 for this wave. Report partial progress via Step 14. All prior wave commits are preserved as checkpoints.
+- **(x) Stop execution:** halt execution immediately. Do NOT perform Step 11 or Step 12 for this wave. Report partial progress via Step 14. All prior wave commits remain in git history.
 
 If the user picks `(x) Stop execution` for any blocked task, stop the whole plan regardless of outstanding choices for other blocked tasks. Do not continue asking about the remaining blocked tasks.
 
@@ -446,12 +446,12 @@ Otherwise, present every concerned task together in a single combined message �
 Options:
   (c) Continue to verification            — proceed to Step 11 with all tasks as-is
   (r) Remediate selected task(s)          — specify task number(s) and guidance; re-dispatch those tasks
-  (x) Stop execution                      — halt the plan; committed waves are preserved as checkpoints
+  (x) Stop execution                      — halt the plan; prior wave commits remain in git history
 ```
 
 - **(c) Continue to verification.** Exit §3. Leave every concerned task's Step 9 status as `DONE_WITH_CONCERNS` and proceed to §4; the verifier is the next gate and will judge the work on its own terms.
 - **(r) Remediate selected task(s).** Prompt the user for (a) the task numbers to remediate (one or more from `CONCERNED_TASKS`) and (b) a single freeform guidance block that applies to those tasks. Re-dispatch each selected task to a fresh `coder` worker using the same task spec, with the worker's original concerns block and the user's guidance appended under a `## Concerns To Address` section in the worker prompt. Each re-dispatch counts against that task's retry budget; see Step 13. When the re-dispatches return, apply Step 9 again. If any re-dispatched task comes back `BLOCKED`, return to §2 with that task. Otherwise rebuild `CONCERNED_TASKS` from the new wave state and re-enter §3 from its top; a task that returns `DONE` after remediation is removed from `CONCERNED_TASKS`, and a task that returns `DONE_WITH_CONCERNS` again re-appears in the next combined view. Tasks that were not selected for remediation keep their prior Step 9 status and re-appear unchanged in the next view.
-- **(x) Stop execution.** Halt immediately. Do NOT run Step 11 or Step 12 for this wave. Report partial progress via Step 14. All prior wave commits remain as checkpoints.
+- **(x) Stop execution.** Halt immediately. Do NOT run Step 11 or Step 12 for this wave. Report partial progress via Step 14. All prior wave commits remain in git history.
 
 Repeat §3 until `CONCERNED_TASKS` is empty (either because the user picked `(c)` or because every concerned task has been remediated to `DONE`) or the user picks `(x)`.
 
@@ -571,25 +571,25 @@ The menu differs between intermediate waves (any wave before the final wave of t
 Options:
 (a) Debug failures                  — dispatch a systematic-debugging pass against new_regressions_after_deferment, then remediate
 (b) Defer integration debugging     — add new_regressions_after_deferment to deferred_integration_regressions and proceed to wave <N+1>
-(c) Stop execution                  — halt plan execution; committed waves are preserved as checkpoints
+(c) Stop execution                  — halt plan execution; prior wave commits remain in git history
 ```
 
 - **(a) Debug failures:** Run the `Debugger-first flow` (below) with the **Step 12 (post-wave)** parameter row, scoped to the tests in `new_regressions_after_deferment`. Do NOT undo the wave commit up front; the debugging dispatch inspects the committed state. This path counts as a retry toward the 3-retry limit in Step 13.
 - **(b) Defer integration debugging:** Compute `additions := new_regressions_after_deferment \ baseline_failures` (preserving disjointness with `baseline_failures`) and set `deferred_integration_regressions := deferred_integration_regressions ∪ additions`. The wave commit remains. Warn: "⚠️ Proceeding with deferred integration regressions. Final plan completion is BLOCKED until every deferred regression is resolved — the final wave's menu will not offer a defer option, so these failures must be debugged (or explicitly accepted via `Stop execution`) before the plan can report success." Then proceed to wave `<N+1>`.
-- **(c) Stop execution:** Halt execution. All prior wave commits are preserved as checkpoints. Report partial progress (Step 14). The user can resume or fix manually.
+- **(c) Stop execution:** Halt execution. All prior wave commits remain in git history. Report partial progress (Step 14).
 
 **Final-wave menu** (wave `<N>` where `<N> == total_waves`):
 
 ```
 Options:
 (a) Debug failures  — dispatch a systematic-debugging pass against new_regressions_after_deferment, then remediate
-(c) Stop execution  — halt plan execution; committed waves are preserved as checkpoints
+(c) Stop execution  — halt plan execution; prior wave commits remain in git history
 ```
 
 The defer option is intentionally removed on the final wave: there is no subsequent wave to carry deferred regressions into, and the precondition that final completion is blocked until all plan-introduced regressions are resolved forbids silently shipping them. On the final wave, the user MUST either debug or stop.
 
 - **(a) Debug failures:** Same as the intermediate-wave `(a)` — run the `Debugger-first flow` (below) with the **Step 12 (post-wave)** parameter row, scoped to `new_regressions_after_deferment`, counting toward the Step 13 retry limit. Deferred regressions from prior waves are NOT handled here; they are cleared by Step 16's "Final integration regression gate (precondition)" before the plan can report success. The same final gate also catches any regression introduced after this final wave (e.g. by Step 15 review/remediation) via the same three-set classification used here.
-- **(c) Stop execution:** Halt execution. Prior wave commits are preserved as checkpoints. Report partial progress (Step 14).
+- **(c) Stop execution:** Halt execution. Prior wave commits remain in git history. Report partial progress (Step 14).
 
 ### Debugger-first flow
 
@@ -603,7 +603,7 @@ Shared by Step 12 (post-wave integration failures) and Step 16 (final integratio
 | Range / changed-file universe | The wave commit: use `git show HEAD --stat` and `git show HEAD` to enumerate the files introduced by the wave. | The plan execution range: `BASE_SHA` = `PRE_EXECUTION_SHA` (recorded in Step 8, immediately before the first wave dispatched); `HEAD_SHA` = `git rev-parse HEAD` at this moment. Use `git diff --name-only BASE_SHA HEAD_SHA` — NOT `git show HEAD`, since HEAD at final-gate time is not guaranteed to be a wave commit. |
 | Suspect task universe | Wave `<N>`'s tasks whose modified files appear in the failing stack traces or whose behavior the failing tests cover. If the mapping is ambiguous, include every wave task. | Every plan task whose declared `**Files:**` scope (from the plan file) intersects the failing stack traces or whose behavior the failing tests cover. If the mapping is ambiguous, include every plan task whose `**Files:**` scope intersects `git diff --name-only BASE_SHA HEAD_SHA` — i.e., every task whose output was touched by plan execution. Do NOT constrain to a single wave. |
 | Success condition | On re-running the test command and applying the Step 7 reconciliation algorithm, `new_regressions_after_deferment` is empty. Pre-existing baseline failures and previously-deferred regressions may remain; incidentally-cleared deferred regressions are reported under "Cleared deferred regressions" via the normal reconciliation rule. On success, proceed to the next wave. | On re-entering the Step 16 gate at its step 1 (re-run the suite, re-reconcile, recompute both sets), **both** `still_failing_deferred` and `new_regressions_after_deferment` are empty. Pre-existing baseline failures may remain. Unlike the wave-scoped case, the final gate must also clear any `still_failing_deferred` carried from prior waves. On success, the gate passes and normal completion proceeds. |
-| Commit template / undo behavior | Remediation commit message: `fix(plan): wave <N> regression — <short summary>`. **Commit-undo fallback is available**: if targeted remediation also fails and the user chooses to retry again, offer to undo the wave commit with `git reset HEAD~1` (working-tree changes preserved unstaged) before a broader retry. Do not undo proactively. | Remediation commit message: `fix(plan): final-gate regression — <short summary>`. **Commit-undo fallback is NOT available**: `HEAD` is not guaranteed to be a wave commit, and prior wave commits must remain as checkpoints for the `(c) Stop execution` exit path. On repeated failure, the only exits are another debugging attempt (costing a Step 13 retry) or `(c) Stop execution`. |
+| Commit template / undo behavior | Remediation commit message: `fix(plan): wave <N> regression — <short summary>`. **Commit-undo fallback is available**: if targeted remediation also fails and the user chooses to retry again, offer to undo the wave commit with `git reset HEAD~1` (working-tree changes preserved unstaged) before a broader retry. Do not undo proactively. | Remediation commit message: `fix(plan): final-gate regression — <short summary>`. **Commit-undo fallback is NOT available**: `HEAD` is not guaranteed to be a wave commit, and prior wave commits must be kept intact for the `(c) Stop execution` exit path. On repeated failure, the only exits are another debugging attempt (costing a Step 13 retry) or `(c) Stop execution`. |
 
 **Flow** (applies to both callers; substitute the parameter values from the row above):
 
@@ -645,7 +645,7 @@ Apply wave pacing from Step 3. These options only govern the cadence of waves wh
 ## Step 14: Report partial progress
 
 **Execution stopped early (user request or unrecoverable failure):**
-- Leave the plan file in `.pi/plans/` so it can be resumed.
+- Leave the plan file in `.pi/plans/` for reference and any manual follow-up.
 - Report which tasks completed, which failed, and which remain.
 
 **Deferred integration regressions:** If `deferred_integration_regressions` is non-empty at the time execution stops, include them under a dedicated heading in the partial-progress report:
@@ -657,8 +657,6 @@ Apply wave pacing from Step 3. These options only govern the cadence of waves wh
 These regressions were introduced by this plan and deferred during intermediate waves.
 They remain unresolved and must be addressed before this branch is considered shippable.
 ```
-
-**Persistence note:** If execution resumes in a new session, do NOT reconstruct `deferred_integration_regressions` from the prior partial-progress report — re-run the full integration suite to re-derive the current failing/deferred state fresh.
 
 ## Step 15: Request code review
 
@@ -706,7 +704,7 @@ Otherwise, always run this gate: re-run the full integration suite and confirm n
    ```
    Options:
    (a) Debug failures now — run the `Debugger-first flow` (defined in Step 12) with the Step 16 (final-gate) parameter row, against the plan-introduced regressions (deferred ∪ new); on success, re-enter this gate.
-   (c) Stop execution     — halt plan execution; all committed wave commits are preserved as checkpoints.
+   (c) Stop execution     — halt plan execution; prior wave commits remain in git history.
    ```
 
    Empty lists render as `(none)`. The menu mirrors the Step 12 **final-wave menu** — there is no `(b) Defer` option here by design, matching the final-wave rule that plan-introduced regressions cannot be silently deferred past the point where the plan reports success.
