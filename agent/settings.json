@@ -1,5 +1,5 @@
 {
-  "lastChangelogVersion": "0.67.68",
+  "lastChangelogVersion": "0.69.0",
   "defaultProvider": "openai-codex",
   "defaultModel": "gpt-5.4",
   "defaultThinkingLevel": "high",
@@ -10,8 +10,9 @@
   "theme": "nord",
   "packages": [
     "~/Code/pi-interactive-subagent",
-    "npm:pi-web-access",
-    "npm:pi-token-burden"
+    "npm:pi-ghostty"
+    "npm:pi-token-burden",
+    "npm:pi-web-access"
   ],
   "enabledModels": [
     "anthropic/claude-opus-4-7",
