@@ -832,4 +832,8 @@ export default function (pi: ExtensionAPI) {
       };
     });
   });
+
+  pi.on("session_shutdown", async (_event, ctx) => {
+    ctx.ui.setFooter(undefined);
+  });
 }
