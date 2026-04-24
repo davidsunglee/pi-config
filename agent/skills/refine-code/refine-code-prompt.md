@@ -114,7 +114,7 @@ Always pass `cli` explicitly on every subagent_run_serial task, even when it res
    - `{RE_REVIEW_BLOCK}` — the filled re-review block content
    - `{DESCRIPTION}` — the Plan Goal above (same as iteration 1)
 
-5. **Dispatch `code-reviewer`** with model `standard` and corresponding `dispatch` from the model matrix (hybrid re-reviews are scoped and cheaper).
+5. **Dispatch `code-reviewer`** with model `standard` and corresponding `cli` from the model matrix (hybrid re-reviews are scoped and cheaper).
 
 6. **Overwrite review sections** in the current versioned file; **append** to remediation log.
 
@@ -124,7 +124,7 @@ Always pass `cli` explicitly on every subagent_run_serial task, even when it res
 
 When a review pass finds no Critical/Important issues (hybrid reviews converge):
 
-1. **Dispatch `code-reviewer`** with model `crossProvider.capable` and corresponding `dispatch` for a **full-diff** verification:
+1. **Dispatch `code-reviewer`** with model `crossProvider.capable` and corresponding `cli` for a **full-diff** verification:
    - `{BASE_SHA}` — original BASE_SHA from this prompt (pre-implementation)
    - `{HEAD_SHA}` — current HEAD (includes all remediations)
    - `{RE_REVIEW_BLOCK}` — empty string (full review, not re-review)

@@ -331,7 +331,7 @@ subagent_run_parallel { tasks: [
 For sequential mode, dispatch one task at a time:
 ```
 subagent_run_serial { tasks: [
-  { name: "coder", agent: "coder", task: "<self-contained prompt>", model: "<resolved>", cli: "<resolved>" }
+  { name: "<task-N>: <task-title>", agent: "coder", task: "<self-contained prompt>", model: "<resolved>", cli: "<resolved>" }
 ]}
 ```
 
