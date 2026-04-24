@@ -63,6 +63,7 @@ Always pass `cli` explicitly on every subagent_run_serial task, even when it res
      { name: "code-reviewer", agent: "code-reviewer", task: "<filled review-code-prompt.md>", model: "<crossProvider.capable from model-tiers.json>", cli: "<dispatch for crossProvider.capable>" }
    ]}
    ```
+   Read the reviewer's output from results[0].finalMessage and write it to the versioned path (step 4).
 
 4. **Write review** to versioned path: `<REVIEW_OUTPUT_PATH>-v<ERA>.md`
    - First era starts at v1. New eras created on budget reset (see Final Verification).
