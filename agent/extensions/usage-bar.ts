@@ -1035,7 +1035,7 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			const modelRegistry = ctx.modelRegistry;
-			await ctx.ui.custom((tui, theme, _kb, done) => {
+			await ctx.ui.custom<void>((tui, theme, _kb, done) => {
 				return new UsageComponent(tui, theme, () => done(), modelRegistry);
 			});
 		},
@@ -1050,7 +1050,7 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			const modelRegistry = ctx.modelRegistry;
-			await ctx.ui.custom((tui, theme, _kb, done) => {
+			await ctx.ui.custom<void>((tui, theme, _kb, done) => {
 				return new UsageComponent(tui, theme, () => done(), modelRegistry);
 			});
 		},
