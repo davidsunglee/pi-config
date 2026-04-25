@@ -10,7 +10,7 @@ The orchestrator passes the user's raw input as your task body. Detect the shape
 
 | Shape | Pattern | Behavior |
 | --- | --- | --- |
-| **Todo ID** | matches `^TODO-[0-9a-f]{8}$` exactly | Use the `todo` tool (if available in your tool surface) or read the todo file directly from `.pi/todos/<id>.md` to get the title and full body. Set provenance to `Source: TODO-<id>`. Check whether `.pi/briefs/TODO-<id>-brief.md` exists; if it does, read it as scout context and set the `Scout brief:` provenance line. If it does not exist, proceed without — do not fail. |
+| **Todo ID** | matches `^TODO-[0-9a-f]{8}$` exactly | Read the todo file directly from `.pi/todos/<id>.md` to get the title and full body. (When dispatched as the `spec-designer` subagent, the agent's tool surface intentionally omits `todo` — direct file read is the expected path. On the orchestrator's inline branch the `todo` tool may be available; either way, reading the file directly is correct.) Set provenance to `Source: TODO-<id>`. Check whether `.pi/briefs/TODO-<id>-brief.md` exists; if it does, read it as scout context and set the `Scout brief:` provenance line. If it does not exist, proceed without — do not fail. |
 | **Existing-spec path** | string ends in `.md` and is **either** (a) a relative path that begins with `.pi/specs/`, **or** (b) an absolute path that contains the segment `/.pi/specs/` (e.g. `/Users/.../<repo>/.pi/specs/foo.md` — this is the form the orchestrator's `SPEC_WRITTEN: <absolute path>` emits and the recovery-menu Redo replays back in), **and** the file exists on disk | Read the existing draft. Treat it as starting context. Preserve its preamble lines (`Source:`, `Scout brief:`) verbatim on rewrite. Q&A focuses on filling gaps and refining unclear sections. **Overwrite the same path** at the end (use the input path as-is — do not normalize between relative and absolute). The spec self-review pass (Step 7) is mandatory. |
 | **Freeform text** | anything else | Use the text as a seed. Do not look up a scout brief. Do not emit a `Source:` or `Scout brief:` preamble. Run the full Q&A. |
 
@@ -137,14 +137,24 @@ Create the `.pi/specs/` directory if it does not exist.
 
 Do **not** commit. The orchestrator owns the commit gate.
 
-## Step 9: Emit the completion line and exit
+## Step 9: Signal completion
 
-After the file is written, end your turn with exactly this line, anchored on its own line, as your last output:
+How this step terminates depends on which branch is running this procedure.
+
+### Subagent / mux branch (you are the `spec-designer` subagent)
+
+End your turn with exactly this line, anchored on its own line, as your last output:
 
 ```
 SPEC_WRITTEN: <absolute path>
 ```
 
-Where `<absolute path>` is the full filesystem path of the spec file you just wrote. No backticks, no trailing commentary on the same line, no abbreviation. Then exit.
+Where `<absolute path>` is the full filesystem path of the spec file you just wrote. No backticks, no trailing commentary on the same line, no abbreviation. Then exit. The orchestrator parses this line to drive its review-and-commit gate.
 
 If you cannot complete the procedure (user terminates Q&A early, ambiguous input the user refuses to clarify, etc.), exit without emitting `SPEC_WRITTEN:`. The orchestrator will detect the missing line and surface the failure.
+
+### Inline branch (you are the orchestrator running this procedure in your own session)
+
+Do **not** emit `SPEC_WRITTEN: <path>` and do **not** exit. There is no subagent boundary on this branch — the completion line is unnecessary, and exiting would skip the orchestrator's review-and-commit gate. Capture the absolute path of the spec you just wrote and return to the orchestrator skill's Step 5 (pause for user review).
+
+If you cannot complete the procedure inline (user aborts mid-Q&A, etc.), stop without writing the spec and report the failure to the user directly — there is nothing for an outer parser to detect.

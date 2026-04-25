@@ -24,11 +24,7 @@ Mirror `pi-interactive-subagent`'s actual mux detection (`pi-extension/subagents
 7. `$WEZTERM_UNIX_SOCKET` is set and non-empty and `command -v wezterm` succeeds → `mux` branch (wezterm).
 8. Otherwise → `inline` branch (no mux).
 
-Notes:
-- The plan deliberately uses `WEZTERM_UNIX_SOCKET` (not `WEZTERM_PANE`), `ZELLIJ` **or** `ZELLIJ_SESSION_NAME` (not `ZELLIJ` alone), and `CMUX_SOCKET_PATH` (not bare `CMUX_*`) because those are the exact env vars the runtime's `cmux.ts` checks. A divergent probe would let the orchestrator pick `mux` while the runtime then picks the headless backend, silently misrouting `spec-designer` into a non-interactive session.
-- Rule 3 mirrors `cmux.ts`'s `muxPreference()` + `getMuxBackend()`: a valid `PI_SUBAGENT_MUX` value pins the runtime to one backend with no fallback. The orchestrator must follow the same single-backend evaluation; otherwise it would pick `mux` while the runtime then refuses every backend and selects `headless`.
-- The command-availability check (`command -v <name>`) matches the runtime's `hasCommand` gate. A pane env var without the corresponding CLI binary on PATH does not count as mux.
-- Do **not** prompt the user during probing.
+The exact env-var names, the `command -v` gate, and rule 3's no-fallback-on-pinned-preference behavior all mirror the runtime's `pi-extension/subagents/cmux.ts` + `backends/select.ts`. Divergence would let the orchestrator pick `mux` while the runtime falls through to `headless`, silently misrouting `spec-designer` into a non-interactive session. Do **not** prompt the user during probing.
 
 ### 1b. User-input override scan
 
@@ -100,38 +96,38 @@ Read `results[0].finalMessage`, `results[0].exitCode`, `results[0].state`, and `
 
 ### 3b. Inline branch — follow the procedure in this session
 
-Treat the body of `procedure.md` (read in Step 2) as if it were addressed to you, the orchestrator. Execute Steps 1 through 9 of the procedure in this session. The user's raw input is the seed for the procedure's Step 1 input-shape detection.
+Treat the body of `procedure.md` (read in Step 2) as if it were addressed to you, the orchestrator. Execute Steps 1 through 8 of the procedure in this session. The user's raw input is the seed for the procedure's Step 1 input-shape detection.
 
-When the procedure's Step 9 finishes, you will have written a spec file. Capture the absolute path you wrote to. There is no `finalMessage` to parse on this branch — you `are` the procedure runner, so the absolute path is already in your hand.
+When you reach the procedure's Step 9, follow the **inline branch** subsection of that step: do **not** emit `SPEC_WRITTEN: <path>` and do **not** exit. Capture the absolute path of the spec file you just wrote and return here. The completion line and process exit at the end of Step 9 are for the subagent / mux branch only; on the inline branch you are the orchestrator, so emitting the line and exiting would skip the review-and-commit gate below.
 
-Skip Step 4 of this orchestrator (it parses the subagent's `finalMessage`) and jump straight to Step 5.
+Skip Step 4 of this orchestrator (it parses the subagent's `finalMessage`) and jump straight to Step 5 with the absolute path you just captured.
 
 ## Step 4: Validate `SPEC_WRITTEN:` (mux branch only)
 
-Parse the subagent's `finalMessage` for a single line matching exactly:
+Evaluate the subagent's `finalMessage`, `exitCode`, `state`, and `transcriptPath` from `results[0]` in the order below. The first matching case wins; surface its message and stop. Do not retry. Do not surface a recovery menu — the recovery menu is only for user-review rejection (Step 7).
 
-```
-SPEC_WRITTEN: <absolute path>
-```
+A `SPEC_WRITTEN: <absolute path>` line in `finalMessage` is the completion signal. Parse it as a single line on its own, no surrounding backticks or commentary on the same line.
 
-Cases:
+Cases (evaluated in this order):
 
-- **(1) `finalMessage` lacks a `SPEC_WRITTEN:` line.** Report to the user:
-  > Spec design did not complete: `spec-designer` exited without emitting `SPEC_WRITTEN: <path>`. Transcript: `<transcriptPath>`. No spec written, no commit attempted.
-
-  Stop. Do not retry. Do not surface a recovery menu.
-
-- **(2) Path reported but file missing on disk.** Report:
-  > Spec design reported `SPEC_WRITTEN: <path>` but `<path>` does not exist on disk. Transcript: `<transcriptPath>`. No commit attempted.
-
-  Stop. Do not retry.
-
-- **(3) `exitCode != 0`.** Report:
+- **(1) `exitCode != 0`.** Report:
   > Spec design failed (`exitCode: <N>`, `error: <error>`). Transcript: `<transcriptPath>`. No commit attempted.
 
-  Stop. Do not retry.
+  If a `SPEC_WRITTEN: <path>` line is also present in `finalMessage`, append `Reported path: <path> (commit not attempted because the subagent exited with a nonzero status).` so the user can see the partial output. Then stop.
 
-- **(success)** `SPEC_WRITTEN: <path>` is present, `<path>` exists, and `exitCode == 0`. Proceed to Step 5 with `<path>` captured.
+  Checking exit code first ensures dispatch failures (process crash, signal, runtime error) are surfaced with the exit code and error text the runtime captured, instead of being misreported as a missing completion line.
+
+- **(2) `finalMessage` lacks a `SPEC_WRITTEN:` line (and `exitCode == 0`).** Report:
+  > Spec design did not complete: `spec-designer` exited without emitting `SPEC_WRITTEN: <path>`. Transcript: `<transcriptPath>`. No spec written, no commit attempted.
+
+  Stop.
+
+- **(3) Path reported but file missing on disk.** Report:
+  > Spec design reported `SPEC_WRITTEN: <path>` but `<path>` does not exist on disk. Transcript: `<transcriptPath>`. No commit attempted.
+
+  Stop.
+
+- **(success)** `exitCode == 0`, `SPEC_WRITTEN: <path>` is present, and `<path>` exists on disk. Proceed to Step 5 with `<path>` captured.
 
 ## Step 5: Pause for user review
 
