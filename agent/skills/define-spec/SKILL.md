@@ -92,7 +92,7 @@ Notes:
 - **Both `model:` and `cli:` come from `model-tiers.json`, not from agent frontmatter.** `spec-designer.md` has no `model:` field by design (R1) — without an explicit per-call `model:` the CLI default would be used and the Opus tier would be lost.
 - The pane spawns; the user types their answers directly into the pane. The dispatch blocks until the subagent completes (top-level `wait: true`).
 
-Read `results[0].finalMessage`, `results[0].exitCode`, `results[0].state`, and `results[0].transcriptPath` from the orchestration result. Proceed to Step 4.
+Read `results[0].finalMessage`, `results[0].exitCode`, `results[0].state`, `results[0].error`, and `results[0].transcriptPath` from the orchestration result. `error` is populated when the runtime captured an error string for a non-clean exit (process crash, signal, runtime error); it may be empty or undefined on clean exits. Proceed to Step 4.
 
 ### 3b. Inline branch — follow the procedure in this session
 
@@ -104,14 +104,14 @@ Skip Step 4 of this orchestrator (it parses the subagent's `finalMessage`) and j
 
 ## Step 4: Validate `SPEC_WRITTEN:` (mux branch only)
 
-Evaluate the subagent's `finalMessage`, `exitCode`, `state`, and `transcriptPath` from `results[0]` in the order below. The first matching case wins; surface its message and stop. Do not retry. Do not surface a recovery menu — the recovery menu is only for user-review rejection (Step 7).
+Evaluate the subagent's `finalMessage`, `exitCode`, `state`, `error`, and `transcriptPath` from `results[0]` in the order below. The first matching case wins; surface its message and stop. Do not retry. Do not surface a recovery menu — the recovery menu is only for user-review rejection (Step 7).
 
 A `SPEC_WRITTEN: <absolute path>` line in `finalMessage` is the completion signal. Parse it as a single line on its own, no surrounding backticks or commentary on the same line.
 
 Cases (evaluated in this order):
 
 - **(1) `exitCode != 0`.** Report:
-  > Spec design failed (`exitCode: <N>`, `error: <error>`). Transcript: `<transcriptPath>`. No commit attempted.
+  > Spec design failed (`exitCode: <N>`, `state: <state>`<if `error` is non-empty, append `, error: <error>`>). Transcript: `<transcriptPath>`. No commit attempted.
 
   If a `SPEC_WRITTEN: <path>` line is also present in `finalMessage`, append `Reported path: <path> (commit not attempted because the subagent exited with a nonzero status).` so the user can see the partial output. Then stop.
 

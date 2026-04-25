@@ -70,8 +70,8 @@ The procedure (not the orchestrator) detects the input shape:
 
 | Input shape | Pattern | Procedure behavior |
 |---|---|---|
-| **Todo ID** | `^TODO-[0-9a-f]{8}$` | Resolve via `todo` tool. Read body. Check `.pi/briefs/TODO-<id>-brief.md`; load if present. Run full Q&A. Write new spec. |
-| **Existing-spec path** | path under `.pi/specs/` ending in `.md`, file exists on disk | Read existing draft. Treat as starting context. Preamble lines (`Source: TODO-<id>`, `Scout brief: …`) preserved on rewrite. Q&A focuses on filling gaps and refining. **Overwrite the same path.** Spec self-review pass is mandatory. |
+| **Todo ID** | `^TODO-([0-9a-f]{8})$` (the 8-char hex is the captured **raw todo id**) | Read `.pi/todos/<raw-id>.md` directly — todo files are stored on disk by raw hex filename, **without** the `TODO-` prefix (e.g. input `TODO-075cf515` → file `.pi/todos/075cf515.md`). Set provenance to `Source: TODO-<raw-id>`. Check `.pi/briefs/TODO-<raw-id>-brief.md`; load if present. Run full Q&A. Write new spec. Direct file read is used (not the `todo` tool) because `spec-designer`'s tool surface intentionally omits `todo` per R1; the orchestrator's inline branch reads the file directly for symmetry. |
+| **Existing-spec path** | string ends in `.md` **and** is **either** (a) a relative path beginning with `.pi/specs/`, **or** (b) an absolute path containing the segment `/.pi/specs/` (e.g. `/Users/.../<repo>/.pi/specs/foo.md`), **and** the file exists on disk. Absolute paths are required because the orchestrator's `SPEC_WRITTEN: <absolute path>` and the recovery-menu Redo replay both use the absolute form. | Read existing draft. Treat as starting context. Preamble lines (`Source: TODO-<id>`, `Scout brief: …`) preserved on rewrite. Q&A focuses on filling gaps and refining. **Overwrite the same path** (use the input path verbatim — do not normalize between relative and absolute). Spec self-review pass is mandatory. |
 | **Freeform text** | anything else | Use as seed. No scout brief lookup. Run full Q&A. Write new spec. |
 
 The orchestrator forwards the raw input string to the procedure via the `task` field; type detection lives entirely in the procedure.
@@ -212,7 +212,7 @@ The work is done when **all** of the following hold:
 6. **Smoke test 4 (architecture round, both directions):**
    - **(a)** Mechanical input — agent recommends skip, user accepts, written spec has no `## Approach` section.
    - **(b)** Ambiguous-architecture input — agent recommends run, user accepts, written spec gains a `## Approach` section with chosen-approach + rationale + considered-and-rejected alternatives.
-7. **Smoke test 5 (failure surface):** user closes the pane mid-Q&A. Orchestrator reports `finalMessage`-lacks-`SPEC_WRITTEN` failure with transcript path, no spec written, no commit attempted.
+7. **Smoke test 5 (failure surface):** user closes the pane mid-Q&A. Orchestrator reports a clean failure with transcript path, no spec written, no commit attempted. The exact failure case depends on how the runtime classifies pane closure: a zero-exit termination surfaces case (2) (`finalMessage` lacks `SPEC_WRITTEN:`); a nonzero-exit termination surfaces case (1) (`exitCode != 0` with exit code, state, and any captured error). Either is acceptable — the invariants are no commit attempted, no recovery menu, and a transcript path in the report.
 8. **Downstream contract verification:**
    - **(a)** `generate-plan` consumes a spec produced by smoke test 1: provenance extraction succeeds (`Source: TODO-<id>` and `Scout brief: …` parse), planner produces a plan, plan-reviewer runs.
    - **(b)** `generate-plan` honors `## Approach`: a spec produced by smoke test 4(b) drives a plan whose `Architecture summary` aligns with the chosen approach. A subsequent plan-edit that introduces a deviation is flagged by `plan-reviewer` as a Warning.
