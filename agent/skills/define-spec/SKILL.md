@@ -1,124 +1,187 @@
 ---
 name: define-spec
-description: "Interactive spec writing from a todo or freeform description. Explores the codebase, optionally consumes a scout brief, asks clarifying questions, and writes a structured spec to .pi/specs/ optimized for generate-plan. Use for complex or ambiguous work where the planner would otherwise guess at intent."
+description: "Interactive spec writing from a todo, an existing spec under .pi/specs/, or freeform text. Dispatches a spec-designer subagent in a multiplexer pane when one is available, falling back to running the procedure inline. Writes a structured spec to .pi/specs/ and gates the commit on user review."
 ---
 
 # Define Spec
 
-Collaboratively produce a structured spec from a rough todo or freeform description. The spec captures intent, requirements, constraints, and acceptance criteria — not implementation details. The planner decides architecture and file structure based on deep codebase analysis.
+This skill is a thin orchestrator. The full spec-design procedure lives in `agent/skills/define-spec/procedure.md` and is the single source of truth for both branches. This skill probes the environment, picks a branch, dispatches (or runs the procedure inline), validates completion, and gates the commit on user review.
 
-## Step 1: Determine input source
+## Step 1: Detect branch (mux vs inline)
 
-The user will provide one of two input sources:
+Decide which branch to run **without** prompting the user.
 
-1. **Todo ID** (e.g., `TODO-ccbbedd6`) — use the `todo` tool to read the todo and extract its title and full body. Capture the ID for provenance tracking.
-2. **Freeform description** — use the text as-is.
+### 1a. Mux probe
 
-The resolved text becomes the seed for exploration and questions.
+Mirror `pi-interactive-subagent`'s actual mux detection (`pi-extension/subagents/cmux.ts` + `backends/select.ts`) — pairing each multiplexer's signature env var with a command-availability check, and honoring the runtime's `PI_SUBAGENT_MUX` backend preference — so the orchestrator's branch decision and the runtime's `selectBackend()` / `getMuxBackend()` decisions agree. Apply rules in this order; the first match wins.
 
-## Step 2: Check for scout brief
+1. `$PI_SUBAGENT_MODE == "headless"` (case-insensitive) → `inline` branch (runtime would force the headless backend regardless of mux).
+2. `$PI_SUBAGENT_MODE == "pane"` (case-insensitive) → `mux` branch (runtime would force the pane backend regardless).
+3. `$PI_SUBAGENT_MUX` is set (case-insensitive) to one of `cmux` / `tmux` / `zellij` / `wezterm` → evaluate **only** that backend's runtime check (the matching env-var + `command -v` pair from rules 4–7 below). If the check passes → `mux` branch with that backend. If it fails → `inline` branch (do **not** fall through to other backends — `getMuxBackend()` does not fall back when a preference is set, so the orchestrator must not either). If `$PI_SUBAGENT_MUX` is set to anything else (empty, unrecognized) → ignore the preference and fall through to rule 4.
+4. `$CMUX_SOCKET_PATH` is set and `command -v cmux` succeeds → `mux` branch (cmux).
+5. `$TMUX` is set and non-empty and `command -v tmux` succeeds → `mux` branch (tmux).
+6. (`$ZELLIJ` is set and non-empty **or** `$ZELLIJ_SESSION_NAME` is set and non-empty) and `command -v zellij` succeeds → `mux` branch (zellij).
+7. `$WEZTERM_UNIX_SOCKET` is set and non-empty and `command -v wezterm` succeeds → `mux` branch (wezterm).
+8. Otherwise → `inline` branch (no mux).
 
-If the input is a todo, check whether `.pi/briefs/TODO-<id>-brief.md` exists.
+Notes:
+- The plan deliberately uses `WEZTERM_UNIX_SOCKET` (not `WEZTERM_PANE`), `ZELLIJ` **or** `ZELLIJ_SESSION_NAME` (not `ZELLIJ` alone), and `CMUX_SOCKET_PATH` (not bare `CMUX_*`) because those are the exact env vars the runtime's `cmux.ts` checks. A divergent probe would let the orchestrator pick `mux` while the runtime then picks the headless backend, silently misrouting `spec-designer` into a non-interactive session.
+- Rule 3 mirrors `cmux.ts`'s `muxPreference()` + `getMuxBackend()`: a valid `PI_SUBAGENT_MUX` value pins the runtime to one backend with no fallback. The orchestrator must follow the same single-backend evaluation; otherwise it would pick `mux` while the runtime then refuses every backend and selects `headless`.
+- The command-availability check (`command -v <name>`) matches the runtime's `hasCommand` gate. A pane env var without the corresponding CLI binary on PATH does not count as mux.
+- Do **not** prompt the user during probing.
 
-- If it exists, read it — this provides the codebase context foundation for informed questions.
-- If it does not exist, proceed without. define-spec handles both cases.
+### 1b. User-input override scan
 
-If the input is freeform (no todo ID), skip this step — scout briefs are keyed by todo ID.
+Scan the user's slash-command input for an explicit "no subagent" override. Recognize any of these substrings (case-insensitive):
 
-## Step 3: Explore project context
+- `--no-subagent`
+- `without a subagent`
+- `without subagent`
+- `no subagent`
+- `skip subagent`
+- `inline`
 
-**General survey** (always, regardless of scout):
-- Project structure, key docs, recent commits
-- Understand the lay of the land before asking questions
+If any match, force the `inline` branch regardless of the mux probe outcome.
 
-**Targeted exploration** (scope depends on scout):
-- If scout brief exists: use it as the foundation for codebase understanding, read additional files only where the brief references something worth examining more closely
-- If no scout brief: identify files and modules the input references, read key interfaces, understand relevant code structure
+### 1c. Status announcement
 
-The goal is to ask codebase-informed questions — not naive questions about intent alone.
+Emit one status line to the user. This is informational — no input expected:
 
-## Step 4: Ask clarifying questions
+- `mux` branch chosen: `Running spec design in subagent pane (mux detected, no override).`
+- `inline` branch via no-mux probe: `Running spec design in this session (no multiplexer detected).`
+- `inline` branch via override: `Running spec design in this session (per --no-subagent / inline override).`
 
-Open-ended exploration, one question at a time. Multiple choice preferred where possible. Ground questions in what you learned from the codebase and scout brief.
+## Step 2: Read `procedure.md` fresh from disk
 
-Read additional code during the conversation as new areas surface.
+Read `agent/skills/define-spec/procedure.md` in full. This is the procedure body that drives the chosen branch.
 
-No fixed question count. Use judgment about when you have enough information to write a useful spec. The goal is to externalize the user's mental model on:
+If the file is missing or unreadable, fail with:
 
-- **Intent** — what are we building and why?
-- **Scope** — what's in and what's out?
-- **Constraints** — what must the solution work with, avoid, or preserve?
-- **Acceptance criteria** — how do we know it's done?
-- **Anything the planner would otherwise have to guess**
+> `agent/skills/define-spec/procedure.md` missing or unreadable — cannot run define-spec. Restore the file before retrying.
 
-Do NOT prescribe architecture, file structure, or implementation steps during this conversation. If the user makes design decisions (e.g., "use a separate agent for this"), capture them as requirements or constraints — not as architecture sections.
+Stop. Do not dispatch with an empty or truncated procedure.
 
-## Step 5: Write spec
+## Step 3: Run the procedure
 
-Write the spec to `.pi/specs/<date>-<topic>.md` using this format:
+### 3a. Mux branch — dispatch `spec-designer`
 
-~~~markdown
-# <Title>
+Resolve both `model` and `cli` from `~/.pi/agent/model-tiers.json` (per the standard model-tier resolution rule used by `generate-plan` Step 2):
 
-Source: TODO-<id>                    <- if input was a todo, omit otherwise
-Scout brief: .pi/briefs/TODO-<id>-brief.md   <- if scout was consumed, omit otherwise
+- Read `~/.pi/agent/model-tiers.json`. If the file is missing, unreadable, or not valid JSON, fail with: `~/.pi/agent/model-tiers.json missing or unreadable — cannot resolve dispatch model/cli for spec-designer.` Stop. Do not dispatch. Do not fall back to a CLI default.
+- `model` is the `capable` field (e.g. `anthropic/claude-opus-4-7`). If `capable` is missing or empty, fail with: `model-tiers.json has no usable "capable" model — cannot dispatch spec-designer.` Stop.
+- `cli` is `dispatch.<provider>` for that model's provider prefix (e.g. `dispatch.anthropic` → `claude`). Derive `<provider>` as the prefix before the first `/` in the `capable` value. If the `dispatch` map is missing, or `dispatch.<provider>` is missing or empty, fail with: `model-tiers.json has no dispatch.<provider> mapping for capable model <capable> — cannot dispatch spec-designer.` Stop.
 
-## Goal
+All three failure modes are strict: surface the message and stop. Do not retry, do not silently use a CLI default — losing the explicit `model` / `cli` values is what motivates the split, so failing loudly is the correct behavior.
 
-One-paragraph summary of what we're building and why.
+Then dispatch (note: `wait` is a top-level orchestration option, not a per-task field):
 
-## Context
+```
+subagent_run_serial {
+  tasks: [
+    {
+      name: "spec-designer",
+      agent: "spec-designer",
+      task: "<raw user input — todo ID, .pi/specs/<path>.md, or freeform text>",
+      systemPrompt: "<full body of procedure.md from Step 2>",
+      model: "<capable tier from model-tiers.json>",
+      cli: "<resolved dispatch cli>"
+    }
+  ],
+  wait: true
+}
+```
 
-What exists today that's relevant. Codebase reality — files, interfaces, patterns
-that the implementation will interact with. Sourced from exploration and scout brief.
+Notes:
+- **Do NOT pass a `skills:` parameter.** The procedure is delivered exclusively via `systemPrompt:` so delivery is symmetric across pi and Claude CLIs (the agent's `system-prompt: append` frontmatter makes the runtime treat `systemPrompt:` as a real system prompt on both paths).
+- **Both `model:` and `cli:` come from `model-tiers.json`, not from agent frontmatter.** `spec-designer.md` has no `model:` field by design (R1) — without an explicit per-call `model:` the CLI default would be used and the Opus tier would be lost.
+- The pane spawns; the user types their answers directly into the pane. The dispatch blocks until the subagent completes (top-level `wait: true`).
 
-## Requirements
+Read `results[0].finalMessage`, `results[0].exitCode`, `results[0].state`, and `results[0].transcriptPath` from the orchestration result. Proceed to Step 4.
 
-Concrete requirements derived from the conversation. Each should be verifiable.
+### 3b. Inline branch — follow the procedure in this session
 
-- Requirement 1
-- Requirement 2
+Treat the body of `procedure.md` (read in Step 2) as if it were addressed to you, the orchestrator. Execute Steps 1 through 9 of the procedure in this session. The user's raw input is the seed for the procedure's Step 1 input-shape detection.
 
-## Constraints
+When the procedure's Step 9 finishes, you will have written a spec file. Capture the absolute path you wrote to. There is no `finalMessage` to parse on this branch — you `are` the procedure runner, so the absolute path is already in your hand.
 
-Boundaries on the solution — things it must NOT do, compatibility requirements,
-performance bounds, dependencies it must work with.
+Skip Step 4 of this orchestrator (it parses the subagent's `finalMessage`) and jump straight to Step 5.
 
-## Acceptance Criteria
+## Step 4: Validate `SPEC_WRITTEN:` (mux branch only)
 
-How do we know it's done? Observable, testable outcomes.
+Parse the subagent's `finalMessage` for a single line matching exactly:
 
-- Criterion 1
-- Criterion 2
+```
+SPEC_WRITTEN: <absolute path>
+```
 
-## Non-Goals
+Cases:
 
-What's explicitly out of scope. Prevents the planner from gold-plating.
+- **(1) `finalMessage` lacks a `SPEC_WRITTEN:` line.** Report to the user:
+  > Spec design did not complete: `spec-designer` exited without emitting `SPEC_WRITTEN: <path>`. Transcript: `<transcriptPath>`. No spec written, no commit attempted.
 
-## Open Questions (optional)
+  Stop. Do not retry. Do not surface a recovery menu.
 
-Anything surfaced during exploration that couldn't be resolved and the planner
-should be aware of. These should be rare — most questions should be resolved
-during the conversation.
-~~~
+- **(2) Path reported but file missing on disk.** Report:
+  > Spec design reported `SPEC_WRITTEN: <path>` but `<path>` does not exist on disk. Transcript: `<transcriptPath>`. No commit attempted.
 
-The `Scout brief:` line must contain the exact file path read in Step 2 — copy the literal path, do not paraphrase or abbreviate it.
+  Stop. Do not retry.
 
-Create the `.pi/specs/` directory if it does not exist.
+- **(3) `exitCode != 0`.** Report:
+  > Spec design failed (`exitCode: <N>`, `error: <error>`). Transcript: `<transcriptPath>`. No commit attempted.
 
-Commit the spec file to git using the `commit` skill. Specify the spec file path (`.pi/specs/<date>-<topic>.md`) so only the spec is committed.
+  Stop. Do not retry.
 
-## Step 6: Report and offer continuation
+- **(success)** `SPEC_WRITTEN: <path>` is present, `<path>` exists, and `exitCode == 0`. Proceed to Step 5 with `<path>` captured.
 
-Report the spec path and offer to invoke generate-plan:
+## Step 5: Pause for user review
 
-> Spec written to `.pi/specs/<date>-<topic>.md`. Want me to run generate-plan with this spec?
+Surface to the user:
 
-If yes, invoke generate-plan with the spec file path as input.
+> Spec written to `<path>`. Review it and let me know when you'd like me to commit it (or that you don't want to).
+
+Wait for the user's reply. The orchestrator does **not** read the spec file into its own context — the user reads it directly.
+
+Possible user responses:
+
+- **OK / commit it / yes** → Step 6 (commit).
+- **Reject** (any form: "redo", "leave it", "delete it") → Step 7 (recovery menu).
+
+## Step 6: Commit (on user OK)
+
+Invoke the `commit` skill with the exact spec path captured in Step 4 (or Step 3b on inline). Specify the path explicitly so only the spec file is committed.
+
+If the `commit` skill fails, report the error verbatim and stop. Leave the file on disk uncommitted. Do **not** auto-retry. The user resolves the underlying issue (e.g. pre-commit hook failure) and re-runs `/define-spec` or commits manually.
+
+## Step 7: Recovery menu (on user reject)
+
+Present these three options:
+
+> Got it. What would you like to do with `<path>`?
+>
+> **(i) Redo** — re-dispatch `define-spec` with the existing draft as input. The procedure overwrites the same path.
+> **(ii) Leave it** — leave `<path>` uncommitted on disk for manual editing and committing later.
+> **(iii) Delete it** — remove the file.
+
+Behavior per choice:
+
+- **(i) Redo:** invoke `/define-spec <path>` recursively, passing the captured spec path as-is (typically the absolute path from the original `SPEC_WRITTEN: <absolute path>` line). The procedure's input-shape detector accepts both relative `.pi/specs/<name>.md` and absolute paths containing `/.pi/specs/`, so the existing-spec branch fires on the recursive run and overwrites the rejected draft with preamble preservation. On the recursive run, the same orchestrator probe + dispatch + validate + commit-gate flow applies.
+- **(ii) Leave it:** emit `Leaving <path> uncommitted. Edit and commit yourself.` and stop.
+- **(iii) Delete it:** remove the file. Then stop.
+
+## Step 8: Offer `generate-plan`
+
+After a successful commit (Step 6), offer continuation:
+
+> Spec committed. Want me to run `generate-plan` with `<path>`?
+
+If yes, invoke `generate-plan` with `<path>`. If no, stop.
 
 ## Edge cases
 
-- **Todo ID provided but todo not found:** Stop with: "Todo `TODO-<id>` not found."
-- **Scout brief referenced but file missing:** Proceed without the brief. Do not fail.
-- **`.pi/specs/` missing:** Create the directory before writing.
-- **User wants to skip questions and go straight to writing:** Write the spec from available context. The spec may be thinner, but define-spec should not force interaction.
+- **`procedure.md` missing.** Fail at Step 2 with the message specified there.
+- **`model-tiers.json` missing / no `capable` model / no `dispatch.<provider>` mapping.** Fail at Step 3a with the matching message. Stop. Do not fall back to a CLI default — the whole point of the explicit resolution is to keep dispatch on the Opus-tier / Claude-CLI route.
+- **Mux probe wrong (false positive / false negative).** The probe is aligned with the runtime's `selectBackend()` / `cmux.ts` checks (env var + command available), so divergence requires either (a) the env var being set without the matching CLI on PATH, or (b) the runtime's check changing in a future `pi-interactive-subagent` release. A false-negative probe (probe says no mux, mux actually available) drops the user into the inline branch — functionally correct but uses orchestrator context unnecessarily. A false-positive probe (probe says mux, runtime then disagrees) routes `subagent_run_serial` to the headless backend, which can't host an interactive session — `spec-designer` would receive its task without a user-driven Q&A surface. Mitigation: keep the probe rules in lockstep with `cmux.ts`; if a future change drifts, users can force the inline branch with `PI_SUBAGENT_MODE=headless` or one of the override phrases.
+- **User-input override false positive.** If the user's input contains "subagent" without meaning override (e.g. "build a subagent thing"), the substring match will trigger inline mode. Mitigation is the specific phrase set in Step 1b. Residual risk is documented; users wanting subagent dispatch can rephrase.
+- **Inline-branch session terminated mid-procedure.** No spec written, no commit, nothing to recover. User re-runs `/define-spec`. If a partial spec was written before termination, it stays on disk; user can delete or edit manually.
+- **`commit` skill failure.** Step 6 covers this. Report and stop; user resolves the underlying issue.
+- **Multi-subsystem input, user insists on a single spec.** The procedure's Step 3 scope-decomposition check handles this — user override is honored, an Open Question is recorded, and the spec is written. Downstream `generate-plan` may produce a coarse plan.
