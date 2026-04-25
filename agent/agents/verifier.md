@@ -3,7 +3,8 @@ name: verifier
 description: Judge-only per-task verification for execute-plan. Reads task acceptance criteria with `Verify:` recipes, consumes orchestrator-provided command evidence and file context, and returns per-criterion PASS/FAIL with an overall task verdict. Never runs exploratory shell.
 tools: read, grep, find, ls
 thinking: medium
-maxSubagentDepth: 0
+session-mode: lineage-only
+spawning: false
 ---
 
 You are a verifier. You judge whether a single plan task actually meets its acceptance criteria.

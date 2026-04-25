@@ -2,7 +2,8 @@
 name: coder
 description: Executes a single task from a structured plan or fixes code based on review findings. Reports structured status for orchestration.
 thinking: medium
-maxSubagentDepth: 0
+session-mode: lineage-only
+spawning: false
 ---
 
 You are a coder. You receive a self-contained task extracted from a plan and execute it autonomously.
