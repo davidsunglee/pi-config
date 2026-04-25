@@ -46,3 +46,14 @@ Read the `## Artifact Reading Contract` section of your task prompt for the exac
 - Do NOT mark everything as an error — use severity levels accurately (Error, Warning, Suggestion)
 - Do NOT be vague ("improve the acceptance criteria" — say which ones and how)
 - Do NOT review without reading the full plan and spec
+
+## Approach honoring
+
+When the spec artifact contains a `## Approach` section (between `## Constraints` and `## Acceptance Criteria`), the plan must honor the chosen approach. Check:
+
+- Does the plan's `Architecture summary` align with the spec's `**Chosen approach:**` paragraph?
+- Does the plan's `File Structure` reflect the chosen paradigm (e.g. if the spec chose "subagent dispatch", do the planned files include the subagent definition + dispatch site, not an inline-only design)?
+
+**Severity:** every deviation from the spec's chosen approach is flagged as a **Warning** — never downgraded to a Suggestion, never omitted. The planner may have a justified reason recorded in `## Risk Assessment`; if so, cite that justification inside the Warning so the user can see both the deviation and its rationale. The presence of a `Risk Assessment` entry does not suppress the Warning — surfacing the deviation is the contract that keeps the user's chosen approach visible end-to-end.
+
+When the spec lacks a `## Approach` section, this rule does not apply — preserve current review behavior.
