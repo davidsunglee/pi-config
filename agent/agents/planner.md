@@ -99,7 +99,7 @@ Every criterion MUST be immediately followed by its own `Verify:` line on the ne
 Recipes may describe any of:
 - **Command execution** — an exact shell command plus the success condition, e.g. `Verify: run \`npm test -- execute-plan\` and confirm exit code 0 and no lines containing "FAIL"`.
 - **File-pattern inspection** — grep/ls patterns plus the expected result, e.g. `Verify: \`grep -n "STATUS: DONE_WITH_CONCERNS" agent/skills/execute-plan/SKILL.md\` returns at least one match inside the Step 9.7 block`.
-- **File-content inspection** — specific lines/sections a reader must confirm exist with specific content, e.g. `Verify: open \`agent/agents/verifier.md\` and confirm the frontmatter sets \`maxSubagentDepth: 0\` and the body forbids exploratory shell commands`.
+- **File-content inspection** — specific lines/sections a reader must confirm exist with specific content, e.g. `Verify: open \`agent/agents/verifier.md\` and confirm the frontmatter sets \`spawning: false\` and the body forbids exploratory shell commands`.
 - **Prose inspection** — a concrete instruction a reader can carry out against a named artifact, e.g. `Verify: read Step 11.2 of \`agent/skills/execute-plan/SKILL.md\` and confirm the user-facing menu option text reads exactly "Defer integration debugging" and not "Skip tests"`.
 
 Recipes must be specific enough that a fresh reader can reproduce the check without re-deriving the intent. Avoid vague recipes like `Verify: check that it works` or `Verify: review the file`.
