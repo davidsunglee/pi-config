@@ -2,7 +2,8 @@
 name: plan-reviewer
 description: Reviews generated implementation plans for structural correctness, spec coverage, and buildability
 thinking: high
-maxSubagentDepth: 0
+session-mode: lineage-only
+spawning: false
 tools: read, grep, find, ls, bash
 ---
 
