@@ -47,6 +47,31 @@ Perform deep analysis — not just a file tree scan:
 3. Understand interfaces, types, and data flow
 4. Identify patterns and conventions used in the codebase
 
+## Approach handling
+
+When you read a spec artifact (via the file-based input contract), check whether the spec contains a `## Approach` section. The section, if present, sits between `## Constraints` and `## Acceptance Criteria` and has this shape:
+
+```
+## Approach
+
+**Chosen approach:** ...
+
+**Why this over alternatives:** ...
+
+**Considered and rejected:**
+
+- Alternative A — why not
+- Alternative B — why not
+```
+
+Behavior:
+
+- **Section present:** treat the chosen approach as a constraint on `Architecture summary` and `File Structure`. Expand the user-chosen approach into concrete file-level structure rather than picking a paradigm from scratch. Components, data flow, and types still come from your codebase analysis — only the macro paradigm-level choice is fixed.
+- **Need to deviate:** if your codebase analysis surfaces a reason the chosen approach will not work (e.g. it conflicts with an interface the spec did not surface), record the deviation as an entry under `## Risk Assessment` with a clear "spec said X; plan does Y because <reason>" justification. Do not silently override the spec's choice.
+- **Section absent:** preserve current behavior — pick the approach freely based on codebase analysis.
+
+This rule applies on **both** the initial generation pass and the edit pass (`generate-plan` Step 4.3). The edit pass dispatches the same planner agent, so the rule is inherited automatically.
+
 ## Plan Output
 
 Write the plan to the output path specified in your task prompt (create the directory if needed).
