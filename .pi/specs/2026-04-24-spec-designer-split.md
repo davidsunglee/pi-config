@@ -47,7 +47,7 @@ There is one load-bearing runtime constraint for `spec-designer`: the current su
 
 - **`agent/agents/spec-designer.md` (new).** Pi/Claude-compatible agent definition. Frontmatter: `name`, `description`, `tools: read, write, grep, find, ls`, `thinking: xhigh`, `session-mode: lineage-only`, `auto-exit: false`, `spawning: false`, `system-prompt: append`. **No `model:` field** — model is resolved at dispatch time from `model-tiers.json`. **No `maxSubagentDepth` field** — that field is not in the `pi-interactive-subagent` frontmatter contract. **No body content after the closing frontmatter delimiter** — the procedure, role definition, and terminal `SPEC_WRITTEN: <path>` contract arrive via the per-call `systemPrompt:` carrying `procedure.md`. This body-less shape is required because the runtime prefers `agentDefs.body` over `params.systemPrompt` when both are present.
 - **`agent/skills/define-spec/procedure.md` (new).** Plain (non-skill) file inside the existing `define-spec/` skill directory. **This is the single canonical source of truth** for the spec-design procedure. It is **not** a discoverable skill — it has no `name`/`description` frontmatter and is not loaded by any `Skill` tool surface. It is consumed by being read from disk and inlined by the orchestrator.
-- **`agent/skills/define-spec/SKILL.md` (revised).** The skill body shrinks substantially (target: orchestration + dispatch only, no Q&A prose, no spec template — those live in `procedure.md`). The skill becomes a thin orchestrator that probes mux availability, picks a dispatch branch, fires the dispatch (or runs the procedure inline), parses the completion line, gates a commit on user review, and offers `generate-plan`.
+- **`agent/skills/define-spec/SKILL.md` (revised).** The skill body contains explicit orchestration instructions only: mux probing, branch selection, dispatch (or inline execution), completion-line parsing, failure reporting, commit gating, and the `generate-plan` offer. Detailed Q&A prose and the spec template live in `procedure.md`; explicit orchestration and failure-handling instructions are preferred over minimizing line count.
 
 ### R2 — One canonical procedure body, two dispatch branches
 
@@ -200,7 +200,7 @@ The work is done when **all** of the following hold:
 1. **Files exist with the expected shape:**
    - `agent/agents/spec-designer.md` exists with the frontmatter described in R1 (no `model:`, no `maxSubagentDepth`, `thinking: xhigh`, `session-mode: lineage-only`, `auto-exit: false`, `spawning: false`, `system-prompt: append`) and has no body content after the closing frontmatter delimiter.
    - `agent/skills/define-spec/procedure.md` exists, contains the procedure body, has no skill frontmatter (no `name:`/`description:` block), and is not discoverable as a top-level skill.
-   - `agent/skills/define-spec/SKILL.md` is substantially smaller than today and contains only orchestration / dispatch / pause / commit-gate logic.
+   - `agent/skills/define-spec/SKILL.md` contains only orchestration / dispatch / failure-reporting / pause / commit-gate logic, with no detailed Q&A procedure or spec template.
 2. **Frontmatter normalization is complete:**
    - `grep -r "maxSubagentDepth" agent/agents/` returns zero matches.
    - `grep -l "session-mode: lineage-only" agent/agents/*.md` returns all 7 agent files.
