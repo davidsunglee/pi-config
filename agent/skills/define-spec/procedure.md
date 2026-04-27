@@ -143,7 +143,9 @@ How this step terminates depends on which branch is running this procedure.
 
 ### Subagent / mux branch (you are the `spec-designer` subagent)
 
-End your turn with exactly this line, anchored on its own line, as your last output:
+After Step 8's file write/edit tool returns successfully, you must send one final assistant message. Do **not** make the file write/edit tool call your final action — the orchestrator parses your final text message, not the tool-result side effect.
+
+That final assistant message must contain exactly this line, anchored on its own line, as your last output:
 
 ```
 SPEC_WRITTEN: <absolute path>
@@ -151,7 +153,7 @@ SPEC_WRITTEN: <absolute path>
 
 Where `<absolute path>` is the full filesystem path of the spec file you just wrote. No backticks, no trailing commentary on the same line, no abbreviation. Then exit. The orchestrator parses this line to drive its review-and-commit gate.
 
-If you cannot complete the procedure (user terminates Q&A early, ambiguous input the user refuses to clarify, etc.), exit without emitting `SPEC_WRITTEN:`. The orchestrator will detect the missing line and surface the failure.
+If you cannot complete the procedure (user terminates Q&A early, ambiguous input the user refuses to clarify, file write fails, etc.), exit without emitting `SPEC_WRITTEN:`. The orchestrator will detect the missing line and surface the failure.
 
 ### Inline branch (you are the orchestrator running this procedure in your own session)
 
