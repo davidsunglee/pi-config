@@ -62,15 +62,8 @@ Model assignments:
 | Role | Tier |
 |------|------|
 | Plan generation | `capable` from model-tiers.json |
-| Plan review (primary) | `crossProvider.capable` from model-tiers.json |
-| Plan review (fallback) | `capable` from model-tiers.json |
-| Plan editing | `capable` from model-tiers.json |
 
-Fallback is triggered by dispatch failure, not preemptively checked. On fallback, notify the user:
-```
-⚠️ Cross-provider plan review failed (<crossProvider.capable model>).
-Falling back to same-provider review (<capable model>).
-```
+Review and edit tier roles now live inside the `refine-plan` skill and the `plan-refiner` coordinator — `generate-plan` no longer dispatches the reviewer or editor itself.
 
 ### Dispatch resolution
 
@@ -102,169 +95,60 @@ If `model-tiers.json` doesn't exist or is unreadable, stop with: "generate-plan 
    ```
    Read the planner's output from results[0].finalMessage — the planner writes the plan to disk; this result is the return message.
 
-## Step 4: Review-edit loop
+## Step 4: Refine the plan
 
-### 4.1: Review the plan
+After Step 3 produces the initial plan, invoke the `refine-plan` skill to run the review-edit loop and commit gate. `refine-plan` owns reviewer/editor dispatch, on-disk review artifacts, finding extraction, and version tracking — `generate-plan` does none of that itself.
 
-The reviewer reads the generated plan, the task artifact, and the scout brief (if any) directly from disk. The orchestrator does NOT load those files into its own context here.
+Invoke `refine-plan` with these arguments:
 
-1. Read [review-plan-prompt.md](review-plan-prompt.md) in this directory.
-2. Fill placeholders as follows:
+- `--plan-path <plan path from Step 3>` — the plan file produced by the planner.
+- **Coverage source** (exactly one of):
+  - **File-based inputs (Step 1b):** pass `--task-artifact <input path>`. The on-disk artifact is the coverage source.
+  - **Todo inputs (Step 1a):** pass `--task-description "<todo body from {TASK_DESCRIPTION} in Step 3>"` AND `--source-todo TODO-<id>`. The inline body is the coverage source; the source-todo line is supplementary metadata.
+  - **Freeform inputs (Step 1c):** pass `--task-description "<freeform text from {TASK_DESCRIPTION} in Step 3>"`. The inline body is the coverage source.
+- `--scout-brief <path>` — only if a valid scout brief was extracted in Step 1 AND still exists on disk at refinement time. Omit otherwise.
+- `--max-iterations 3`.
+- `--auto-commit-on-approval` — always set when invoked from `generate-plan`.
 
-   | Placeholder | File-based input | Todo / freeform input |
-   |---|---|---|
-   | `{PLAN_ARTIFACT}` | `Plan artifact: <plan path from Step 3>` | `Plan artifact: <plan path from Step 3>` |
-   | `{TASK_ARTIFACT}` | `Task artifact: <input path>` (same path used in Step 3) | empty string |
-   | `{SOURCE_TODO}` | same value used in Step 3 | same value used in Step 3 |
-   | `{SOURCE_SPEC}` | same value used in Step 3 | empty string |
-   | `{SCOUT_BRIEF}` | `Scout brief: .pi/briefs/<filename>` if a valid scout brief was extracted in Step 1 **and the brief file still exists on disk** at review time; empty string otherwise | empty string |
-   | `{ORIGINAL_SPEC_INLINE}` | empty string | the inline text from Step 1 |
+`--structural-only` is NEVER passed by `generate-plan`. Every generate-plan input source has a coverage source: the file artifact for 1b, the inline body for 1a/1c.
 
-   Freshness / existence checks before filling:
+`refine-plan` returns a compact summary (with `STATUS`, `COMMIT`, `PLAN_PATH`, `REVIEW_PATHS`, and optionally `STRUCTURAL_ONLY` and `FAILURE_REASON`). Step 5 consumes that summary.
 
-   - Verify the plan file produced by Step 3 exists and is non-empty. If it does not exist, fail with: `Plan file <path> missing — cannot dispatch plan review.` This is consistent with the planner slice: missing required artifacts fail the workflow.
-   - For file-based inputs, verify the task artifact path still exists. If not, fail with: `Task artifact <path> missing — cannot dispatch plan review.`
-   - For scout briefs, re-check existence at review time. If the brief file was present in Step 1 but is gone now, warn (`Scout brief <path> no longer exists at review time — proceeding without it.`), set `{SCOUT_BRIEF}` to empty, and continue. Do not fail.
+## Step 5: Report result
 
-   **Do NOT read the plan, task artifact, or scout brief contents into the orchestrator prompt.** The `plan-reviewer` agent reads them from disk per its Input Contract.
+Read the compact summary returned by `refine-plan` in Step 4. Show the user:
 
-3. Determine review output path from the plan filename. For a plan at `.pi/plans/2026-04-13-my-feature.md`, the review path is `.pi/plans/reviews/2026-04-13-my-feature-plan-review-v1.md`.
-4. Dispatch `plan-reviewer`:
-   ```
-   subagent_run_serial { tasks: [
-     {
-       name: "plan-reviewer",
-       agent: "plan-reviewer",
-       task: "<filled review-plan-prompt.md>",
-       model: "<crossProvider.capable from model-tiers.json>",
-       cli: "<dispatch for crossProvider.capable>"
-     }
-   ]}
-   ```
-   If the cross-provider dispatch fails, retry with `capable` from model-tiers.json (re-resolving the `cli:` value from the `dispatch` map in `model-tiers.json` for the fallback model) and notify the user (see Step 2 fallback message).
-   Read the reviewer's output from results[0].finalMessage and write it to the versioned path in step 5.
-5. Write review output to the versioned path. Create `.pi/plans/reviews/` if it doesn't exist.
+- `STATUS`
+- `COMMIT`
+- `PLAN_PATH`
+- `REVIEW_PATHS`
+- `STRUCTURAL_ONLY: yes` (only when present in the summary)
 
-### 4.2: Assess review
+Then offer execute-plan:
 
-Read the review output file. Parse for the Status line (`**[Approved]**` or `**[Issues Found]**`) and all issues (Error / Warning / Suggestion severity).
+> Plan written to `<PLAN_PATH>`. Want me to run execute-plan with this plan?
 
-**If Approved (no errors):**
-- If warnings or suggestions exist, append them as a `## Review Notes` section at the end of the plan file:
-  ```markdown
-  ## Review Notes
+If `COMMIT: left_uncommitted` (which can happen only in standalone-style runs; auto-commit mode always commits on the approved path), prepend this note to the offer:
 
-  _Added by plan reviewer — informational, not blocking._
+> Note: plan was left uncommitted. Proceeding with an uncommitted plan means edits made by execute-plan will land on top of an unstaged plan file.
 
-  ### Warnings
-  - **Task N**: <full warning text from review, including "What", "Why it matters", and "Recommendation">
-
-  ### Suggestions
-  - **Task N**: <full suggestion text from review, including "What", "Why it matters", and "Recommendation">
-  ```
-  The review file at `.pi/plans/reviews/` is kept for reference (do not delete it).
-- Proceed to Step 5 (commit).
-
-**If Issues Found (errors):**
-- Continue to Step 4.3.
-
-### 4.3: Edit the plan
-
-The planner edit pass reads the existing plan from disk (it will overwrite it at the same path), plus the task artifact and scout brief from disk for reference. Review findings and the output path remain inline control data.
-
-1. Read [edit-plan-prompt.md](edit-plan-prompt.md) in this directory.
-2. Fill placeholders as follows:
-
-   | Placeholder | File-based input | Todo / freeform input |
-   |---|---|---|
-   | `{REVIEW_FINDINGS}` | full text of all error-severity findings from the review (inline) | same |
-   | `{PLAN_ARTIFACT}` | `Plan artifact: <plan path from Step 3>` | same |
-   | `{TASK_ARTIFACT}` | `Task artifact: <input path>` (same path used in Step 3) | empty string |
-   | `{SOURCE_TODO}` | same value used in Step 3 | same value used in Step 3 |
-   | `{SOURCE_SPEC}` | same value used in Step 3 | empty string |
-   | `{SCOUT_BRIEF}` | `Scout brief: .pi/briefs/<filename>` if a valid scout brief was extracted in Step 1 **and the brief file still exists on disk** at edit time; empty string otherwise | empty string |
-   | `{ORIGINAL_SPEC_INLINE}` | empty string | the inline text from Step 1 |
-   | `{OUTPUT_PATH}` | plan path from Step 3 (same path — the planner overwrites in place) | same |
-
-   Freshness / existence checks before filling:
-
-   - Verify the plan file exists and is non-empty. If not, fail with: `Plan file <path> missing — cannot dispatch plan edit.`
-   - For file-based inputs, verify the task artifact path still exists. If not, fail with: `Task artifact <path> missing — cannot dispatch plan edit.`
-   - For scout briefs, re-check existence at edit time. If missing, warn (`Scout brief <path> no longer exists at edit time — proceeding without it.`), set `{SCOUT_BRIEF}` to empty, and continue.
-
-   **Do NOT read the plan, task artifact, or scout brief contents into the orchestrator prompt.** The planner reads them from disk per its Edit mode contract.
-
-3. Dispatch `planner` with the filled template:
-   ```
-   subagent_run_serial { tasks: [
-     { name: "planner", agent: "planner", task: "<filled edit-plan-prompt.md>", model: "<capable from model-tiers.json>", cli: "<dispatch for capable>" }
-   ]}
-   ```
-4. The planner writes the edited plan back to the same path (overwriting the previous version).
-
-### 4.4: Iterate or escalate
-
-Loop back to Step 4.1 (re-review the edited plan). Max 3 iterations per era. Each iteration overwrites the current versioned review file.
-
-**On convergence (Approved within budget):** proceed to Step 5.
-
-**On budget exhaustion (3 iterations, errors persist):**
-
-Present all remaining findings to the user and offer:
-- **(a) Keep iterating** — reset budget, update plan version
-- **(b) Proceed with issues** — report plan with findings noted
-
-If **(a):** increment era (v1 → v2), create a new versioned review file (e.g., `-plan-review-v2.md`), loop back to Step 4.1 with fresh budget.
-
-If **(b):** proceed to Step 5 with outstanding findings noted.
-
-## Step 5: Commit artifacts
-
-Commit the plan file and every review artifact produced during this run using the `commit` skill. Specify the concrete file paths explicitly — no globs, no wildcards — so only these files are committed.
-
-As you run the review-edit loop, keep a running list of the exact review file paths written in Step 4.1, one entry per era (e.g., `.pi/plans/reviews/<plan-basename>-plan-review-v1.md`, `.pi/plans/reviews/<plan-basename>-plan-review-v2.md`, …). Each era overwrites its own versioned file in place per Step 4.4, so the list contains one concrete path per era that actually ran, with `<plan-basename>` resolved from the plan filename (no wildcard in the final value).
-
-When invoking the `commit` skill, pass the following concrete paths:
-
-- The plan path from Step 3 (e.g., `.pi/plans/<date>-<short-description>.md`), with `<date>` and `<short-description>` resolved to the actual filename.
-- Each review path from the tracked list above, fully resolved (v1, v2, …, through the current era). Only include versions that were actually written during this run — if the user never chose **(a) Keep iterating** in Step 4.4, this is a single-element list containing the v1 path.
-
-Do not pass a glob or wildcard pattern to `commit`; pass the explicit, fully resolved list of paths from this run so older same-basename reviews from prior runs are not accidentally staged.
-
-Do not push. Do not auto-invoke execute-plan — that remains the user's choice in Step 6.
-
-## Step 6: Report result
-
-- Show the path to the generated plan file (e.g., `.pi/plans/2026-04-13-my-feature.md`)
-- Report the review status:
-  - **Clean:** "Plan reviewed — no issues found."
-  - **Clean with notes:** "Plan reviewed — N warnings/suggestions appended as Review Notes."
-  - **Proceeded with issues:** "Plan reviewed — N outstanding issues noted. Review: `<review-path>`"
-- Offer to continue:
-
-  > Plan written to `.pi/plans/...`. Want me to run execute-plan with this plan?
-
-  If yes, invoke execute-plan with the plan file path.
+Require explicit user confirmation before invoking execute-plan in that case. Do not auto-invoke execute-plan.
 
 ## Edge cases
 
 - **Todo ID provided:** Read the todo body first with the `todo` tool and inline the full body in `{TASK_DESCRIPTION}`. The planner subagent does not have the `todo` tool, so the ID alone is not enough.
 - **File path provided:** Pass by path via `{TASK_ARTIFACT}`. Do NOT inline the file body into `{TASK_DESCRIPTION}`. Only do a bounded preamble read (e.g., `head -n 40`) for provenance extraction. The planner reads the full artifact from disk.
 - **Scout brief referenced but missing on disk:** Warn the user and continue planning without it. Do not block.
-- **Plan file missing between generation and review/edit:** Fail with a clear error (`Plan file <path> missing — cannot dispatch plan review.` or `... plan edit.`). This should not normally happen — the planner writes the plan in Step 3 at a known path — but a clear failure is preferable to dispatching with no plan.
-- **Task artifact moved or deleted during the review/edit loop:** Fail with `Task artifact <path> missing — cannot dispatch plan review.` (or `... plan edit.`). File-based planning runs require the artifact to remain on disk throughout the loop.
-- **Scout brief deleted between generation and review/edit:** Warn (`Scout brief <path> no longer exists at review time — proceeding without it.`) and continue. Consistent with the planner-slice warn-and-continue policy.
+- **Refine-plan failures:** when refine-plan returns `STATUS: failed` (e.g. plan file missing, dispatch failure, review write failure), surface the `FAILURE_REASON` line to the user and skip the execute-plan offer until the underlying issue is resolved. Do not retry refine-plan automatically.
 - **`.pi/plans/` missing:** The subagent handles creating the directory; no action needed from the main agent.
-- **`.pi/plans/reviews/` missing:** Create it before writing the review file.
 
 ## Scope note on path-based handoff
 
-Path-based handoff in this skill applies to the initial `generate-plan -> planner` dispatch (Step 3), the `generate-plan -> plan-reviewer` dispatch (Step 4.1), and the planner edit-pass dispatch (Step 4.3). For these three dispatches, large durable artifacts — the generated plan file, the original task artifact, and any scout brief — are passed by filesystem path rather than inlined into the prompt. The worker agents read them from disk per their input contracts.
+Path-based handoff in this skill applies to the initial `generate-plan -> planner` dispatch (Step 3); review/edit dispatches are now owned by `refine-plan` and follow `refine-plan`'s own handoff contract (which itself uses path-based handoff for the plan, task artifact, and scout brief). For the Step 3 dispatch, large durable artifacts — the original task artifact and any scout brief — are passed by filesystem path rather than inlined into the prompt. The planner reads them from disk per its input contract.
 
 What remains inline:
 
-- For todo and freeform runs, the original task description itself is inline in `{TASK_DESCRIPTION}` (Step 3) and `{ORIGINAL_SPEC_INLINE}` (Steps 4.1 and 4.3). No temp artifact files are created just to force path-based handoff — todo/freeform inputs are not durable artifacts.
-- For the edit pass, review findings (`{REVIEW_FINDINGS}`) and the output path (`{OUTPUT_PATH}`) are small, ephemeral control data and remain inline.
+- For todo and freeform runs, the original task description itself is inline in `{TASK_DESCRIPTION}` (Step 3). No temp artifact files are created just to force path-based handoff — todo/freeform inputs are not durable artifacts.
 - Minimal provenance / safety metadata (`{SOURCE_TODO}`, `{SOURCE_SPEC}`, `{SCOUT_BRIEF}`) stays inline.
 
 `execute-plan` and `execute-plan -> coder` are out of scope for this handoff contract.
