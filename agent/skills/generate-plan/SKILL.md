@@ -101,7 +101,7 @@ After Step 3 produces the initial plan, invoke the `refine-plan` skill to run th
 
 Invoke `refine-plan` with these arguments:
 
-- `--plan-path <plan path from Step 3>` — the plan file produced by the planner.
+- `PLAN_PATH = <plan path from Step 3>` — pass the plan file produced by the planner as the positional `PLAN_PATH` argument (e.g., `<plan path from Step 3>`), not as a flag.
 - **Coverage source** (exactly one of):
   - **File-based inputs (Step 1b):** pass `--task-artifact <input path>`. The on-disk artifact is the coverage source.
   - **Todo inputs (Step 1a):** pass `--task-description "<todo body from {TASK_DESCRIPTION} in Step 3>"` AND `--source-todo TODO-<id>`. The inline body is the coverage source; the source-todo line is supplementary metadata.
