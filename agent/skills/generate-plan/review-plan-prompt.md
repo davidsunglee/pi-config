@@ -25,6 +25,10 @@ You are reviewing a generated implementation plan for structural correctness bef
 
 {ORIGINAL_SPEC_INLINE}
 
+## Structural-Only Mode
+
+{STRUCTURAL_ONLY_NOTE}
+
 ## Artifact Reading Contract
 
 - A `Plan artifact: <path>` line in `## Provenance` is always present. Read that plan file in full from disk before reviewing. It is the authoritative plan under review — the orchestrator has NOT inlined plan contents in this prompt.
@@ -33,10 +37,12 @@ You are reviewing a generated implementation plan for structural correctness bef
 - If a referenced scout brief file is missing on disk, note it in your review and continue — do not abort.
 - If no `Task artifact:` line is present, the original task description is contained inline in the `## Original Spec (inline)` section above and is self-contained (this is the todo/freeform case).
 - If both `Task artifact:` is present and `## Original Spec (inline)` is non-empty, prefer the on-disk artifact as authoritative. The inline section must be empty in that case; if it is not, report an inconsistency in your review but continue using the on-disk artifact.
+- If the `## Structural-Only Mode` section is non-empty (i.e. {STRUCTURAL_ONLY_NOTE} was filled), treat the absence of both `Task artifact:` and `## Original Spec (inline)` content as expected — this is a structural-only review. Do NOT report an inconsistency in this case. Follow the instructions in `## Structural-Only Mode`.
 
 ## Review Checklist
 
 **Spec/Todo Coverage:**
+If the `## Structural-Only Mode` section is non-empty, skip this Spec/Todo Coverage block entirely and do not list any coverage findings — there is no original spec/todo to compare against.
 - Does every requirement in the original spec have a corresponding task?
 - Are there tasks that don't map to any requirement (scope creep)?
 - List any gaps: requirement → missing task.
@@ -108,7 +114,7 @@ For each issue found:
 
 ### Summary
 
-One paragraph: overall assessment, number of errors/warnings/suggestions, and whether the plan is ready for execution.
+One paragraph: overall assessment, number of errors/warnings/suggestions, and whether the plan is ready for execution. If this is a structural-only review (per `## Structural-Only Mode`), prepend the literal phrase "Structural-only review — no spec/todo coverage check performed." to the Summary paragraph.
 
 ## Critical Rules
 
