@@ -33,12 +33,15 @@ cat ~/.pi/agent/model-tiers.json | python3 -c "import sys,json; print(json.dumps
 
 The model matrix provides tier mappings used by the coordinator:
 - `crossProvider.capable` — first-pass and final verification reviews
-- `standard` — hybrid re-reviews, coordinator model
+- `crossProvider.standard` — coordinator model (pi-backed orchestration path)
+- `standard` — hybrid re-reviews
 - `capable` — remediator
 
 ### Dispatch resolution
 
-After reading the model matrix, resolve the dispatch target for the `code-refiner` call using the `dispatch` map from `model-tiers.json`. See execute-plan Step 6 for the full resolution algorithm.
+After reading the model matrix, resolve the dispatch target for the `code-refiner` call from `crossProvider.standard` using the `dispatch` map from `model-tiers.json`. See execute-plan Step 6 for the full resolution algorithm.
+
+The coordinator must run through a CLI that exposes pi orchestration tools (currently `openai-codex` → `pi` in `model-tiers.json`), so do not use top-level `standard` for this dispatch.
 
 The `code-refiner` receives the full model matrix (including the `dispatch` map) as `{MODEL_MATRIX}` and resolves dispatch for its own subagent calls internally — see `refine-code-prompt.md`.
 
@@ -62,7 +65,7 @@ Fill placeholders:
 
 ```
 subagent_run_serial { tasks: [
-  { name: "code-refiner", agent: "code-refiner", task: "<filled refine-code-prompt.md>", model: "<standard from model-tiers.json>", cli: "<dispatch for standard>" }
+  { name: "code-refiner", agent: "code-refiner", task: "<filled refine-code-prompt.md>", model: "<crossProvider.standard from model-tiers.json>", cli: "<dispatch for crossProvider.standard>" }
 ]}
 ```
 
@@ -86,5 +89,5 @@ The caller (execute-plan or user) makes the decision. This skill does not auto-c
 ## Edge Cases
 
 - **No changes in range** (`BASE_SHA` equals `HEAD_SHA`): Stop with "No changes to review."
-- **Code-refiner fails to dispatch** (model unavailable): Retry with `capable` from the model matrix (re-resolving dispatch for the fallback model). If that also fails, stop with error.
+- **Code-refiner fails to dispatch** (model unavailable): Retry with `crossProvider.capable` from the model matrix (re-resolving dispatch for the fallback model). If that also fails, stop with error. Do not fall back to top-level `capable` for the coordinator dispatch; it may route to a CLI without pi orchestration tools.
 - **Empty requirements**: Review is purely quality-focused — no spec compliance check. The code-refiner handles this (it passes empty `{PLAN_CONTENTS}` through to the reviewer).
