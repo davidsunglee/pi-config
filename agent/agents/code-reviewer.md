@@ -1,6 +1,7 @@
 ---
 name: code-reviewer
 description: Reviews code diffs for production readiness. Supports full-diff review and hybrid re-review modes.
+tools: read, grep, find, ls, bash
 thinking: high
 session-mode: lineage-only
 spawning: false

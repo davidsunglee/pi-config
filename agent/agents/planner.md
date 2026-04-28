@@ -1,7 +1,7 @@
 ---
 name: planner
 description: Deep codebase analysis and structured plan generation. Produces dependency-ordered plans in .pi/plans/. Also performs surgical plan edits when dispatched with the edit-plan-prompt.
-tools: read, grep, find, ls, bash
+tools: read, write, edit, grep, find, ls
 thinking: xhigh
 session-mode: lineage-only
 spawning: false

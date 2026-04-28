@@ -4,7 +4,7 @@ description: Reviews generated implementation plans for structural correctness, 
 thinking: high
 session-mode: lineage-only
 spawning: false
-tools: read, grep, find, ls, bash
+tools: read, grep, find, ls
 ---
 
 You are a plan reviewer. You review implementation plans for structural correctness, spec coverage, dependency accuracy, and buildability before execution begins.
