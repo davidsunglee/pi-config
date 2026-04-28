@@ -1,6 +1,7 @@
 ---
 name: code-refiner
 description: Orchestrates the review-remediate loop. Dispatches code-reviewer and coder subagents, manages iteration budget, writes versioned review files.
+tools: read, write, edit, grep, find, ls, bash
 thinking: medium
 session-mode: lineage-only
 ---

@@ -1,6 +1,7 @@
 ---
 name: coder
 description: Executes a single task from a structured plan or fixes code based on review findings. Reports structured status for orchestration.
+tools: read, write, edit, grep, find, ls, bash
 thinking: medium
 session-mode: lineage-only
 spawning: false
