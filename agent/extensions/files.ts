@@ -175,7 +175,7 @@ const extractFileReferencesFromEntry = (entry: SessionEntry): string[] => {
 
 const sanitizeReference = (raw: string): string => {
 	let value = raw.trim();
-	value = value.replace(/^["'`(<\[]+/, "");
+	value = value.replace(/^(?:["'`(<]|\[)+/, "");
 	value = value.replace(/[>"'`,;).\]]+$/, "");
 	value = value.replace(/[.,;:]+$/, "");
 	return value;
@@ -757,15 +757,10 @@ const revealPath = async (pi: ExtensionAPI, ctx: ExtensionContext, target: FileE
 	}
 
 	const isDirectory = target.isDirectory || statSync(target.resolvedPath).isDirectory();
-	let command = "open";
-	let args: string[] = [];
-
-	if (process.platform === "darwin") {
-		args = isDirectory ? [target.resolvedPath] : ["-R", target.resolvedPath];
-	} else {
-		command = "xdg-open";
-		args = [isDirectory ? target.resolvedPath : path.dirname(target.resolvedPath)];
-	}
+	const command = process.platform === "darwin" ? "open" : "xdg-open";
+	const args = process.platform === "darwin"
+		? (isDirectory ? [target.resolvedPath] : ["-R", target.resolvedPath])
+		: [isDirectory ? target.resolvedPath : path.dirname(target.resolvedPath)];
 
 	const result = await pi.exec(command, args);
 	if (result.code !== 0) {

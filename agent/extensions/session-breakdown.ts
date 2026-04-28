@@ -244,7 +244,7 @@ interface BreakdownProgressState {
 function setBorderedLoaderMessage(loader: BorderedLoader, message: string) {
 	// BorderedLoader wraps a (Cancellable)Loader which supports setMessage(),
 	// but it doesn't expose it publicly. Access the inner loader for progress updates.
-	const inner = (loader as any)["loader"]; // eslint-disable-line @typescript-eslint/no-explicit-any
+	const inner = (loader as any)["loader"];
 	if (inner && typeof inner.setMessage === "function") {
 		inner.setMessage(message);
 	}
@@ -293,10 +293,6 @@ function weightedMix(colors: Array<{ color: RGB; weight: number }>): RGB {
 	}
 	if (total <= 0) return EMPTY_CELL_BG;
 	return { r: Math.round(r / total), g: Math.round(g / total), b: Math.round(b / total) };
-}
-
-function ansiBg(rgb: RGB, text: string): string {
-	return `\x1b[48;2;${rgb.r};${rgb.g};${rgb.b}m${text}\x1b[0m`;
 }
 
 function ansiFg(rgb: RGB, text: string): string {
@@ -464,19 +460,18 @@ function extractTokensTotal(usage: any): number {
 		return 0;
 	};
 
-	let total = 0;
 	// direct totals
-	total =
+	const directTotal =
 		readNum(usage?.totalTokens) ||
 		readNum(usage?.total_tokens) ||
 		readNum(usage?.tokens) ||
 		readNum(usage?.tokenCount) ||
 		readNum(usage?.token_count);
-	if (total > 0) return total;
+	if (directTotal > 0) return directTotal;
 
 	// nested tokens object
-	total = readNum(usage?.tokens?.total) || readNum(usage?.tokens?.totalTokens) || readNum(usage?.tokens?.total_tokens);
-	if (total > 0) return total;
+	const nestedTotal = readNum(usage?.tokens?.total) || readNum(usage?.tokens?.totalTokens) || readNum(usage?.tokens?.total_tokens);
+	if (nestedTotal > 0) return nestedTotal;
 
 	// sum of parts
 	const a =
@@ -504,7 +499,7 @@ async function walkSessionFiles(
 	while (stack.length) {
 		if (signal?.aborted) break;
 		const dir = stack.pop()!;
-		let entries: Dirent[] = [];
+		let entries: Dirent[];
 		try {
 			entries = await fs.readdir(dir, { withFileTypes: true });
 		} catch {
@@ -937,15 +932,11 @@ function graphMetricForRange(
 	if (mode === "tokens") {
 		const maxTokens = Math.max(0, ...range.days.map((d) => d.tokens));
 		if (maxTokens > 0) return { kind: "tokens", max: maxTokens, denom: Math.log1p(maxTokens) };
-		// fall back if tokens aren't available
-		mode = "messages";
 	}
 
-	if (mode === "messages") {
+	if (mode === "tokens" || mode === "messages") {
 		const maxMessages = Math.max(0, ...range.days.map((d) => d.messages));
 		if (maxMessages > 0) return { kind: "messages", max: maxMessages, denom: Math.log1p(maxMessages) };
-		// fall back if messages aren't available
-		mode = "sessions";
 	}
 
 	const maxSessions = Math.max(0, ...range.days.map((d) => d.sessions));
@@ -1042,59 +1033,14 @@ function displayModelName(modelKey: string): string {
 	return idx === -1 ? modelKey : modelKey.slice(idx + 1);
 }
 
-function renderLegendItems(modelColors: Map<ModelKey, RGB>, orderedModels: ModelKey[], otherColor: RGB): string[] {
-	const items: string[] = [];
-	for (const mk of orderedModels) {
-		const c = modelColors.get(mk);
-		if (!c) continue;
-		items.push(`${ansiFg(c, "█")} ${displayModelName(mk)}`);
-	}
-	items.push(`${ansiFg(otherColor, "█")} other`);
-	return items;
-}
-
-function fitRight(text: string, width: number): string {
-	if (width <= 0) return "";
-	let w = visibleWidth(text);
-	let t = text;
-	if (w > width) {
-		t = sliceByColumnLocal(t, w - width, width, true);
-		w = visibleWidth(t);
-	}
-	return " ".repeat(Math.max(0, width - w)) + t;
-}
-
-function renderLegendBlock(leftLabel: string, items: string[], width: number): string[] {
-	if (width <= 0) return [];
-	if (items.length === 0) return [truncateToWidth(leftLabel, width)];
-
-	const lines: string[] = [];
-	// First line: label on left, first item right-aligned into remaining space.
-	const leftW = visibleWidth(leftLabel);
-	if (leftW >= width) {
-		lines.push(truncateToWidth(leftLabel, width));
-		// Put all items on their own lines right-aligned.
-		for (const it of items) lines.push(fitRight(it, width));
-		return lines;
-	}
-
-	const remaining = Math.max(0, width - leftW);
-	lines.push(leftLabel + fitRight(items[0], remaining));
-
-	for (let i = 1; i < items.length; i++) {
-		lines.push(fitRight(items[i], width));
-	}
-	return lines;
-}
-
 function renderModelTable(range: RangeAgg, mode: MeasurementMode, maxRows = 8): string[] {
 	// Keep this relatively narrow: model + selected metric + cost + share.
 	const metric = graphMetricForRange(range, mode);
 	const kind = metric.kind;
 
 	let perModel: Map<ModelKey, number>;
-	let total = 0;
-	let label = kind;
+	let total: number;
+	const label = kind;
 
 	if (kind === "tokens") {
 		perModel = range.modelTokens;
@@ -1138,8 +1084,8 @@ function renderCwdTable(range: RangeAgg, mode: MeasurementMode, maxRows = 8): st
 	const kind = metric.kind;
 
 	let perCwd: Map<CwdKey, number>;
-	let total = 0;
-	let label = kind;
+	let total: number;
+	const label = kind;
 
 	if (kind === "tokens") {
 		perCwd = range.cwdTokens;
@@ -1260,7 +1206,7 @@ function renderTodTable(range: RangeAgg, mode: MeasurementMode): string[] {
 	const kind = metric.kind;
 
 	let perTod: Map<TodKey, number>;
-	let total = 0;
+	let total: number;
 
 	if (kind === "tokens") {
 		perTod = range.todTokens;
@@ -1291,22 +1237,6 @@ function renderTodTable(range: RangeAgg, mode: MeasurementMode): string[] {
 	}
 
 	return lines;
-}
-
-function renderLeftRight(left: string, right: string, width: number): string {
-	const leftW = visibleWidth(left);
-	if (width <= 0) return "";
-	if (leftW >= width) return truncateToWidth(left, width);
-
-	const remaining = width - leftW;
-	let rightText = right;
-	const rightW = visibleWidth(rightText);
-	if (rightW > remaining) {
-		// Keep the *rightmost* part visible.
-		rightText = sliceByColumnLocal(rightText, rightW - remaining, remaining, true);
-	}
-	const pad = Math.max(0, remaining - visibleWidth(rightText));
-	return left + " ".repeat(pad) + rightText;
 }
 
 function rangeSummary(range: RangeAgg, days: number, mode: MeasurementMode): string {

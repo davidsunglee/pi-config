@@ -825,8 +825,6 @@ async function fetchZaiUsage(): Promise<UsageSnapshot> {
 
 		for (const limit of limits) {
 			const type = limit.type;
-			const usage = limit.usage || 0;
-			const remaining = limit.remaining || 0;
 			const percent = limit.percentage || 0;
 			const nextReset = limit.nextResetTime ? new Date(limit.nextResetTime) : undefined;
 

@@ -34,7 +34,7 @@ import { StringEnum } from "@mariozechner/pi-ai";
 import { Type, type Static } from "typebox";
 import path from "node:path";
 import fs from "node:fs/promises";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync } from "node:fs";
 import crypto from "node:crypto";
 import {
 	Container,
@@ -749,22 +749,19 @@ function normalizeTodoSettings(raw: Partial<TodoSettings>): TodoSettings {
 
 async function readTodoSettings(todosDir: string): Promise<TodoSettings> {
 	const settingsPath = getTodoSettingsPath(todosDir);
-	let data: Partial<TodoSettings> = {};
 
 	try {
 		const raw = await fs.readFile(settingsPath, "utf8");
-		data = JSON.parse(raw) as Partial<TodoSettings>;
+		return normalizeTodoSettings(JSON.parse(raw) as Partial<TodoSettings>);
 	} catch {
-		data = {};
+		return normalizeTodoSettings({});
 	}
-
-	return normalizeTodoSettings(data);
 }
 
 async function garbageCollectTodos(todosDir: string, settings: TodoSettings): Promise<void> {
 	if (!settings.gc) return;
 
-	let entries: string[] = [];
+	let entries: string[];
 	try {
 		entries = await fs.readdir(todosDir);
 	} catch {
@@ -1029,7 +1026,7 @@ async function withTodoLock<T>(
 }
 
 async function listTodos(todosDir: string): Promise<TodoFrontMatter[]> {
-	let entries: string[] = [];
+	let entries: string[];
 	try {
 		entries = await fs.readdir(todosDir);
 	} catch {
@@ -1055,39 +1052,6 @@ async function listTodos(todosDir: string): Promise<TodoFrontMatter[]> {
 			});
 		} catch {
 			// ignore unreadable todo
-		}
-	}
-
-	return sortTodos(todos);
-}
-
-function listTodosSync(todosDir: string): TodoFrontMatter[] {
-	let entries: string[] = [];
-	try {
-		entries = readdirSync(todosDir);
-	} catch {
-		return [];
-	}
-
-	const todos: TodoFrontMatter[] = [];
-	for (const entry of entries) {
-		if (!entry.endsWith(".md")) continue;
-		const id = entry.slice(0, -3);
-		const filePath = path.join(todosDir, entry);
-		try {
-			const content = readFileSync(filePath, "utf8");
-			const { frontMatter } = splitFrontMatter(content);
-			const parsed = parseFrontMatter(frontMatter, id);
-			todos.push({
-				id,
-				title: parsed.title,
-				tags: parsed.tags ?? [],
-				status: parsed.status,
-				created_at: parsed.created_at,
-				assigned_to_session: parsed.assigned_to_session,
-			});
-		} catch {
-			// ignore
 		}
 	}
 
