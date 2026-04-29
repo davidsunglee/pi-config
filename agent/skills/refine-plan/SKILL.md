@@ -79,11 +79,7 @@ If the file is missing or unreadable, stop with: "refine-plan requires ~/.pi/age
 
 ### Dispatch resolution
 
-Take `crossProvider.standard` (e.g., `openai-codex/gpt-5.5`), extract the provider prefix (`openai-codex`), and look up `dispatch["openai-codex"]` (e.g., `pi`). Use that string as the `cli` for the `plan-refiner` dispatch.
-
-Fallback chain on dispatch failure: retry with `crossProvider.capable`, then `capable`, re-resolving the `cli` from the `dispatch` map each time.
-
-The coordinator's CLI must expose pi orchestration tools (`subagent_run_serial`). If the resolved `cli` is not `pi`, warn the user — same pattern as `refine-code`.
+Read [agent/skills/_shared/coordinator-dispatch.md](../_shared/coordinator-dispatch.md) and follow it to resolve the coordinator `(model, cli)` pair before Step 8. The shared file is the single authority for the four-tier chain, the skip-silently rule for non-`pi` tiers, and the two hard-stop conditions with their exact error messages. Do not duplicate that procedure here.
 
 ## Step 6: Allocate starting era
 
@@ -137,13 +133,13 @@ When `STRUCTURAL_ONLY` is `false`, replace `{STRUCTURAL_ONLY_NOTE}` with the emp
 
 ## Step 8: Dispatch plan-refiner
 
+Use the `(model, cli)` pair returned by the shared `coordinator-dispatch.md` procedure (Step 5). If the procedure hard-stopped, do not dispatch — surface the error from the shared file's `## Hard-stop conditions` section to the caller, set `STATUS = failed` with reason `coordinator-dispatch: <verbatim error message>`, and skip to Step 11.
+
 ```
 subagent_run_serial { tasks: [
-  { name: "plan-refiner", agent: "plan-refiner", task: "<filled refine-plan-prompt.md>", model: "<crossProvider.standard from model-tiers.json>", cli: "<dispatch for crossProvider.standard>" }
+  { name: "plan-refiner", agent: "plan-refiner", task: "<filled refine-plan-prompt.md>", model: "<resolved model from coordinator-dispatch.md>", cli: "<resolved cli from coordinator-dispatch.md — guaranteed pi>" }
 ]}
 ```
-
-Fallback chain on dispatch failure: retry with `crossProvider.capable`, then `capable`, re-resolving `cli` from the `dispatch` map each time. If all three tiers fail, set `STATUS = failed` with reason `coordinator dispatch failed on all tiers` and skip to Step 11.
 
 ## Step 9: Parse and validate coordinator result
 
@@ -155,6 +151,22 @@ Read `results[0].finalMessage`. Parse:
 - The optional `## Structural-Only Label` block — used to record whether the run was structural-only.
 
 Validate every parsed path with `test -s <path>` (non-empty regular file). On any path validation failure, set `STATUS = failed` with reason `coordinator returned <path> but file is missing or empty` and skip to Step 11.
+
+## Step 9.5: Validate review provenance
+
+Run this validation only on `STATUS: approved` or `STATUS: issues_remaining`; skip on `STATUS: failed` (no review file is guaranteed to exist on failure).
+
+For each review file path in the `## Review Files` list parsed in Step 9, read the file and validate the first non-empty line:
+
+1. The line MUST match the regex `^\*\*Reviewer:\*\* [^/]+/[^ ]+ via [a-zA-Z0-9_-]+$` — i.e. the literal markdown `**Reviewer:**`, a single space, a `<provider>/<model>` token (provider has no `/`, model has no whitespace), the literal ` via `, then a `<cli>` token (alphanumerics / `_` / `-`).
+2. Extract `<provider>/<model>` and `<cli>` from the matched line.
+3. The extracted value MUST NOT contain the substring `inline` (case-insensitive).
+4. Read `~/.pi/agent/model-tiers.json` (re-read; do not assume Step 5's snapshot is still current). Resolve `crossProvider.capable` and `capable` to their concrete model strings, and resolve `dispatch[<provider>]` for each.
+5. `<provider>/<model>` MUST equal either the model string `crossProvider.capable` resolves to OR the model string `capable` resolves to (the two documented reviewer tiers in `refine-plan-prompt.md`'s `plan-reviewer` primary + fallback chain). `<cli>` MUST equal `dispatch[<provider>]` for that model's provider prefix.
+
+On any validation failure (missing first line, malformed format, `inline` value, or model/cli mismatch), set `STATUS = failed` with reason `review provenance validation failed at <path>: <specific check>` and skip to Step 11. Do NOT proceed to Step 10's commit gate after a validation failure.
+
+When all paths pass validation, proceed to Step 10.
 
 ## Step 10: Handle STATUS
 
@@ -228,6 +240,6 @@ The `REVIEW_PATHS` list contains every review file written during the entire `re
 ## Edge Cases
 
 - **`commit` skill not present**: stop with a clear error pointing at `agent/skills/commit/SKILL.md`.
-- **Coordinator dispatch CLI is not `pi`**: warn the user with the same wording used in `refine-code` — the coordinator needs pi orchestration tools (`subagent_run_serial`).
+- **Coordinator dispatch CLI is not `pi`**: defer to the shared `coordinator-dispatch.md` procedure. The shared file's two hard-stop conditions ("no tier resolves to `pi`" and "all `pi`-eligible tiers failed") are the only sanctioned outcomes here; the prior cross-reference to `refine-code` is removed because the shared file is the single authority for both skills. Surface the shared file's verbatim error message to the caller, set `STATUS = failed` with the verbatim error as the reason, and exit.
 - **Plan path is in `.pi/plans/done/` or another archived location**: proceed normally; era allocation still scans `.pi/plans/reviews/` keyed by `PLAN_BASENAME`.
 - **Coordinator returns paths outside `.pi/plans/reviews/`**: treat as `STATUS: failed` with reason `coordinator returned review path outside .pi/plans/reviews/`.
