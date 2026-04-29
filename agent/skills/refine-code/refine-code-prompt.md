@@ -45,6 +45,30 @@ Always pass `cli` explicitly on every subagent_run_serial task, even when it res
 
 ## Protocol
 
+### Hard rules (read first)
+
+These rules govern the entire protocol below. They are NOT edge cases; they are unconditional.
+
+1. **No inline review on coordinator-tool unavailability.** If `subagent_run_serial` is unavailable in your session — for any reason, at any iteration — you MUST emit `STATUS: failed` with reason `coordinator dispatch unavailable`, MUST NOT write any review file, and MUST NOT perform an inline review as a substitute. The calling skill (`refine-code`) is responsible for fallback decisions; you do not improvise.
+2. **No inline review on worker-dispatch exhaustion.** If every dispatch attempt for a `code-reviewer` (first-pass, hybrid re-review, or final-verification) or for a `coder` (remediator) fails — model unavailable, transport error, repeated empty results — you MUST emit `STATUS: failed` with reason `worker dispatch failed: <which worker>` and MUST NOT write any review file written after the failure. Inline-review fallback is forbidden in all cases. There is no exception for "I could just write the review myself"; that path produces silently degraded artifacts and is the failure mode this protocol exists to prevent.
+
+Both rules are duplicated as standing identity rules in `agent/agents/code-refiner.md` `## Rules`. The duplication is intentional — these rules apply unconditionally regardless of the per-invocation prompt.
+
+### Reviewer provenance stamping
+
+Every review file you write MUST begin with a `**Reviewer:**` provenance line as its first non-empty line. The format is exact:
+
+```
+**Reviewer:** <provider>/<model> via <cli>
+```
+
+- `<provider>/<model>` MUST be the EXACT model string you passed to `subagent_run_serial` for that review-pass `code-reviewer` dispatch (e.g., `openai-codex/gpt-5.5`).
+- `<cli>` MUST be the EXACT cli string you passed to `subagent_run_serial` for that same dispatch (e.g., `pi`).
+- The line is followed by a single blank line, then the reviewer's persisted output.
+- You MUST NOT emit `inline` or any synonym (`improvised`, `local`, `fallback`) as the value. The corollary — never write a review file when dispatch failed — is enforced by the Hard rules above; together those two rules make inline-stamped review files structurally impossible.
+
+Apply this stamp to every persisted review file: the versioned `<REVIEW_OUTPUT_PATH>-v<ERA>.md` (first-pass, every hybrid re-review write, the final-verification write) AND the unversioned final copy `<REVIEW_OUTPUT_PATH>.md` written on `STATUS: clean`. When you overwrite a versioned file in a later iteration, re-stamp the new first line with the model and cli used for THAT iteration's reviewer dispatch. The calling skill (`refine-code`) validates this line on every returned path before reporting success; missing, malformed, or `inline`-valued stamps will surface as a validation error to the caller.
+
 ### Iteration 1: Full Review
 
 1. **Read the review template** at `~/.pi/agent/skills/requesting-code-review/review-code-prompt.md`.
@@ -66,6 +90,7 @@ Always pass `cli` explicitly on every subagent_run_serial task, even when it res
    Read the reviewer's output from results[0].finalMessage and write it to the versioned path (step 4).
 
 4. **Write review** to versioned path: `<REVIEW_OUTPUT_PATH>-v<ERA>.md`
+   - Prepend the `**Reviewer:**` provenance line as the first non-empty line of the file (see [Reviewer provenance stamping](#reviewer-provenance-stamping)). Use the model and cli you passed to this iteration's `code-reviewer` dispatch.
    - First era starts at v1. New eras created on budget reset (see Final Verification).
 
 5. **Assess verdict:**
@@ -117,7 +142,7 @@ Always pass `cli` explicitly on every subagent_run_serial task, even when it res
 
 5. **Dispatch `code-reviewer`** with model `standard` and corresponding `cli` from the model matrix (hybrid re-reviews are scoped and cheaper).
 
-6. **Overwrite review sections** in the current versioned file; **append** to remediation log.
+6. **Overwrite review sections** in the current versioned file; **append** to remediation log. Re-stamp the first non-empty line of the file with the `**Reviewer:**` provenance line for THIS iteration's reviewer dispatch (the hybrid re-review uses `standard`, so the stamp will reflect that model and its cli — not the prior iteration's).
 
 7. **Assess and remediate** — same as iteration 1 steps 5-10.
 
@@ -132,9 +157,10 @@ When a review pass finds no Critical/Important issues (hybrid reviews converge):
    - `{DESCRIPTION}` — the Plan Goal above (same as iteration 1)
 
 2. **If clean** (no Critical/Important issues):
+   - Re-stamp the first non-empty line of the versioned file with the `**Reviewer:**` provenance line for the final-verification reviewer dispatch (always `crossProvider.capable`).
    - Write final review to the versioned file
    - Append final entry to remediation log: `**Result:** Clean after N iterations.`
-   - Copy the versioned file to the unversioned path: `<REVIEW_OUTPUT_PATH>.md`
+   - Copy the versioned file to the unversioned path: `<REVIEW_OUTPUT_PATH>.md` (the copy preserves the just-stamped `**Reviewer:**` first line, so the unversioned final copy carries the same provenance as the versioned final-verification write).
    - Report `STATUS: clean`
 
 3. **If issues found:**
