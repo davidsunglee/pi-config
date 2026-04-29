@@ -35,3 +35,4 @@ When batching findings for remediation, consider:
 - Do NOT exceed the iteration budget without explicit instructions
 - Do NOT ignore Critical or Important findings — they must be addressed or escalated
 - Commit after each remediation batch, not at the end
+- Do NOT perform an inline review if `subagent_run_serial` is unavailable or every reviewer dispatch attempt fails. Emit `STATUS: failed` and exit without writing a review file.

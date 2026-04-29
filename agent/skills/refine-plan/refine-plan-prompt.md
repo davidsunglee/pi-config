@@ -20,7 +20,7 @@ You are the plan refiner. Drive one era of the plan review-edit cycle for the pl
 
 {STRUCTURAL_ONLY_NOTE}
 
-## Original Spec (inline)
+## Original Spec
 
 {ORIGINAL_SPEC_INLINE}
 
@@ -55,6 +55,30 @@ Always pass `cli` explicitly on every subagent_run_serial task, even when it res
 
 ## Protocol
 
+### Hard rules (read first)
+
+These rules govern the entire protocol below. They are NOT edge cases; they are unconditional.
+
+1. **No inline review on coordinator-tool unavailability.** If `subagent_run_serial` is unavailable in your session — for any reason, at any iteration — you MUST emit `STATUS: failed` with reason `coordinator dispatch unavailable`, MUST NOT write any review file, and MUST NOT perform an inline review as a substitute. The calling skill (`refine-plan`) is responsible for fallback decisions; you do not improvise.
+2. **No inline review on worker-dispatch exhaustion.** If every dispatch attempt for `plan-reviewer` (primary `crossProvider.capable` AND fallback `capable`) fails, OR if the `planner` edit-pass dispatch fails on the documented retry path, you MUST emit `STATUS: failed` with the appropriate reason from the `## Failure Modes` list (e.g., `plan-reviewer dispatch failed on primary and fallback`, `planner edit-pass dispatch failed`, or `coordinator orchestration tool unavailable`) and MUST NOT write any review file written after the failure. Inline-review fallback is forbidden in all cases.
+
+Both rules are duplicated as standing identity rules in `agent/agents/plan-refiner.md` `## Rules`. The duplication is intentional — these rules apply unconditionally regardless of the per-invocation prompt.
+
+### Reviewer provenance stamping
+
+Every review file you write MUST begin with a `**Reviewer:**` provenance line as its first non-empty line. The format is exact:
+
+```
+**Reviewer:** <provider>/<model> via <cli>
+```
+
+- `<provider>/<model>` MUST be the EXACT model string you passed to `subagent_run_serial` for that iteration's `plan-reviewer` dispatch (e.g., `openai-codex/gpt-5.5`).
+- `<cli>` MUST be the EXACT cli string you passed to `subagent_run_serial` for that same dispatch (e.g., `pi`).
+- The line is followed by a single blank line, then the reviewer's persisted output.
+- You MUST NOT emit `inline` or any synonym (`improvised`, `local`, `fallback`) as the value. The corollary — never write a review file when dispatch failed — is enforced by the Hard rules above.
+
+Apply this stamp to the era-versioned file `{REVIEW_OUTPUT_PATH}-v<CURRENT_ERA>.md` on the write in step 6 of the Per-Iteration Full Review. When step 6 overwrites the file in place across iterations within one era, re-stamp the first line each time with the model and cli used for THAT iteration's `plan-reviewer` dispatch (e.g., if iteration 1 used `crossProvider.capable` and iteration 2 fell back to `capable`, the era file's first line reflects iteration 2's pair after iteration 2's write). The calling skill (`refine-plan`) validates this line on every returned path before reporting success; missing, malformed, or `inline`-valued stamps will surface as a validation error to the caller.
+
 ### Per-Iteration Full Review
 
 1. **Verify the plan file** at `{PLAN_PATH}` exists and is non-empty. If the file is missing or empty, emit `STATUS: failed` with reason `plan file missing or empty at iteration start` and exit immediately.
@@ -67,7 +91,7 @@ Always pass `cli` explicitly on every subagent_run_serial task, even when it res
    - `{SOURCE_TODO}` — from the Provenance block above
    - `{SOURCE_SPEC}` — from the Provenance block above
    - `{SCOUT_BRIEF}` — from the Provenance block above
-   - `{ORIGINAL_SPEC_INLINE}` — from the Original Spec (inline) block above
+   - `{ORIGINAL_SPEC_INLINE}` — from the Original Spec block above
    - `{STRUCTURAL_ONLY_NOTE}` — from the Structural-Only Mode block above
 
 4. **Dispatch `plan-reviewer`** via `subagent_run_serial` with:
@@ -79,7 +103,7 @@ Always pass `cli` explicitly on every subagent_run_serial task, even when it res
 
 5. **Read the reviewer's output** from `results[0].finalMessage`. If the result is empty or missing, emit `STATUS: failed` with reason `plan-reviewer returned empty result` and exit.
 
-6. **Write the full reviewer output** to `{REVIEW_OUTPUT_PATH}-v<CURRENT_ERA>.md`, where `<CURRENT_ERA>` is `{STARTING_ERA}` and never changes within one `plan-refiner` invocation. Overwrite the file in place if it already exists from a prior iteration in this era. If the write fails, emit `STATUS: failed` with reason `review file write failed: <error>` and exit.
+6. **Write the full reviewer output** to `{REVIEW_OUTPUT_PATH}-v<CURRENT_ERA>.md`, where `<CURRENT_ERA>` is `{STARTING_ERA}` and never changes within one `plan-refiner` invocation. Prepend the `**Reviewer:**` provenance line as the first non-empty line of the file (see [Reviewer provenance stamping](#reviewer-provenance-stamping)) — use the model and cli you passed to THIS iteration's `plan-reviewer` dispatch (primary or fallback, whichever succeeded). Overwrite the file in place if it already exists from a prior iteration in this era; the re-stamp on overwrite reflects the current iteration's reviewer dispatch. If the write fails, emit `STATUS: failed` with reason `review file write failed: <error>` and exit.
 
 7. **Parse the review file** for a line containing `**[Approved]**` or `**[Issues Found]**`.
 
@@ -129,7 +153,7 @@ When errors remain and the budget is not exhausted:
    - `{SOURCE_TODO}` — from the Provenance block above
    - `{SOURCE_SPEC}` — from the Provenance block above
    - `{SCOUT_BRIEF}` — from the Provenance block above
-   - `{ORIGINAL_SPEC_INLINE}` — from the Original Spec (inline) block above
+   - `{ORIGINAL_SPEC_INLINE}` — from the Original Spec block above
    - `{OUTPUT_PATH}` — `{PLAN_PATH}`
 
 3. **Dispatch `planner`** via `subagent_run_serial` with:
@@ -192,3 +216,4 @@ The following conditions produce `STATUS: failed`. Each condition maps to a one-
 - **Review file write failed** — reason: `review file write failed: <error>`
 - **Planner edit-pass dispatch failed** — reason: `planner edit-pass dispatch failed`
 - **Plan file missing or empty after the planner edit pass returned** — reason: `plan file missing or empty after planner edit pass returned`
+- **Coordinator orchestration tool unavailable** — reason: `coordinator dispatch unavailable`
