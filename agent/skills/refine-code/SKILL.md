@@ -69,20 +69,23 @@ subagent_run_serial { tasks: [
 
 ## Step 5: Handle code-refiner result
 
-Parse `results[0].finalMessage` from the code-refiner for the STATUS line:
+Parse `results[0].finalMessage` from the code-refiner for the STATUS line and stash the parsed outcome locally. **Do not report success to the caller in this step** — caller-facing success reporting is deferred until Step 6's provenance validation passes.
+
+Determine the stashed outcome:
 
 **`STATUS: clean`**
-- Report to caller: review passed, include iteration count and review file path
-- No action needed
+- Stash: review passed, iteration count, and review file path — to be reported to the caller only after Step 6 succeeds.
 
 **`STATUS: max_iterations_reached`**
-- Present remaining findings to caller
-- Offer choices:
+- Stash: remaining findings and the choice menu below — to be presented to the caller only after Step 6 succeeds.
+- Choices to offer (after Step 6 passes):
   - **(a) Keep iterating** — re-invoke this skill from Step 3 with the same inputs but `HEAD_SHA` updated to current HEAD (budget resets, new cycle)
   - **(b) Proceed with issues** — caller continues with known issues noted
   - **(c) Stop execution** — caller halts
 
-The caller (execute-plan or user) makes the decision. This skill does not auto-continue.
+For any other outcome (dispatch failure, unexpected status), surface it directly to the caller per the Edge Cases section; Step 6 is skipped.
+
+The caller (execute-plan or user) makes the decision. This skill does not auto-continue. Proceed to Step 6 before reporting anything to the caller.
 
 ## Step 6: Validate review provenance
 
@@ -110,7 +113,7 @@ refine-code: review provenance validation failed at <path>: <specific check> —
 
 Do NOT silently report `STATUS: clean` or `STATUS: max_iterations_reached` after a validation failure; the caller sees the validation error in place of the success status. Use a precise `<specific check>` label such as `first non-empty line missing`, `format mismatch`, `inline-substring forbidden`, `model/cli mismatch (expected <X> got <Y>)`.
 
-When all paths pass validation, proceed to report the original `STATUS:` to the caller as Step 5 already specified.
+When all paths pass validation, proceed to report the stashed outcome from Step 5 to the caller — `STATUS: clean` with iteration count and review file path, or `STATUS: max_iterations_reached` with remaining findings and the (a)/(b)/(c) choice menu. This is the only point at which Step 5's success outcome may reach the caller.
 
 ## Edge Cases
 
