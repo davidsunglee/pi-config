@@ -39,11 +39,7 @@ The model matrix provides tier mappings used by the coordinator:
 
 ### Dispatch resolution
 
-After reading the model matrix, resolve the dispatch target for the `code-refiner` call from `crossProvider.standard` using the `dispatch` map from `model-tiers.json`. See execute-plan Step 6 for the full resolution algorithm.
-
-The coordinator must run through a CLI that exposes pi orchestration tools (currently `openai-codex` → `pi` in `model-tiers.json`), so do not use top-level `standard` for this dispatch.
-
-The `code-refiner` receives the full model matrix (including the `dispatch` map) as `{MODEL_MATRIX}` and resolves dispatch for its own subagent calls internally — see `refine-code-prompt.md`.
+Read [agent/skills/_shared/coordinator-dispatch.md](../_shared/coordinator-dispatch.md) and follow it to resolve the coordinator `(model, cli)` pair before Step 4. The shared file is the single authority for the four-tier chain, the skip-silently rule for non-`pi` tiers, and the two hard-stop conditions with their exact error messages. Do not duplicate that procedure here.
 
 If the file doesn't exist or is unreadable, stop with: "refine-code requires ~/.pi/agent/model-tiers.json — see model matrix configuration."
 
@@ -63,9 +59,11 @@ Fill placeholders:
 
 ## Step 4: Dispatch code-refiner
 
+Use the `(model, cli)` pair returned by the shared `coordinator-dispatch.md` procedure (Step 2). If the procedure hard-stopped, do not dispatch — surface the error from the shared file's `## Hard-stop conditions` section to the caller and exit.
+
 ```
 subagent_run_serial { tasks: [
-  { name: "code-refiner", agent: "code-refiner", task: "<filled refine-code-prompt.md>", model: "<crossProvider.standard from model-tiers.json>", cli: "<dispatch for crossProvider.standard>" }
+  { name: "code-refiner", agent: "code-refiner", task: "<filled refine-code-prompt.md>", model: "<resolved model from coordinator-dispatch.md>", cli: "<resolved cli from coordinator-dispatch.md — guaranteed pi>" }
 ]}
 ```
 
@@ -86,8 +84,36 @@ Parse `results[0].finalMessage` from the code-refiner for the STATUS line:
 
 The caller (execute-plan or user) makes the decision. This skill does not auto-continue.
 
+## Step 6: Validate review provenance
+
+Run this validation only on `STATUS: clean` or `STATUS: max_iterations_reached`; skip on any other outcome.
+
+Build the list of review file paths to validate:
+
+- The path the coordinator reported in its `## Review File` block (the latest versioned `<REVIEW_OUTPUT_PATH>-v<ERA>.md`).
+- On `STATUS: clean` only: also include the unversioned final copy at `<REVIEW_OUTPUT_PATH>.md` (Step 1's `REVIEW_OUTPUT_PATH` plus `.md`).
+
+For each path, read the file and validate the first non-empty line:
+
+1. The line MUST match the regex `^\*\*Reviewer:\*\* [^/]+/[^ ]+ via [a-zA-Z0-9_-]+$` — i.e. the literal markdown `**Reviewer:**`, a single space, a `<provider>/<model>` token (provider has no `/`, model has no whitespace), the literal ` via `, then a `<cli>` token (alphanumerics / `_` / `-`).
+2. Extract `<provider>/<model>` and `<cli>` from the matched line.
+3. The extracted value MUST NOT contain the substring `inline` (case-insensitive).
+4. Read `~/.pi/agent/model-tiers.json` (re-read; do not assume Step 2's snapshot is still current). Resolve `crossProvider.capable` and `standard` to their concrete model strings, and resolve `dispatch[<provider>]` for each.
+5. On `STATUS: clean`: `<provider>/<model>` MUST equal the model string `crossProvider.capable` resolves to, and `<cli>` MUST equal `dispatch[<provider>]` for that model's provider prefix. The final-verification pass always runs at `crossProvider.capable` and is the last write to the file.
+6. On `STATUS: max_iterations_reached`: `<provider>/<model>` MUST equal either the model string `crossProvider.capable` resolves to OR the model string `standard` resolves to (the two documented reviewer tiers in `refine-code-prompt.md`). `<cli>` MUST equal `dispatch[<provider>]` for that model's provider prefix.
+
+On any validation failure (missing first line, malformed format, `inline` value, or model/cli mismatch), surface to the caller a single error of the form:
+
+```
+refine-code: review provenance validation failed at <path>: <specific check> — <observed value or "missing">.
+```
+
+Do NOT silently report `STATUS: clean` or `STATUS: max_iterations_reached` after a validation failure; the caller sees the validation error in place of the success status. Use a precise `<specific check>` label such as `first non-empty line missing`, `format mismatch`, `inline-substring forbidden`, `model/cli mismatch (expected <X> got <Y>)`.
+
+When all paths pass validation, proceed to report the original `STATUS:` to the caller as Step 5 already specified.
+
 ## Edge Cases
 
 - **No changes in range** (`BASE_SHA` equals `HEAD_SHA`): Stop with "No changes to review."
-- **Code-refiner fails to dispatch** (model unavailable): Retry with `crossProvider.capable` from the model matrix (re-resolving dispatch for the fallback model). If that also fails, stop with error. Do not fall back to top-level `capable` for the coordinator dispatch; it may route to a CLI without pi orchestration tools.
+- **Code-refiner fails to dispatch** (model unavailable, transport error, no `pi` tier resolves): defer to the shared `coordinator-dispatch.md` procedure. The shared file's two hard-stop conditions ("no tier resolves to `pi`" and "all `pi`-eligible tiers failed") are the only sanctioned outcomes here; do NOT declare a separate two-tier or three-tier fallback chain in this skill. Surface the shared file's verbatim error message to the caller and exit without dispatch.
 - **Empty requirements**: Review is purely quality-focused — no spec compliance check. The code-refiner handles this (it passes empty `{PLAN_CONTENTS}` through to the reviewer).
