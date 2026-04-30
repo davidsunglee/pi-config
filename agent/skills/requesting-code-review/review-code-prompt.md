@@ -110,6 +110,26 @@ git diff {BASE_SHA}..{HEAD_SHA}
 - Be vague ("improve error handling")
 - Avoid giving a clear verdict
 
+## Output Artifact Contract
+
+This section operationalizes your standing `## Output Artifact Contract` rule with the per-invocation values supplied by the refiner.
+
+- **Designated output path:** `{REVIEW_OUTPUT_PATH}`
+- **Verbatim provenance first line:** `{REVIEWER_PROVENANCE}`
+
+When `{REVIEW_OUTPUT_PATH}` is non-empty:
+
+1. Write the full review (Strengths, Issues by severity, Recommendations, Assessment with the "Ready to merge" verdict) to `{REVIEW_OUTPUT_PATH}` (absolute path).
+2. The first non-empty line of the file MUST be exactly `{REVIEWER_PROVENANCE}` — copy it verbatim. Do not normalize whitespace, do not add backticks, do not insert any other content above it.
+3. Follow the provenance line with a single blank line, then the review body in the format defined by `## Output Format` above.
+4. Perform exactly one write per dispatch.
+5. End your final assistant message with exactly one anchored line on its own line, as the very last line of your output: `REVIEW_ARTIFACT: <absolute path>` where `<absolute path>` is character-for-character identical to `{REVIEW_OUTPUT_PATH}`.
+6. Do not emit any other structured markers; the on-disk file is the sole source of truth for the refiner.
+
+When `{REVIEW_OUTPUT_PATH}` is empty (standalone use):
+
+Output your review as your final assistant message in the format defined by `## Output Format` above. Do not write to disk. Do not emit a `REVIEW_ARTIFACT:` marker.
+
 ## Example Output
 
 ```
