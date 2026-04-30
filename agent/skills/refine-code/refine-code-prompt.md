@@ -72,9 +72,17 @@ Every persisted review file MUST begin with a `**Reviewer:**` provenance line as
 
 1. **Construct** the verbatim `**Reviewer:** <provider>/<model> via <cli>` line at dispatch time, using the exact `model` and `cli` values you are passing to THIS pass's `subagent_run_serial` task. Re-construct per pass — first-pass uses `crossProvider.capable`, hybrid re-review uses `standard`, final-verification uses `crossProvider.capable`. Each constructed line uses that pass's specific pair.
 2. **Embed** that line as `{REVIEWER_PROVENANCE}` in the filled review-code-prompt.md, and embed the absolute era-versioned path as `{REVIEW_OUTPUT_PATH}`. Use the SAME absolute path across first-pass, hybrid re-reviews, and final-verification within one era — the file is overwritten in place by each successive reviewer.
-3. **Validate** the on-disk first non-empty line on read-back as a fail-fast check (see Iteration 1 Step 3 below). The check is: line matches the regex `^\*\*Reviewer:\*\* [^/]+/[^ ]+ via [a-zA-Z0-9_-]+$`, and the value does NOT contain the substring `inline` (case-insensitive). The downstream `refine-code/SKILL.md` Step 6 validation runs again on the returned path with the same regex and reason labels — your fail-fast check is additive, not a replacement.
+3. **Validate** the on-disk first non-empty line on read-back as a fail-fast check (see Iteration 1 Step 3 below). The check is: the line is BYTE-EQUAL to the EXACT `{REVIEWER_PROVENANCE}` string you supplied for THIS dispatch — not merely regex-conformant. As defense-in-depth, the line must additionally match the regex `^\*\*Reviewer:\*\* [^/]+/[^ ]+ via [a-zA-Z0-9_-]+$` and must NOT contain the substring `inline` (case-insensitive), but the primary, authoritative check is exact equality with the supplied `{REVIEWER_PROVENANCE}`. The downstream `refine-code/SKILL.md` Step 6 validation runs again on the returned path with the same regex and reason labels — your fail-fast check is additive (and stricter, since it pins to your supplied value), not a replacement.
 
 Apply this contract to first-pass full reviews, hybrid re-reviews, and final-verification reviews — every reviewer dispatch in this protocol uses it.
+
+### Era handling
+
+An "era" is one full pass of the loop (Iteration 1 → hybrid re-reviews → Final Verification) keyed to a single versioned review file path. Era handling is concrete:
+
+- **First era starts at `ERA=1`.** The first reviewer dispatch in this protocol uses the path `{WORKING_DIR}/{REVIEW_OUTPUT_PATH}-v1.md`. Iteration 1, all hybrid re-reviews within this era, and Final Verification all reuse this same `v1` path — the reviewer overwrites the file in place each pass.
+- **Subsequent eras increment `ERA` only when Final Verification surfaces Critical/Important issues.** When Final Verification finds issues, set `ERA = ERA + 1` and re-enter the remediation loop; the very next reviewer dispatch (Iteration 1 of the new era) is given the next versioned path `{WORKING_DIR}/{REVIEW_OUTPUT_PATH}-v<ERA>.md` (e.g., `-v2.md`, `-v3.md`). Within each new era the same overwrite-in-place rule applies.
+- **The coordinator never creates the versioned review file directly.** New versioned files come into existence solely as a result of the next reviewer dispatch (which writes to the new path you supply as `{REVIEW_OUTPUT_PATH}`). You compute and pass the next `-v<ERA>.md` path; the reviewer creates the file on disk.
 
 ### Iteration 1: Full Review
 
@@ -101,7 +109,7 @@ Apply this contract to first-pass full reviews, hybrid re-reviews, and final-ver
    - **3a. Marker extraction.** Find the LAST line in `finalMessage` matching the anchored regex `^REVIEW_ARTIFACT: (.+)$`. If no such line exists, emit `STATUS: failed` with reason `reviewer response missing REVIEW_ARTIFACT marker` and exit. Capture the captured group as `<reviewer_path>`.
    - **3b. Path-equality check.** Compare `<reviewer_path>` (string-equal) to the absolute path you supplied as `{REVIEW_OUTPUT_PATH}` in Step 2. If they differ, emit `STATUS: failed` with reason `reviewer artifact path mismatch: expected <expected>, got <reviewer_path>` and exit.
    - **3c. File-existence check.** Read `<reviewer_path>` from disk. If the file does not exist, OR the file is empty (zero bytes, or only whitespace), emit `STATUS: failed` with reason `reviewer artifact missing or empty at <reviewer_path>` and exit.
-   - **3d. On-disk first-line provenance check.** Find the first non-empty line of `<reviewer_path>`. Validate two things: (i) the line matches the regex `^\*\*Reviewer:\*\* [^/]+/[^ ]+ via [a-zA-Z0-9_-]+$`; (ii) the matched value does NOT contain the substring `inline` (case-insensitive). On either failure, emit `STATUS: failed` with reason `reviewer artifact provenance malformed at <reviewer_path>: <specific check>` and exit.
+   - **3d. On-disk first-line provenance check.** Find the first non-empty line of `<reviewer_path>`. Validate three things, in order: (i) the line is BYTE-EQUAL to the EXACT `{REVIEWER_PROVENANCE}` string you supplied to the reviewer in Step 2 for THIS dispatch (this is the primary check — a generic regex match is insufficient); (ii) as defense-in-depth, the line matches the regex `^\*\*Reviewer:\*\* [^/]+/[^ ]+ via [a-zA-Z0-9_-]+$`; (iii) the line does NOT contain the substring `inline` (case-insensitive). On any of the three failing, emit `STATUS: failed` with reason `reviewer artifact provenance malformed at <reviewer_path>: <specific check>` (where `<specific check>` is one of `does not match supplied REVIEWER_PROVENANCE`, `format mismatch`, or `inline-substring forbidden`) and exit.
    - **3e. Read the file as the authoritative review.** On all checks passing, treat the on-disk file content as the authoritative review for verdict assessment, batching, remediator dispatch, and (downstream) hybrid re-review `{PREVIOUS_FINDINGS}` construction. Do NOT use `finalMessage` content beyond the marker line.
 
    Do NOT improvise the review file or perform an inline review on any failure above (Hard rule 3).
@@ -184,9 +192,9 @@ When a review pass finds no Critical/Important issues (hybrid reviews converge):
    - Report `STATUS: clean`. Return the era-versioned path as the `## Review File` in your output. Do NOT produce an unversioned copy at `<REVIEW_OUTPUT_PATH>.md` — that legacy copy is dropped under this contract.
 
 3. **If issues found:**
-   - **Reset the iteration budget** — start a new era
-   - Create a new versioned file (`v2`, `v3`, etc.)
-   - Re-enter the remediation loop from Iteration 1 step 5 (assess + remediate)
+   - **Reset the iteration budget** — start a new era by incrementing `ERA = ERA + 1`
+   - Compute the next versioned path `{WORKING_DIR}/{REVIEW_OUTPUT_PATH}-v<ERA>.md` (e.g. `-v2.md`, `-v3.md`). Do NOT create or write to this file yourself — the next reviewer dispatch (Iteration 1 of the new era) will create it by writing to the path you supply as `{REVIEW_OUTPUT_PATH}`.
+   - Re-enter the remediation loop from Iteration 1 step 5 (assess + remediate). The next `code-reviewer` dispatch in the new era is given the new `-v<ERA>.md` path as `{REVIEW_OUTPUT_PATH}`.
 
 ### On Budget Exhaustion
 
