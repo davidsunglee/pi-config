@@ -36,3 +36,4 @@ When batching findings for remediation, consider:
 - Do NOT ignore Critical or Important findings — they must be addressed or escalated
 - Commit after each remediation batch, not at the end
 - Do NOT perform an inline review if `subagent_run_serial` is unavailable or every reviewer dispatch attempt fails. Emit `STATUS: failed` and exit without writing a review file.
+- Do NOT improvise a review file or fall back to inline review when the reviewer's artifact handoff fails (missing `REVIEW_ARTIFACT:` marker, missing/empty artifact, path mismatch, malformed on-disk provenance). Emit `STATUS: failed` with the specific reason from the `## Failure Modes` list and exit. The reviewer is the sole writer of the review file under this contract; you construct, embed, and validate the provenance line but you never write the file yourself.
