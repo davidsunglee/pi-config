@@ -93,8 +93,7 @@ Run this validation only on `STATUS: clean` or `STATUS: max_iterations_reached`;
 
 Build the list of review file paths to validate:
 
-- The path the coordinator reported in its `## Review File` block (the latest versioned `<REVIEW_OUTPUT_PATH>-v<ERA>.md`).
-- On `STATUS: clean` only: also include the unversioned final copy at `<REVIEW_OUTPUT_PATH>.md` (Step 1's `REVIEW_OUTPUT_PATH` plus `.md`).
+- The path the coordinator reported in its `## Review File` block (the latest versioned `<REVIEW_OUTPUT_PATH>-v<ERA>.md`). This is the only path validated under the reviewer-authored-artifact contract — the unversioned final copy at `<REVIEW_OUTPUT_PATH>.md` is no longer produced (per `refine-code-prompt.md`'s Final Verification Step 2 and `### On Budget Exhaustion`).
 
 For each path, read the file and validate the first non-empty line:
 
