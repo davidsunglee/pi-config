@@ -61,12 +61,13 @@ These rules govern the entire protocol below. They are NOT edge cases; they are 
 
 1. **No inline review on coordinator-tool unavailability.** If `subagent_run_serial` is unavailable in your session — for any reason, at any iteration — you MUST emit `STATUS: failed` with reason `coordinator dispatch unavailable`, MUST NOT write any review file, and MUST NOT perform an inline review as a substitute. The calling skill (`refine-plan`) is responsible for fallback decisions; you do not improvise.
 2. **No inline review on worker-dispatch exhaustion.** If every dispatch attempt for `plan-reviewer` (primary `crossProvider.capable` AND fallback `capable`) fails, OR if the `planner` edit-pass dispatch fails on the documented retry path, you MUST emit `STATUS: failed` with the appropriate reason from the `## Failure Modes` list (e.g., `plan-reviewer dispatch failed on primary and fallback`, `planner edit-pass dispatch failed`, or `coordinator orchestration tool unavailable`) and MUST NOT write any review file written after the failure. Inline-review fallback is forbidden in all cases.
+3. **No improvised review file or inline review on artifact-handoff failure.** If the `plan-reviewer`'s response is missing the `REVIEW_ARTIFACT:` marker, OR the artifact file is missing/empty/path-mismatched, OR the on-disk first-line provenance is malformed, you MUST emit `STATUS: failed` with the specific reason from the `## Failure Modes` list (`reviewer response missing REVIEW_ARTIFACT marker`, `reviewer artifact missing or empty at <path>`, `reviewer artifact path mismatch: expected <X>, got <Y>`, or `reviewer artifact provenance malformed at <path>: <specific check>`) and exit. You MUST NOT improvise the review file or fall back to inline review. This mirrors the existing "no inline review on dispatch failure" rules above.
 
-Both rules are duplicated as standing identity rules in `agent/agents/plan-refiner.md` `## Rules`. The duplication is intentional — these rules apply unconditionally regardless of the per-invocation prompt.
+All three rules are duplicated as standing identity rules in `agent/agents/plan-refiner.md` `## Rules`. The duplication is intentional — these rules apply unconditionally regardless of the per-invocation prompt.
 
 ### Reviewer provenance stamping
 
-Every review file you write MUST begin with a `**Reviewer:**` provenance line as its first non-empty line. The format is exact:
+Every review file persisted in this loop MUST begin with a `**Reviewer:**` provenance line as its first non-empty line. The format is exact:
 
 ```
 **Reviewer:** <provider>/<model> via <cli>
@@ -74,10 +75,16 @@ Every review file you write MUST begin with a `**Reviewer:**` provenance line as
 
 - `<provider>/<model>` MUST be the EXACT model string you passed to `subagent_run_serial` for that iteration's `plan-reviewer` dispatch (e.g., `openai-codex/gpt-5.5`).
 - `<cli>` MUST be the EXACT cli string you passed to `subagent_run_serial` for that same dispatch (e.g., `pi`).
-- The line is followed by a single blank line, then the reviewer's persisted output.
-- You MUST NOT emit `inline` or any synonym (`improvised`, `local`, `fallback`) as the value. The corollary — never write a review file when dispatch failed — is enforced by the Hard rules above.
+- The line is followed by a single blank line, then the review body.
+- The value MUST NOT contain `inline` or any synonym (`improvised`, `local`, `fallback`).
 
-Apply this stamp to the era-versioned file `{REVIEW_OUTPUT_PATH}-v<CURRENT_ERA>.md` on the write in step 6 of the Per-Iteration Full Review. When step 6 overwrites the file in place across iterations within one era, re-stamp the first line each time with the model and cli used for THAT iteration's `plan-reviewer` dispatch (e.g., if iteration 1 used `crossProvider.capable` and iteration 2 fell back to `capable`, the era file's first line reflects iteration 2's pair after iteration 2's write). The calling skill (`refine-plan`) validates this line on every returned path before reporting success; missing, malformed, or `inline`-valued stamps will surface as a validation error to the caller.
+**You no longer write the review file.** The reviewer writes it, using the verbatim provenance line you supply in its task prompt as `{REVIEWER_PROVENANCE}` and the absolute output path you supply as `{REVIEW_OUTPUT_PATH}`. Your role is to:
+
+1. **Construct** the verbatim `**Reviewer:** <provider>/<model> via <cli>` line at dispatch time, using the exact `model` and `cli` values you are passing to THIS iteration's `subagent_run_serial` task. Re-construct the line per iteration — if iteration 1 used `crossProvider.capable` and iteration 2 fell back to `capable`, iteration 2's line uses iteration 2's pair.
+2. **Embed** that line as `{REVIEWER_PROVENANCE}` in the filled review-plan-prompt.md, and embed the absolute era-versioned path as `{REVIEW_OUTPUT_PATH}` (see Per-Iteration Full Review Step 3 below for the path-construction rule).
+3. **Validate** the on-disk first non-empty line on read-back (Per-Iteration Full Review Step 5 below), as a fail-fast check. The check is: line matches the regex `^\*\*Reviewer:\*\* [^/]+/[^ ]+ via [a-zA-Z0-9_-]+$`, and the value does NOT contain the substring `inline` (case-insensitive). The downstream `refine-plan/SKILL.md` Step 9.5 validation runs again on the returned path with the same regex and reason labels — your fail-fast check is additive, not a replacement.
+
+When the file is overwritten in place across iterations within one era, the reviewer's fresh write replaces the prior first line with iteration N's provenance; you supply iteration N's `{REVIEWER_PROVENANCE}` afresh per iteration.
 
 ### Per-Iteration Full Review
 
@@ -93,6 +100,8 @@ Apply this stamp to the era-versioned file `{REVIEW_OUTPUT_PATH}-v<CURRENT_ERA>.
    - `{SCOUT_BRIEF}` — from the Provenance block above
    - `{ORIGINAL_SPEC_INLINE}` — from the Original Spec block above
    - `{STRUCTURAL_ONLY_NOTE}` — from the Structural-Only Mode block above
+   - `{REVIEW_OUTPUT_PATH}` — the absolute path `{WORKING_DIR}/{REVIEW_OUTPUT_PATH}-v<CURRENT_ERA>.md` (concatenate `{WORKING_DIR}` and the relative review-output base path supplied above, then append `-v<CURRENT_ERA>.md`). Use the SAME path each iteration in this era — the file is overwritten in place by the reviewer.
+   - `{REVIEWER_PROVENANCE}` — the verbatim line `**Reviewer:** <provider>/<model> via <cli>` constructed from the EXACT `model` and `cli` you will pass to THIS iteration's `subagent_run_serial` task in Step 4. Reconstruct per iteration if the model or cli changes (e.g., primary → fallback).
 
 4. **Dispatch `plan-reviewer`** via `subagent_run_serial` with:
    - `model: <crossProvider.capable from model matrix>`
@@ -101,27 +110,33 @@ Apply this stamp to the era-versioned file `{REVIEW_OUTPUT_PATH}-v<CURRENT_ERA>.
 
    On dispatch error, retry **once** with `model: <capable>` and its corresponding dispatch CLI. If both fail, emit `STATUS: failed` with reason `plan-reviewer dispatch failed on primary and fallback` and exit.
 
-5. **Read the reviewer's output** from `results[0].finalMessage`. If the result is empty or missing, emit `STATUS: failed` with reason `plan-reviewer returned empty result` and exit.
+5. **Extract and validate the reviewer's artifact handoff.** Read `results[0].finalMessage`. Perform these steps in order, each producing its own `STATUS: failed` reason on failure:
 
-6. **Write the full reviewer output** to `{REVIEW_OUTPUT_PATH}-v<CURRENT_ERA>.md`, where `<CURRENT_ERA>` is `{STARTING_ERA}` and never changes within one `plan-refiner` invocation. Prepend the `**Reviewer:**` provenance line as the first non-empty line of the file (see [Reviewer provenance stamping](#reviewer-provenance-stamping)) — use the model and cli you passed to THIS iteration's `plan-reviewer` dispatch (primary or fallback, whichever succeeded). Overwrite the file in place if it already exists from a prior iteration in this era; the re-stamp on overwrite reflects the current iteration's reviewer dispatch. If the write fails, emit `STATUS: failed` with reason `review file write failed: <error>` and exit.
+   - **5a. Marker extraction.** Find the LAST line in `finalMessage` matching the anchored regex `^REVIEW_ARTIFACT: (.+)$`. If no such line exists, emit `STATUS: failed` with reason `reviewer response missing REVIEW_ARTIFACT marker` and exit. Capture the captured group as `<reviewer_path>`.
+   - **5b. Path-equality check.** Compare `<reviewer_path>` (string-equal) to the absolute path you supplied as `{REVIEW_OUTPUT_PATH}` in Step 3. If they differ, emit `STATUS: failed` with reason `reviewer artifact path mismatch: expected <expected>, got <reviewer_path>` (substituting the supplied path for `<expected>`) and exit.
+   - **5c. File-existence check.** Read `<reviewer_path>` from disk. If the file does not exist, OR the file is empty (zero bytes, or only whitespace), emit `STATUS: failed` with reason `reviewer artifact missing or empty at <reviewer_path>` and exit.
+   - **5d. On-disk first-line provenance check.** Find the first non-empty line of `<reviewer_path>`. Validate two things: (i) the line matches the regex `^\*\*Reviewer:\*\* [^/]+/[^ ]+ via [a-zA-Z0-9_-]+$`; (ii) the matched value does NOT contain the substring `inline` (case-insensitive). On either failure, emit `STATUS: failed` with reason `reviewer artifact provenance malformed at <reviewer_path>: <specific check>` (substituting `format mismatch` or `inline-substring forbidden` for `<specific check>`) and exit.
+   - **5e. Read the file as the authoritative review.** On all checks passing, treat the on-disk file content as the authoritative review for verdict parsing, severity counting, planner-edit-pass `{REVIEW_FINDINGS}` construction, and the `## Review Notes` append. Do NOT use `finalMessage` content beyond the marker line.
 
-7. **Parse the review file** for a line containing `**[Approved]**` or `**[Issues Found]**`.
+   Do NOT improvise the review file or perform an inline review on any failure above (Hard rule 3).
 
-8. **Count findings by severity** — count Error, Warning, and Suggestion findings from the review (severity tags appear per the `review-plan-prompt.md` Output Format).
+6. **Parse the review file** for a line containing `**[Approved]**` or `**[Issues Found]**`.
 
-9. **If `Errors == 0`** (regardless of whether the verdict label is `[Approved]` or `[Issues Found]`):
+7. **Count findings by severity** — count Error, Warning, and Suggestion findings from the review (severity tags appear per the `review-plan-prompt.md` Output Format).
+
+8. **If `Errors == 0`** (regardless of whether the verdict label is `[Approved]` or `[Issues Found]`):
    - Append warnings and suggestions to the plan as a `## Review Notes` section using the exact format documented in [Review Notes Append Format](#review-notes-append-format) below.
    - Emit `STATUS: approved` with the summary block and exit.
 
    Warnings and suggestions are informational only and never force a planner edit pass. A `[Issues Found]` review with zero Errors is treated as approved — approval means "no errors remain."
 
-10. **If `Errors > 0` and the current iteration count is less than `{MAX_ITERATIONS}`**: continue to the [Planner Edit Pass](#planner-edit-pass).
+9. **If `Errors > 0` and the current iteration count is less than `{MAX_ITERATIONS}`**: continue to the [Planner Edit Pass](#planner-edit-pass).
 
-11. **Otherwise** (`Errors > 0` and budget exhausted): emit `STATUS: issues_remaining` with the summary block and exit.
+10. **Otherwise** (`Errors > 0` and budget exhausted): emit `STATUS: issues_remaining` with the summary block and exit.
 
 ### Review Notes Append Format
 
-When the approved path is taken (step 9), append the following markdown to the end of the plan file. The leading blank line is required to separate from any prior content. The section must be appended at the end of the file, not inserted elsewhere.
+When the approved path is taken (step 8), append the following markdown to the end of the plan file. The leading blank line is required to separate from any prior content. The section must be appended at the end of the file, not inserted elsewhere.
 
 If zero warnings and zero suggestions exist on the approved path, do **not** append a `## Review Notes` section at all.
 
@@ -147,7 +162,7 @@ When errors remain and the budget is not exhausted:
 1. **Read the edit template** at `~/.pi/agent/skills/generate-plan/edit-plan-prompt.md`.
 
 2. **Fill placeholders** in the edit template:
-   - `{REVIEW_FINDINGS}` — the full text of all Error-severity findings concatenated from the review file
+   - `{REVIEW_FINDINGS}` — the full text of all Error-severity findings concatenated from the on-disk review artifact (read in Per-Iteration Full Review Step 5e)
    - `{PLAN_ARTIFACT}` — `Plan artifact: {PLAN_PATH}`
    - `{TASK_ARTIFACT}` — from the Provenance block above
    - `{SOURCE_TODO}` — from the Provenance block above
@@ -199,10 +214,10 @@ This run was structural-only — no original spec/todo coverage was checked.
 
 On `STATUS: approved` or `STATUS: issues_remaining`, the `## Review Files` list contains exactly one entry — the era review file successfully written during this invocation.
 
-On `STATUS: failed`, the `## Review Files` list contains only review files that were successfully written before the failure:
+On `STATUS: failed`, the `## Review Files` list contains only review files that the reviewer successfully wrote and you successfully validated before the failure occurred:
 
-- Include the era file path if step (6) of the per-iteration protocol completed before the failure occurred.
-- Leave the `## Review Files` list empty when the failure occurred before any review file was written (e.g. plan file missing or empty at iteration start, plan-reviewer dispatch failed on both primary and fallback, plan-reviewer returned an empty `results[0].finalMessage`, or the review file write itself failed).
+- Include the era file path if the reviewer's artifact was successfully written and passed all of Step 5's validations (5a–5d) for the most recent iteration before the failure.
+- Leave the `## Review Files` list empty when the failure occurred before any reviewer artifact passed validation (e.g. plan file missing or empty at iteration start, plan-reviewer dispatch failed on both primary and fallback, the reviewer's response was missing the `REVIEW_ARTIFACT` marker, the artifact was missing/empty/path-mismatched, or its on-disk provenance was malformed).
 
 A `plan-refiner` invocation runs one era and therefore writes at most one review file.
 
@@ -212,8 +227,10 @@ The following conditions produce `STATUS: failed`. Each condition maps to a one-
 
 - **Plan file missing or empty at iteration start** — reason: `plan file missing or empty at iteration start`
 - **Plan-reviewer dispatch failed on both primary and fallback** — reason: `plan-reviewer dispatch failed on primary and fallback`
-- **Plan-reviewer returned an empty result** — reason: `plan-reviewer returned empty result`
-- **Review file write failed** — reason: `review file write failed: <error>`
+- **Reviewer response missing the REVIEW_ARTIFACT marker** — reason: `reviewer response missing REVIEW_ARTIFACT marker`
+- **Reviewer artifact missing or empty on disk** — reason: `reviewer artifact missing or empty at <path>`
+- **Reviewer artifact path mismatch (the marker path does not equal the path supplied to the reviewer)** — reason: `reviewer artifact path mismatch: expected <X>, got <Y>`
+- **Reviewer artifact provenance malformed (first-line regex fails or contains `inline`)** — reason: `reviewer artifact provenance malformed at <path>: <specific check>`
 - **Planner edit-pass dispatch failed** — reason: `planner edit-pass dispatch failed`
 - **Plan file missing or empty after the planner edit pass returned** — reason: `plan file missing or empty after planner edit pass returned`
 - **Coordinator orchestration tool unavailable** — reason: `coordinator dispatch unavailable`

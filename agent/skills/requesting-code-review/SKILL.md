@@ -40,6 +40,8 @@ Fill these placeholders:
 - `{HEAD_SHA}` — ending commit
 - `{DESCRIPTION}` — brief summary of changes
 - `{RE_REVIEW_BLOCK}` — empty string (standalone reviews are always full reviews, not re-reviews)
+- `{REVIEW_OUTPUT_PATH}` — empty string (standalone reviews do not persist to a designated artifact path; the conditional Output Artifact Contract in the prompt template is dormant when this placeholder is empty)
+- `{REVIEWER_PROVENANCE}` — empty string (no provenance first line is required when the contract is dormant)
 
 ### 2b. Resolve model and dispatch
 
