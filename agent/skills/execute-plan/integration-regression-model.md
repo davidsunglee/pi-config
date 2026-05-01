@@ -1,71 +1,193 @@
 # Integration regression model
 
-This document is the single canonical definition of the three-set integration tracking model, the reconciliation algorithm, and the user-facing summary format used during plan execution. It is referenced by Step 7 (baseline capture), Step 12 (post-wave integration tests), and Step 16 (final integration regression gate) — those steps use this model verbatim rather than restating it.
+This document is the single canonical definition of the baseline-only integration tracking model, the reconciliation algorithm, and the user-facing summary format used during plan execution. It is referenced by Step 7 (baseline capture), Step 12 (post-wave integration tests), and Step 16 (final integration regression gate) — those steps use this model verbatim rather than restating it.
 
-## The three tracked sets
+## Identifier contract
 
-The post-wave integration run is classified against three explicitly tracked sets of test identifiers. A "test identifier" is the suite-native unique name for a failing test (e.g. file path plus test name, or fully qualified symbol), taken verbatim from the test runner's failure output per the Step 7 identifier-extraction contract.
+A **stable identifier** is the suite-native unique name for a single failing test, taken verbatim from the runner output. No normalization is applied: no lowercasing, no reordering of path components, no synthesis from multiple fields. The identifier is the exact string the runner emits to name the failing test.
 
-1. **`baseline_failures`** — the set of tests that failed in the Step 7 baseline run. Captured once, before any wave executes, and never mutated after baseline capture. A test in this set represents a pre-existing failure the plan did not introduce.
-2. **`deferred_integration_regressions`** — the set of tests the user has chosen to debug later via `(b) Defer integration debugging` in a prior wave's intermediate-wave menu. Starts empty at plan start. Grows only when the user selects `(b)` on an intermediate wave, and is reconciled on every subsequent integration run (see reconciliation algorithm below). These are regressions caused by this plan that the user has explicitly deferred — not pre-existing failures.
-3. **`new_regressions_after_deferment`** — the set of tests that are failing in the just-completed integration run AND are not in `baseline_failures` AND are not in the post-reconciliation `deferred_integration_regressions`. Recomputed from scratch on every post-wave integration run (it does not persist across waves). This set names the plan-introduced regressions that first surface in the current run — i.e. the ones the user has not already chosen to defer and that were not pre-existing. It is the authoritative driver of the pass/fail classification below and the target scope of the `(a) Debug failures` and `(b) Defer integration debugging` menu actions.
+Any failure for which no stable suite-native identifier is available (panics before test execution, collection errors, process crashes) is a **non-reconcilable failure**. Non-reconcilable failures are recorded verbatim under the `NON_RECONCILABLE_FAILURES:` block of the test-runner artifact. They are never placed in `FAILING_IDENTIFIERS:` and never used as set members for comparison.
 
-`current_failing` is NOT one of the three tracked sets. It is a transient per-run value: the set of tests failing in the just-completed integration run, recomputed from scratch on every run, and used solely as input to the reconciliation step that derives the post-reconciliation `deferred_integration_regressions` and the fresh `new_regressions_after_deferment`. Once reconciliation computes those two tracked sets, `current_failing` is not referenced further and is not persisted across waves.
+See `agent/agents/test-runner.md` for the per-runner extraction rules that produce `FAILING_IDENTIFIERS:` and `NON_RECONCILABLE_FAILURES:`.
 
-## Disjointness and transition rules
+**Using an arbitrary output line as a stand-in identifier is forbidden.** A synthesized or ad-hoc identifier derived from raw failure output re-introduces the unreliable equality problem that the non-reconcilable bucket exists to solve.
 
-- `baseline_failures` and `deferred_integration_regressions` MUST remain disjoint. When adding a test to `deferred_integration_regressions`, first subtract `baseline_failures` from the candidate set; a test cannot simultaneously be a pre-existing baseline failure and a deferred regression.
-- `new_regressions_after_deferment` is disjoint from both `baseline_failures` and `deferred_integration_regressions` by construction (see reconciliation step 4). A test can be in at most one of the three tracked sets at any moment.
-- A test transitions out of `deferred_integration_regressions` only via the reconciliation rule below (when it is no longer failing). It never transitions into `baseline_failures` — the baseline is frozen at Step 7.
-- Only `baseline_failures` and `deferred_integration_regressions` are carried across waves. `new_regressions_after_deferment` is recomputed fresh each run (via reconciliation), and `current_failing` is purely ephemeral input to that computation.
+All consumers — Step 7, Step 12, the Debugger-first re-test, Step 16 — compare stable identifiers byte-for-byte and never apply a normalization step.
 
-## Reconciliation algorithm
+## Tracked state
 
-After every integration test run (post-wave in Step 12, and the final gate in Step 16), and before classifying pass/fail, compute the transient `current_failing` from the run output and reconcile `deferred_integration_regressions` against it, then derive `new_regressions_after_deferment`:
+Exactly one set is tracked persistently across waves:
 
-1. Compute `current_failing` := the set of failing-test identifiers reported by the just-completed integration run, extracted via the Step 7 identifier-extraction contract so the identifiers are directly comparable with `baseline_failures` and `deferred_integration_regressions`. This value is transient — used only as input to steps 2–4 below and discarded after this reconciliation.
-2. Compute `still_failing_deferred := deferred_integration_regressions ∩ current_failing` — deferred regressions that are still failing.
-3. Compute `cleared_deferred := deferred_integration_regressions \ current_failing` — deferred regressions that are no longer failing (either the wave's changes fixed them, or the suite's output no longer includes them). Report these briefly in the pass/fail output as "Cleared deferred regressions: <list>".
-4. Set `deferred_integration_regressions := still_failing_deferred`. Any deferred regression not in the current failing set is removed from the tracked set — the orchestrator does NOT carry stale identifiers forward.
-5. Assign `new_regressions_after_deferment := current_failing \ (baseline_failures ∪ deferred_integration_regressions)`. This set is empty when every currently failing test is either a pre-existing baseline failure or a previously deferred regression; it is populated when the just-completed run includes at least one failure that was neither in the baseline nor previously deferred. `new_regressions_after_deferment` is the authoritative source for:
-   - the user-facing "New regressions in this wave" section,
-   - the pass/fail classification below, and
-   - the `(a) Debug failures` and `(b) Defer integration debugging` menu actions (which operate only on the tests in this set).
+**`baseline_failures`** — the set of stable identifiers captured by the baseline run. Frozen at the end of Step 7. Never mutated thereafter, regardless of what any later integration run produces.
+
+This is the ONLY persistent set across waves. There is no persistent set of deferred regressions, no persistent set of regressions discovered after some earlier continuation, and no persistent non-reconcilable state.
+
+Each later integration run (Step 12, Step 16) is judged solely by comparing that run's artifact against `baseline_failures`. When a user selects `(c) Continue despite failures` on an intermediate wave, this does NOT mutate `baseline_failures` and does NOT persist any other identifier set across waves.
+
+## Per-run inputs and reconciliation
+
+After every integration test run, compute three transient values from the run artifact, classify pass/fail, then discard them:
+
+- **`current_failing_stable`** := the contents of `FAILING_IDENTIFIERS:` in the run artifact.
+- **`current_non_reconcilable`** := the contents of `NON_RECONCILABLE_FAILURES:` in the run artifact. Treated as an opaque list of evidence entries. Never used as set members for comparison.
+- **`current_non_baseline_stable`** := `current_failing_stable \ baseline_failures` (set difference, byte-for-byte). This is the set of stable failures in the current run that were not present at baseline.
+
+`current_non_reconcilable` is never compared, intersected, or subtracted against any other set. Its only role is to gate the pass/fail outcome and populate the non-reconcilable section of the user-facing summary.
+
+**Rationale:** Comparing non-reconcilable evidence by raw-line equality is unreliable. Two runs of the same underlying crash or collection error will often emit differently formatted stack traces, differing line numbers, or different timing data, causing a byte-for-byte comparison to report a spurious "new" failure. The non-reconcilable bucket prevents this by keeping such evidence entirely out of the identifier comparison path.
 
 ## Pass/fail classification
 
 **Post-wave (Step 12):**
 
-- **Pass:** `new_regressions_after_deferment` is empty. Proceed to the next wave. Format the user-facing summary per the [User-facing summary format](#user-facing-summary-format) section below.
-- **Fail:** `new_regressions_after_deferment` is non-empty. Present the three-section report followed by the Step 12 failure menu.
+- **Pass:** `current_non_baseline_stable` is empty AND `current_non_reconcilable` is empty. Proceed to the next wave (or the final gate if this was the last wave). Format the user-facing summary per the [User-facing summary format](#user-facing-summary-format) section below.
+- **Fail:** `current_non_baseline_stable` is non-empty OR `current_non_reconcilable` is non-empty. Present the three-section report followed by the failure menu.
+  - For waves before the final wave: `(d) Debug failures now / (c) Continue despite failures / (x) Stop plan execution`
+  - For the final wave: `(d) Debug failures now / (x) Stop plan execution`
 
-Step 16's final gate uses a stricter condition — it gates on the union `still_failing_deferred ∪ new_regressions_after_deferment` — but uses the same reconciliation algorithm and the same three-section report format defined here.
+**Final gate (Step 16):**
+
+- **Pass:** `current_non_baseline_stable` is empty AND `current_non_reconcilable` is empty.
+- **Fail:** `current_non_baseline_stable` is non-empty OR `current_non_reconcilable` is non-empty. Present the three-section report followed by the menu: `(d) Debug failures now / (x) Stop execution`.
+
+A non-empty `current_non_reconcilable` alone is sufficient to fail the gate, even when `current_non_baseline_stable` is empty (zero stable failures but a crash or collection error still blocks the gate).
 
 ## User-facing summary format
 
-The user-facing summary uses one of two formats, depending on whether the suite is clean:
+**Fully clean** — `current_failing_stable`, `current_non_reconcilable`, and `baseline_failures ∩ current_failing_stable` are all empty. Render:
 
-- **Fully-clean suite** — `baseline_failures ∩ current_failing`, post-reconciliation `deferred_integration_regressions`, and `new_regressions_after_deferment` are ALL empty. Report briefly, without the three-section block:
+```
+✅ Integration tests pass after wave <N> (no failures).
+```
 
-  ```
-  ✅ Integration tests pass after wave <N> (no failures).
-  ```
+Do not render the three-section block.
 
-- **Not fully clean** — any of the three sets above is non-empty (including the pass path where `new_regressions_after_deferment` is empty but baseline failures or deferred regressions remain). Present exactly these three separately-headed sections, in this order, regardless of whether the overall classification is pass or fail:
+**Not fully clean** — render the three-section block in this order, with these exact section headings:
 
-  ```
-  <header line — see below>
+```
+<header line — see below>
 
-  ### Baseline failures
-  <list of tests in baseline_failures ∩ current_failing — pre-existing, not plan-introduced>
+### Baseline failures
+<list of stable identifiers in baseline_failures ∩ current_failing_stable, or `(none)` if empty>
 
-  ### Deferred integration regressions
-  <list of tests in deferred_integration_regressions (post-reconciliation) — plan-introduced regressions the user chose to defer>
+### Current non-baseline failures
+<list of stable identifiers in current_non_baseline_stable, or `(none)` if empty>
 
-  ### New regressions in this wave
-  <list of tests in new_regressions_after_deferment — plan-introduced regressions first observed in this run>
-  ```
+### Current non-reconcilable failures
+<list of evidence entries from current_non_reconcilable, or `(none)` if empty>
+```
 
-  The header line is `✅ Integration tests pass after wave <N> (no new regressions; baseline and/or deferred failures remain — see below).` on the pass path, and `❌ Integration tests failed after wave <N>.` on the fail path.
+Header line variants:
 
-  Each of the three sections MUST be present even if its list is empty (render an empty list as `(none)`), and the section headings MUST be the exact strings `Baseline failures`, `Deferred integration regressions`, and `New regressions in this wave`. On the pass path, the "New regressions in this wave" section is rendered as `(none)` by construction. The `(a)` and `(b)` menu actions — which only appear on the fail path — operate only on the "New regressions in this wave" list (i.e. on `new_regressions_after_deferment`).
+- **Pass path** (both `current_non_baseline_stable` and `current_non_reconcilable` are empty, but `baseline_failures ∩ current_failing_stable` is non-empty):
+  `✅ Integration tests pass after wave <N> (no new failures; baseline failures remain — see below).`
+- **Fail path (Step 12):**
+  `❌ Integration tests failed after wave <N>.`
+- **Fail path (Step 16 final gate):**
+  `❌ Integration tests failed at final gate.`
+
+All three sections MUST be present even when empty. Empty sections render as `(none)` — one line, the literal string `(none)`. The section headings MUST be the exact strings `Baseline failures`, `Current non-baseline failures`, and `Current non-reconcilable failures`.
+
+## Worked examples
+
+### Go (`go test ./...`)
+
+```
+--- FAIL: TestFoo (0.01s)
+    foo_test.go:42: expected 1, got 2
+FAIL    github.com/example/myrepo/pkg/foo    0.012s
+```
+
+```
+FAILING_IDENTIFIERS:
+- github.com/example/myrepo/pkg/foo.TestFoo
+
+NON_RECONCILABLE_FAILURES:
+(none)
+```
+
+The identifier is `<package>.<TestName>` where the package portion is exactly the module path the runner prints after `FAIL\t`.
+
+### pytest
+
+```
+FAILED tests/test_foo.py::TestX::test_bar - AssertionError: expected True
+```
+
+```
+FAILING_IDENTIFIERS:
+- tests/test_foo.py::TestX::test_bar
+
+NON_RECONCILABLE_FAILURES:
+(none)
+```
+
+The identifier is the pytest nodeid as printed: `tests/test_foo.py::TestX::test_bar`.
+
+### cargo test
+
+```
+failures:
+    tests::name_of_test
+
+test result: FAILED. 0 passed; 1 failed
+```
+
+```
+FAILING_IDENTIFIERS:
+- tests::name_of_test
+
+NON_RECONCILABLE_FAILURES:
+(none)
+```
+
+The identifier is the module path as listed in the `failures:` block, taken verbatim.
+
+### Jest / Vitest
+
+```
+FAIL src/foo.test.ts
+  ✕ describe block > it should X (12 ms)
+```
+
+```
+FAILING_IDENTIFIERS:
+- src/foo.test.ts > describe block > it should X
+
+NON_RECONCILABLE_FAILURES:
+(none)
+```
+
+The identifier is the file path and the full nested test name, joined with ` > ` exactly as the runner prints it.
+
+### Crash / collection-failure (no stable identifier)
+
+Two example shapes that produce non-reconcilable failures:
+
+**(a) Go panic before any test-name line:**
+```
+panic: runtime error: index out of range [3] with length 2
+goroutine 1 [running]:
+github.com/example/myrepo/pkg/foo.init(...)
+    /src/foo.go:10
+```
+
+**(b) pytest collection error:**
+```
+ERROR tests/test_x.py - ImportError: cannot import name 'bar' from 'mymodule'
+    tests/test_x.py:5: in <module>
+        from mymodule import bar
+```
+
+Both are recorded as one entry each in `NON_RECONCILABLE_FAILURES:` (verbatim multi-line evidence is permitted). `FAILING_IDENTIFIERS:` does NOT include any synthesized or ad-hoc fallback identifier for them.
+
+```
+FAILING_IDENTIFIERS:
+(none)
+
+NON_RECONCILABLE_FAILURES:
+- panic: runtime error: index out of range [3] with length 2\n  goroutine 1 [running]: ...
+- ERROR tests/test_x.py - ImportError: cannot import name 'bar' from 'mymodule'\n  ...
+```
+
+Because `current_non_reconcilable` is non-empty, the orchestrator presents the menu defined in `## Pass/fail classification` for the appropriate phase rather than treating the failures as comparable to baseline.
