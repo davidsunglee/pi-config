@@ -61,13 +61,13 @@ Stop. Do not dispatch with an empty or truncated procedure.
 
 ### 3a. Mux branch — dispatch `spec-designer`
 
-Resolve both `model` and `cli` from `~/.pi/agent/model-tiers.json` (per the standard model-tier resolution rule used by `generate-plan` Step 2):
+Resolve both `model` and `cli` from `~/.pi/agent/model-tiers.json` per the canonical procedure in [`agent/skills/_shared/model-tier-resolution.md`](../_shared/model-tier-resolution.md).
 
-- Read `~/.pi/agent/model-tiers.json`. If the file is missing, unreadable, or not valid JSON, fail with: `~/.pi/agent/model-tiers.json missing or unreadable — cannot resolve dispatch model/cli for spec-designer.` Stop. Do not dispatch. Do not fall back to a CLI default.
-- `model` is the `capable` field (e.g. `anthropic/claude-opus-4-7`). If `capable` is missing or empty, fail with: `model-tiers.json has no usable "capable" model — cannot dispatch spec-designer.` Stop.
-- `cli` is `dispatch.<provider>` for that model's provider prefix (e.g. `dispatch.anthropic` → `claude`). Derive `<provider>` as the prefix before the first `/` in the `capable` value. If the `dispatch` map is missing, or `dispatch.<provider>` is missing or empty, fail with: `model-tiers.json has no dispatch.<provider> mapping for capable model <capable> — cannot dispatch spec-designer.` Stop.
+Parameters for this dispatch:
+- `<agent>` = `spec-designer`
+- `<tier>` = `capable` (no fallback)
 
-All three failure modes are strict: surface the message and stop. Do not retry, do not silently use a CLI default — losing the explicit `model` / `cli` values is what motivates the split, so failing loudly is the correct behavior.
+On any of the four documented failure conditions, emit the corresponding canonical template byte-equal with the parameter values above and stop. Do not dispatch. Do not fall back to a CLI default.
 
 Then dispatch (note: `wait` is a top-level orchestration option, not a per-task field):
 
@@ -196,7 +196,7 @@ If yes, invoke `generate-plan` with `<path>`. If no, stop.
 ## Edge cases
 
 - **`procedure.md` missing.** Fail at Step 2 with the message specified there.
-- **`model-tiers.json` missing / no `capable` model / no `dispatch.<provider>` mapping.** Fail at Step 3a with the matching message. Stop. Do not fall back to a CLI default — the whole point of the explicit resolution is to keep dispatch on the Opus-tier / Claude-CLI route.
+- **`model-tiers.json` missing / no `capable` model / no `dispatch.<provider>` mapping.** Fail at Step 3a per the canonical procedure in `agent/skills/_shared/model-tier-resolution.md` — emit the corresponding template (1)–(4) byte-equal with `<agent> = spec-designer`, `<tier> = capable` and stop. Do not fall back to a CLI default — the explicit resolution keeps dispatch on the Opus-tier / Claude-CLI route.
 - **Mux probe wrong (false positive / false negative).** The probe is aligned with the runtime's `selectBackend()` / `cmux.ts` checks (env var + command available), so divergence requires either (a) the env var being set without the matching CLI on PATH, or (b) the runtime's check changing in a future `pi-interactive-subagent` release. A false-negative probe (probe says no mux, mux actually available) drops the user into the inline branch — functionally correct but uses orchestrator context unnecessarily. A false-positive probe (probe says mux, runtime then disagrees) routes `subagent_run_serial` to the headless backend, which can't host an interactive session — `spec-designer` would receive its task without a user-driven Q&A surface. Mitigation: keep the probe rules in lockstep with `cmux.ts`; if a future change drifts, users can force the inline branch with `PI_SUBAGENT_MODE=headless` or one of the override phrases.
 - **User-input override false positive.** If the user's input contains "subagent" without meaning override (e.g. "build a subagent thing"), the substring match will trigger inline mode. Mitigation is the specific phrase set in Step 1b. Residual risk is documented; users wanting subagent dispatch can rephrase.
 - **Inline-branch session terminated mid-procedure.** No spec written, no commit, nothing to recover. User re-runs `/define-spec`. If a partial spec was written before termination, it stays on disk; user can delete or edit manually.

@@ -245,13 +245,7 @@ Always pass an explicit `model` override per task in the subagent dispatch using
 
 ### Dispatch resolution
 
-After resolving each task's model, also resolve its dispatch target:
-
-1. Extract the provider prefix — the substring before the first `/` in the resolved model string (e.g., `anthropic/claude-opus-4-6` → `anthropic`)
-2. Look up the prefix in the `dispatch` object from `model-tiers.json` (e.g., `dispatch["anthropic"]` → `"claude"`)
-3. Use the mapped value as the `cli` property in the subagent orchestration call (`subagent_run_serial` or `subagent_run_parallel`)
-
-If `model-tiers.json` has no `dispatch` key, or the provider prefix has no entry in the dispatch map, default to `"pi"`.
+Follow the canonical procedure in [`agent/skills/_shared/model-tier-resolution.md`](../_shared/model-tier-resolution.md) to resolve the dispatch `cli` for each task's model. `<agent> = coder`; `<tier>` is the per-task tier resolved from the table above (`capable`, `standard`, or `cheap`).
 
 Always pass `cli` explicitly on every orchestration call, even when it resolves to `"pi"`.
 
@@ -293,7 +287,7 @@ Step 7, Step 12.2, the Step 12 Debugger-first flow's success re-test, and Step 1
 
 **Dispatch.** Read `agent/skills/execute-plan/test-runner-prompt.md` once and fill `{TEST_COMMAND}` from Step 3 settings, `{WORKING_DIR}` with the absolute working directory, `{ARTIFACT_PATH}` with the absolute path above, and `{PHASE_LABEL}` with `baseline`, `wave-<N>-attempt-<K>`, or `final-gate-<seq>`.
 
-Resolve the model from `crossProvider.cheap` in `~/.pi/agent/model-tiers.json`, and resolve `cli` through `dispatch[<provider>]` for that model's provider prefix. If `crossProvider.cheap` cannot be resolved or its provider has no `dispatch` entry, surface the resolution failure to the user — do NOT silently fall back to `cheap`, `standard`, or a CLI default.
+Resolve `(model, cli)` for this dispatch per the canonical procedure in [`agent/skills/_shared/model-tier-resolution.md`](../_shared/model-tier-resolution.md): `<agent> = test-runner`, `<tier> = crossProvider.cheap`. On any of the four documented failure conditions, emit the corresponding canonical template byte-equal with the parameter values above and stop the call site that triggered the dispatch — do NOT silently fall back to `cheap`, `standard`, or a CLI default.
 
 Dispatch via `subagent_run_serial { tasks: [{ name: "test-runner: <phase label>", agent: "test-runner", task: "<filled test-runner-prompt.md>", model: "<resolved crossProvider.cheap model>", cli: "<dispatch[<provider>] for that model>" }] }`.
 
@@ -493,7 +487,7 @@ Fill the template's placeholders as follows:
 - `{DIFF_CONTEXT}` — the uncommitted wave diff against `HEAD`, produced as follows. For tracked files modified in this wave, use `git diff HEAD -- <modified files>`. For newly created (untracked) files, `git diff HEAD` does not produce output; instead, generate a diff for each new file via `git diff --no-index /dev/null -- <file>` (which produces a unified diff showing the entire file as added). Concatenate both outputs into a single diff block. To identify which files are new vs. modified, check `git status --porcelain -- <modified files>`: entries prefixed with `??` are untracked/new; all others are tracked modifications. This reflects the working tree vs. the last commit, which is where wave changes live before Step 12's commit. Do NOT substitute a committed-range diff (e.g. a diff between `HEAD` and a prior commit) or a `--staged` diff; wave changes have not been committed yet. **Diff truncation rule.** If the combined diff output exceeds 500 lines or 40 KB, truncate it by keeping the first 300 lines and the last 100 lines, separated by a single marker line that records the pre-truncation line count and byte count (e.g., `[diff truncated — <N> lines, <B> bytes total; verifier should note this and fall back to reading the named files for file-inspection criteria whose relevant code may lie in the truncated window]`). Never silently drop diff output. If a file-inspection criterion cannot be judged because the relevant hunk is inside the truncated window, the verifier should read the named file(s) directly from `## Verifier-Visible Files` rather than guessing. **Sub-task dispatch carve-out:** Sub-task dispatches from the Blocked handling phase of Step 10 (split-into-sub-tasks) MUST occur pre-commit — their changes must remain in the working tree at Step 11 time so `git diff HEAD` captures them alongside the rest of the wave. Step 12's commit is the only sanctioned transition from working tree to committed state for wave changes, and it runs after Step 11. If for any reason a sub-task's changes were committed before Step 11 runs for this wave (a protocol violation that should not normally occur), substitute `git diff <pre-subtask-commit>..HEAD -- <modified files>` for those criteria so the verifier still sees the sub-task's changes; otherwise file-inspection criteria will fail for insufficient evidence even though the work was done.
 - `{WORKING_DIR}` — the plan's working directory.
 
-**Verifier model tier:** Every verifier dispatch in execute-plan uses the model resolved from `crossProvider.standard` in `~/.pi/agent/model-tiers.json`, with `cli` resolved through `dispatch[<provider>]` for that model's provider prefix. Verifier model selection is no longer based on the model tier used by the task under review (the prior `standard` default plus `capable` upgrade rule is removed). Do not silently fall back to a non-cross-provider tier; if `crossProvider.standard` cannot be resolved, surface the resolution failure to the user.
+**Verifier model tier:** Every verifier dispatch in execute-plan uses the model resolved from `crossProvider.standard` per the canonical procedure in [`agent/skills/_shared/model-tier-resolution.md`](../_shared/model-tier-resolution.md): `<agent> = verifier`, `<tier> = crossProvider.standard`. Verifier model selection is no longer based on the model tier used by the task under review (the prior `standard` default plus `capable` upgrade rule is removed). On any of the four documented failure conditions, emit the corresponding canonical template byte-equal and stop — do not silently fall back to a non-cross-provider tier.
 
 Dispatch the verifier wave as `subagent_run_parallel { tasks: [{ name: "<task-N>: <task-title>", agent: "verifier", task: "<filled verify-task-prompt.md>", model: "<resolved crossProvider.standard model>", cli: "<dispatch[<provider>] for that model>" }, ...] }`.
 

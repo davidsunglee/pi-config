@@ -100,7 +100,7 @@ For each path, read the file and validate the first non-empty line:
 1. The line MUST match the regex `^\*\*Reviewer:\*\* [^/]+/[^ ]+ via [a-zA-Z0-9_-]+$` — i.e. the literal markdown `**Reviewer:**`, a single space, a `<provider>/<model>` token (provider has no `/`, model has no whitespace), the literal ` via `, then a `<cli>` token (alphanumerics / `_` / `-`).
 2. Extract `<provider>/<model>` and `<cli>` from the matched line.
 3. The extracted value MUST NOT contain the substring `inline` (case-insensitive).
-4. Read `~/.pi/agent/model-tiers.json` (re-read; do not assume Step 2's snapshot is still current). Resolve `crossProvider.capable` and `standard` to their concrete model strings, and resolve `dispatch[<provider>]` for each.
+4. Read `~/.pi/agent/model-tiers.json` (re-read; do not assume Step 2's snapshot is still current). Resolve `crossProvider.capable` and `standard` to their concrete model strings, and resolve `dispatch[<provider>]` for each, using the primitive operations defined in [`agent/skills/_shared/model-tier-resolution.md`](../_shared/model-tier-resolution.md) (tier-path resolution, provider-prefix extraction, dispatch lookup).
 5. On `STATUS: clean`: `<provider>/<model>` MUST equal the model string `crossProvider.capable` resolves to, and `<cli>` MUST equal `dispatch[<provider>]` for that model's provider prefix. The final-verification pass always runs at `crossProvider.capable` and is the last write to the file.
 6. On `STATUS: max_iterations_reached`: `<provider>/<model>` MUST equal either the model string `crossProvider.capable` resolves to OR the model string `standard` resolves to (the two documented reviewer tiers in `refine-code-prompt.md`). `<cli>` MUST equal `dispatch[<provider>]` for that model's provider prefix.
 

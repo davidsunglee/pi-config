@@ -67,11 +67,13 @@ Review and edit tier roles now live inside the `refine-plan` skill and the `plan
 
 ### Dispatch resolution
 
-After resolving the model for each role, also resolve its dispatch target using the `dispatch` map from `model-tiers.json`. See execute-plan Step 6 for the full resolution algorithm. In brief: extract the provider prefix (substring before the first `/`), look it up in `dispatch`, default to `"pi"` if absent.
+Follow the canonical procedure in [`agent/skills/_shared/model-tier-resolution.md`](../_shared/model-tier-resolution.md) to resolve `(model, cli)` for the planner dispatch.
 
-When falling back from `crossProvider.capable` to `capable`, re-resolve the dispatch target — it will change if the providers differ (e.g., `openai-codex` dispatches to `"pi"`, `anthropic` dispatches to `"claude"`).
+Parameters: `<agent> = planner`, `<tier> = capable`.
 
-If `model-tiers.json` doesn't exist or is unreadable, stop with: "generate-plan requires `~/.pi/agent/model-tiers.json` — see model matrix configuration."
+If a downstream consumer of this skill's resolution (such as a worker that re-resolves on `crossProvider.capable`) needs to fall back, the documented fallback target is `capable`; this skill's own planner dispatch uses `capable` directly and does not perform the re-resolution itself.
+
+If `~/.pi/agent/model-tiers.json` is missing or unreadable, stop with the canonical Template (1) message from `_shared/model-tier-resolution.md` substituting `<agent> = planner`.
 
 ## Step 3: Generate the plan
 
