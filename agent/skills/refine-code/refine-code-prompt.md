@@ -68,7 +68,7 @@ Every persisted review file MUST begin with a `**Reviewer:**` provenance line as
 - The line is followed by a single blank line, then the review body.
 - The value MUST NOT contain `inline` or any synonym (`improvised`, `local`, `fallback`).
 
-**You no longer write the review file.** The reviewer writes it, using the verbatim provenance line you supply in its task prompt as `{REVIEWER_PROVENANCE}` and the absolute output path you supply as `{REVIEW_OUTPUT_PATH}`. Your role is to:
+**You do not write the review file.** The reviewer writes it, using the verbatim provenance line you supply in its task prompt as `{REVIEWER_PROVENANCE}` and the absolute output path you supply as `{REVIEW_OUTPUT_PATH}`. Your role is to:
 
 1. **Construct** the verbatim `**Reviewer:** <provider>/<model> via <cli>` line at dispatch time, using the exact `model` and `cli` values you are passing to THIS pass's `subagent_run_serial` task. Re-construct per pass — first-pass uses `crossProvider.capable`, hybrid re-review uses `standard`, final-verification uses `crossProvider.capable`. Each constructed line uses that pass's specific pair.
 2. **Embed** that line as `{REVIEWER_PROVENANCE}` in the filled review-code-prompt.md, and embed the absolute era-versioned path as `{REVIEW_OUTPUT_PATH}`. Use the SAME absolute path across first-pass, hybrid re-reviews, and final-verification within one era — the file is overwritten in place by each successive reviewer.
