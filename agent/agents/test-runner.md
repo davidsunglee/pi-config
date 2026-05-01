@@ -26,11 +26,11 @@ Perform these steps in order:
 
 1. `cd` to `## Working Directory`.
 
-2. Execute `## Test Command` exactly as supplied via `bash`, capturing combined stdout and stderr and the exit code:
-   ```
-   bash -c '<## Test Command> 2>&1'
-   ```
-   Record the combined stream as the run-output and record the integer exit code.
+2. Execute `## Test Command` exactly as supplied in a `bash` shell, capturing combined stdout and stderr and the exit code. Do NOT wrap the supplied command in single quotes (or any other quoting) — quoting the command can corrupt commands that themselves contain quote characters (e.g. `pytest -k 'not slow'`). Instead, preserve the supplied command text verbatim by feeding it to `bash` via a mechanism that does not require re-quoting it. Recommended approaches, in order of preference:
+   - Write `## Test Command` verbatim to a temporary script file and execute it with `bash <script>`, appending `2>&1` to merge stderr into stdout.
+   - Or pipe the command verbatim into `bash` via stdin (e.g. a heredoc whose body is exactly `## Test Command` followed by no transformation), again with stderr merged into stdout.
+
+   Whichever mechanism is used, the bytes of `## Test Command` MUST reach `bash` unchanged — no surrounding quotes added, no characters escaped, no substitutions performed. Record the combined stream as the run-output and record the integer exit code.
 
 3. Apply the identifier-extraction contract (inlined verbatim below) to the run-output stream to derive the set of failing-test identifiers.
 
