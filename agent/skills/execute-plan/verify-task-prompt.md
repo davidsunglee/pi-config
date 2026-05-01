@@ -10,15 +10,15 @@ Prompt template dispatched to `verifier` subagents for a single plan task. Fill 
 
 {ACCEPTANCE_CRITERIA_WITH_VERIFY}
 
-## Orchestrator Command Evidence
+## Phase 1 Verification Recipes
 
-The orchestrator has already executed every command-style `Verify:` recipe for this task and captured the exact command, exit status, stdout, and stderr. You MUST rely on this evidence for command-style recipes — do NOT re-run commands.
+The orchestrator has extracted every command-style `Verify:` recipe from the `## Acceptance Criteria` section above and listed them below, numbered to match the criterion index in that section. In Phase 1 of your dispatch you MUST execute each recipe BYTE-EQUAL VERBATIM from `## Working Directory` via `bash`, capture stdout + stderr + exit code (per the per-stream 200-line / 20 KB truncation rule documented in your agent definition), and emit one `[Evidence for Criterion N]` block per recipe under a top-level `## Phase 1 Evidence` heading in your response.
 
-Each block has the header `[Evidence for Criterion N]` (where `N` is the 1-based criterion number in plan order), followed by these fields in this order: `command: <exact command>`, `exit_code: <status>`, `stdout:` (fenced), `stderr:` (fenced). If a criterion has no command-style recipe, it has no evidence block — gaps in numbering are expected. Cite a block as `evidence: Evidence for Criterion N` in your per-criterion verdicts.
+Recipe-verbatim discipline (per your agent definition): you MAY run commands ONLY when they exactly match a recipe text byte-equal from this section. You MUST NOT run any other commands. You MUST NOT re-run a command after capturing its output. You MUST NOT add flags, expand variables, or otherwise transform the recipe text.
 
-{ORCHESTRATOR_COMMAND_EVIDENCE}
+{PHASE_1_RECIPES}
 
-If this section is empty, the task has no command-style recipes and all verification is via file inspection or prose inspection.
+If this section is empty, the task has no command-style recipes — skip Phase 1 entirely and proceed to Phase 2 judgment using `## Verifier-Visible Files` and any files explicitly named by file-inspection / prose-inspection recipes.
 
 ## Verifier-Visible Files
 
@@ -48,7 +48,7 @@ All paths in this prompt are relative to that directory unless otherwise stated.
 
 ## Rules
 
-- You are judge-only. Do NOT run shell commands.
+- Two-phase: in Phase 1 you MAY run bash, but ONLY to execute command-style `Verify:` recipes from `## Phase 1 Verification Recipes` byte-equal verbatim. In Phase 2 (judgment) you do NOT run any commands; you cite the Phase 1 evidence blocks for command-style criteria and read files in `## Verifier-Visible Files` (plus recipe-named files) for file-inspection / prose-inspection criteria.
 - Do NOT read files outside `## Verifier-Visible Files` unless a `Verify:` recipe explicitly names them by path.
 - Every criterion gets a binary verdict: `PASS` or `FAIL`. Any `FAIL` means the overall verdict is `FAIL`.
 - If evidence is missing, return `FAIL` with `reason:` explaining what is missing. Do not guess.
@@ -57,12 +57,28 @@ All paths in this prompt are relative to that directory unless otherwise stated.
 
 Use this exact structure:
 
+Omit the `## Phase 1 Evidence` heading entirely when no command-style recipes ran. The `## Per-Criterion Verdicts` and `## Overall Verdict` sections always appear and their format is unchanged byte-for-byte.
+
 ```
+## Phase 1 Evidence
+
+[Evidence for Criterion N]
+  command: <exact recipe text>
+  exit_code: <integer>
+  stdout:
+    ```
+    <captured>
+    ```
+  stderr:
+    ```
+    <captured>
+    ```
+
 ## Per-Criterion Verdicts
 
 [Criterion 1] <PASS | FAIL>
   recipe: <the Verify: recipe text>
-  evidence: <command-evidence block number, file path + line range, or diff hunk>
+  evidence: <Evidence for Criterion N, file path + line range, or diff hunk>
   reason: <one or two sentences>
 
 [Criterion 2] <PASS | FAIL>
