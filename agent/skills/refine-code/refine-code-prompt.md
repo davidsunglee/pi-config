@@ -32,16 +32,7 @@ Model tier assignments:
 
 ### Dispatch resolution
 
-The model matrix above includes a `dispatch` map that maps provider prefixes to CLI dispatch targets. For each subagent call:
-
-1. Take the resolved model string (e.g., `anthropic/claude-opus-4-6`)
-2. Extract the provider prefix — the substring before the first `/` (e.g., `anthropic`)
-3. Look up `dispatch["<prefix>"]` in the model matrix (e.g., `dispatch["anthropic"]` → `"claude"`)
-4. Pass the result as `cli: "<value>"` in the subagent_run_serial task
-
-If the `dispatch` map is absent from the model matrix, or the provider has no entry, default to `"pi"`.
-
-Always pass `cli` explicitly on every subagent_run_serial task, even when it resolves to `"pi"`.
+Resolve `(model, cli)` for each subagent dispatch per the canonical procedure in [`agent/skills/_shared/model-tier-resolution.md`](../_shared/model-tier-resolution.md). The model-tier role assignments are listed above (`crossProvider.capable` first-pass and final-verification, `standard` hybrid re-review, `capable` remediator) — these supply `<tier>` per dispatch; `<agent>` is `code-reviewer` for review dispatches and `coder` for the remediator. On any of the four documented failure conditions, emit the corresponding canonical template byte-equal and emit `STATUS: failed` with the appropriate reason from the `## Failure Modes` list — never silently fall back to `pi` (or any other CLI default). Always pass `cli` explicitly on every `subagent_run_serial` task.
 
 ## Protocol
 

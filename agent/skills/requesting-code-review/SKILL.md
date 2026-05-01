@@ -45,9 +45,7 @@ Fill these placeholders:
 
 ### 2b. Resolve model and dispatch
 
-Read the model matrix from `~/.pi/agent/model-tiers.json`. If the file doesn't exist or is unreadable, stop with: "requesting-code-review requires `~/.pi/agent/model-tiers.json` — see model matrix configuration."
-
-Use the `capable` tier for the reviewer model. Resolve the dispatch target using the `dispatch` map — see execute-plan Step 6 for the full algorithm. Default to `"pi"` if absent.
+Resolve `(model, cli)` for the `code-reviewer` dispatch per the canonical procedure in [`agent/skills/_shared/model-tier-resolution.md`](../_shared/model-tier-resolution.md): `<agent> = code-reviewer`, `<tier> = capable`. On any of the four documented failure conditions, emit the corresponding canonical template byte-equal and stop. Do not fall back to a CLI default.
 
 ### 3. Dispatch the subagent
 
