@@ -259,35 +259,17 @@ Always pass `cli` explicitly on every orchestration call, even when it resolves 
 
 **Skip if:** Integration test is disabled (Step 3 settings) or no test command is available.
 
-Before executing the first wave, run the test command to establish a baseline:
-
-```bash
-# Run the test command from Step 3 settings
-TEST_OUTPUT=$(<test_command> 2>&1)
-TEST_EXIT=$?
-```
-
-#### Identifier-extraction contract
-
-Baseline capture and every post-wave integration classification (Step 12) use the SAME rule for turning test-runner output into a set of failing-test identifiers. Do not use failure counts, exit-code deltas, or any other heuristic — the three-set model in Step 12 requires exact identifier equality, so Step 7 and Step 12 must extract identifiers identically.
-
-A "test identifier" is the suite-native unique name for a single failing test, taken verbatim from the test runner's failure output. Examples by runner:
-
-- `go test ./...` — `<package>.<TestName>` or `<package>/<TestName>` exactly as printed on `--- FAIL:` lines
-- `pytest` — the `nodeid`, e.g. `tests/test_foo.py::test_bar` or `tests/test_foo.py::TestX::test_bar`
-- `cargo test` — the fully qualified test path printed on `test <path> ... FAILED`
-- `npm test` / Jest / Vitest — the file path plus test name, e.g. `src/foo.test.ts > describe > it`
-- Other runners — use the runner's own unique per-test identifier verbatim; never synthesize or normalize
-
-Extract one identifier per failing test. Strip surrounding whitespace but do NOT lowercase, reorder, or otherwise transform the identifier. The resulting collection is a set (deduplicated). This set — not a count — is what gets stored and compared. If the runner's output does not yield a stable per-test identifier for a particular failure (e.g. a crash before test names are printed), record that failure's raw line as the identifier so it still participates in set equality; do NOT silently drop it.
+Before executing the first wave, run the integration suite via the `test-runner` subagent (see the shared test-runner dispatch subsection below) with `{ARTIFACT_PATH} = <working-dir>/.pi/test-runs/<plan-name>/baseline.log` (an absolute path under the plan's working directory) and `{PHASE_LABEL} = baseline`. The agent applies the same Step 7 identifier-extraction contract documented in `agent/agents/test-runner.md` so the failing-identifier set the orchestrator reads back is byte-equal to the legacy in-orchestrator extraction.
 
 #### Baseline recording
 
-**If exit code 0 (all tests pass):**
+After artifact readback succeeds, classify the baseline by `EXIT_CODE`:
+
+**If `EXIT_CODE == 0` (all tests pass):**
 Record `baseline_failures := ∅` (the empty set). Any post-wave failing-test identifier that is not later classified as a deferred integration regression is a regression introduced by the plan execution.
 
-**If exit code non-zero (some tests fail):**
-Apply the identifier-extraction contract above to the baseline test output and record `baseline_failures` as the resulting set of identifiers. Warn the user:
+**If `EXIT_CODE != 0` (some tests fail):**
+Read the failing-identifier set from the artifact's `FAILING_IDENTIFIERS:` block and record `baseline_failures` as that set. Warn the user:
 ```
 ⚠️ Baseline: N tests already failing before execution.
 New failures only will be flagged after each wave.
@@ -297,6 +279,33 @@ New failures only will be flagged after each wave.
 #### Integration regression model
 
 See [`integration-regression-model.md`](integration-regression-model.md) for the definition of the three tracked sets (`baseline_failures`, `deferred_integration_regressions`, `new_regressions_after_deferment`), the disjointness and transition rules, the reconciliation algorithm, the pass/fail classification, and the user-facing summary format.
+
+#### Test-runner dispatch (shared)
+
+Step 7, Step 12.2, the Step 12 Debugger-first flow's success re-test, and Step 16's final-gate gate use the same `test-runner` subagent to execute the integration suite. The orchestrator never runs the test command itself.
+
+**Per-plan runs directory.** Compute `<plan-name>` as the plan filename without the `.md` extension; before the first `test-runner` dispatch in the plan, create it with `mkdir -p .pi/test-runs/<plan-name>`.
+
+**Filename scheme (relative to the plan's working directory).** Join each relative path with `<working-dir>` to produce the absolute `{ARTIFACT_PATH}` supplied to `test-runner`:
+- Step 7 baseline capture: `.pi/test-runs/<plan-name>/baseline.log` → `{ARTIFACT_PATH} = <working-dir>/.pi/test-runs/<plan-name>/baseline.log` (single file; written exactly once).
+- Step 12.2 post-wave + Step 12 Debugger-first re-test: `.pi/test-runs/<plan-name>/wave-<N>-attempt-<K>.log` → `{ARTIFACT_PATH} = <working-dir>/.pi/test-runs/<plan-name>/wave-<N>-attempt-<K>.log`, where `<K>` increments on every re-entry within wave `<N>`.
+- Step 16 final-gate runs: `.pi/test-runs/<plan-name>/final-gate-<seq>.log` → `{ARTIFACT_PATH} = <working-dir>/.pi/test-runs/<plan-name>/final-gate-<seq>.log`, where `<seq>` increments on every gate entry.
+
+**Dispatch.** Read `agent/skills/execute-plan/test-runner-prompt.md` once and fill `{TEST_COMMAND}` from Step 3 settings, `{WORKING_DIR}` with the absolute working directory, `{ARTIFACT_PATH}` with the absolute path above, and `{PHASE_LABEL}` with `baseline`, `wave-<N>-attempt-<K>`, or `final-gate-<seq>`.
+
+Resolve the model from `crossProvider.cheap` in `~/.pi/agent/model-tiers.json`, and resolve `cli` through `dispatch[<provider>]` for that model's provider prefix. If `crossProvider.cheap` cannot be resolved or its provider has no `dispatch` entry, surface the resolution failure to the user — do NOT silently fall back to `cheap`, `standard`, or a CLI default.
+
+Dispatch via `subagent_run_serial { tasks: [{ name: "test-runner: <phase label>", agent: "test-runner", task: "<filled test-runner-prompt.md>", model: "<resolved crossProvider.cheap model>", cli: "<dispatch[<provider>] for that model>" }] }`.
+
+**Artifact readback.** After dispatch, read `results[0].finalMessage`; on any failure below, stop the call site that triggered dispatch (do NOT fall back to running the test command in-orchestrator):
+1. **Marker extraction.** Find the LAST line in `finalMessage` matching `^TEST_RESULT_ARTIFACT: (.+)$`; if absent, stop with reason `test-runner response missing TEST_RESULT_ARTIFACT marker`.
+2. **Path-equality check.** Compare the marker path to `{ARTIFACT_PATH}`; if they differ, stop with reason `test-runner artifact path mismatch: expected <X>, got <Y>`.
+3. **Existence-and-non-empty check.** Read the marker path from disk; if missing or empty (zero bytes, or only whitespace), stop with reason `test-runner artifact missing or empty at <path>`.
+4. **Header-parse check.** Confirm the structured header has `PHASE`, `COMMAND`, `WORKING_DIRECTORY`, `EXIT_CODE`, `TIMESTAMP`, `FAILING_IDENTIFIERS_COUNT`, `FAILING_IDENTIFIERS:`, and `END_FAILING_IDENTIFIERS` in order, followed by `--- RAW RUN OUTPUT BELOW ---`; if not, stop with reason `test-runner artifact header malformed at <path>: <specific check>`.
+
+**Dispatch-failure reasons.** If `subagent_run_serial` is unavailable, stop with reason `test-runner dispatch unavailable`. If dispatch returns an error result, stop with reason `test-runner dispatch failed`.
+
+**Reading the failing-identifier set.** On all checks passing, parse lines between `FAILING_IDENTIFIERS:` and `END_FAILING_IDENTIFIERS` as the failing-test identifier set and read `EXIT_CODE`; these are the inputs the integration regression model consumes.
 
 ## Step 8: Execute waves
 
@@ -419,7 +428,7 @@ These are the canonical intervention options for blocked tasks. Do not invent ne
 - **(c) More context:** prompt the user for the additional context (free-form text). Re-dispatch this single task to a `coder` worker with the original task spec plus the supplied context appended under a `## Additional Context` section in the worker prompt. Keep the task's existing model tier unless the user also picks (m) for the same task on a subsequent pass.
 - **(m) Better model:** only offered when the task's current tier is `cheap` or `standard`. Re-dispatch this single task to a `coder` worker using the next tier up (`cheap` → `standard`, `standard` → `capable`). Resolve the concrete model string via `~/.pi/agent/model-tiers.json` as described in Step 6.
 - **(s) Split into sub-tasks:** decompose the task into smaller sub-tasks in-session. Each sub-task must keep the same output file(s) and acceptance criteria coverage between them (no criterion may be dropped). Dispatch the sub-tasks as a mini-wave bounded by the pi-interactive-subagent `MAX_PARALLEL_HARD_CAP` cap (see Step 5). If there is a natural ordering between sub-tasks, run them sequentially instead. The parent task's slot is replaced by the sub-tasks for all subsequent tracking; each sub-task is treated as an independent task in this wave for Step 9 classification and gate re-entry. ⚠ Sub-task dispatches run pre-commit: their changes must remain in the working tree (uncommitted) at the point Step 11 dispatches the verifier. See Step 11.2 for the fallback diff range if this is violated. Retry budget: see Step 13.
-- **(x) Stop execution:** halt execution immediately. Do NOT perform Step 11 or Step 12 for this wave. Report partial progress via Step 14. All prior wave commits remain in git history.
+- **(x) Stop execution:** halt execution immediately. Do NOT perform Step 11 or Step 12 for this wave. Report partial progress via Step 14. All prior wave commits remain in git history. The per-plan .pi/test-runs/<plan-name>/ directory is preserved on this exit path so the user can inspect run artifacts after stop.
 
 If the user picks `(x) Stop execution` for any blocked task, stop the whole plan regardless of outstanding choices for other blocked tasks. Do not continue asking about the remaining blocked tasks.
 
@@ -451,7 +460,7 @@ Options:
 
 - **(c) Continue to verification.** Exit §3. Leave every concerned task's Step 9 status as `DONE_WITH_CONCERNS` and proceed to §4; the verifier is the next gate and will judge the work on its own terms.
 - **(r) Remediate selected task(s).** Prompt the user for (a) the task numbers to remediate (one or more from `CONCERNED_TASKS`) and (b) a single freeform guidance block that applies to those tasks. Re-dispatch each selected task to a fresh `coder` worker using the same task spec, with the worker's original concerns block and the user's guidance appended under a `## Concerns To Address` section in the worker prompt. Each re-dispatch counts against that task's retry budget; see Step 13. When the re-dispatches return, apply Step 9 again. If any re-dispatched task comes back `BLOCKED`, return to §2 with that task. Otherwise rebuild `CONCERNED_TASKS` from the new wave state and re-enter §3 from its top; a task that returns `DONE` after remediation is removed from `CONCERNED_TASKS`, and a task that returns `DONE_WITH_CONCERNS` again re-appears in the next combined view. Tasks that were not selected for remediation keep their prior Step 9 status and re-appear unchanged in the next view.
-- **(x) Stop execution.** Halt immediately. Do NOT run Step 11 or Step 12 for this wave. Report partial progress via Step 14. All prior wave commits remain in git history.
+- **(x) Stop execution.** Halt immediately. Do NOT run Step 11 or Step 12 for this wave. Report partial progress via Step 14. All prior wave commits remain in git history. The per-plan .pi/test-runs/<plan-name>/ directory is preserved on this exit path so the user can inspect run artifacts after stop.
 
 Repeat §3 until `CONCERNED_TASKS` is empty (either because the user picked `(c)` or because every concerned task has been remediated to `DONE`) or the user picks `(x)`.
 
@@ -543,14 +552,7 @@ git commit -m "feat(plan): wave <N> - <plan_goal_summary>
 
 **Skip if:** Integration test is disabled (Step 3 settings) or no test command is available.
 
-Run the test command:
-
-```bash
-TEST_OUTPUT=$(<test_command> 2>&1)
-TEST_EXIT=$?
-```
-
-Apply the integration regression model from [`integration-regression-model.md`](integration-regression-model.md). Pass if `new_regressions_after_deferment` is empty; fail if non-empty.
+Run the integration suite via the `test-runner` subagent (see Step 7's shared test-runner dispatch subsection) with `{ARTIFACT_PATH} = <working-dir>/.pi/test-runs/<plan-name>/wave-<N>-attempt-<K>.log` (an absolute path under the plan's working directory, where `<N>` is the current wave number and `<K>` is a 1-based attempt counter for this wave, starting at 1 and incremented on each Step 12 Debugger-first re-test) and `{PHASE_LABEL} = wave-<N>-attempt-<K>`. After artifact readback, read the failing-identifier set and `EXIT_CODE` from the artifact and pass them as `current_failing` into the integration regression model from `integration-regression-model.md`. Apply the reconciliation algorithm; pass if `new_regressions_after_deferment` is empty, fail if non-empty.
 
 #### Menu
 
@@ -567,7 +569,7 @@ Options:
 
 - **(a) Debug failures:** Run the `Debugger-first flow` (below) with the **Step 12 (post-wave)** parameter row, scoped to the tests in `new_regressions_after_deferment`. Do NOT undo the wave commit up front; the debugging dispatch inspects the committed state. This path counts as a retry toward the 3-retry limit in Step 13.
 - **(b) Defer integration debugging:** Compute `additions := new_regressions_after_deferment \ baseline_failures` (preserving disjointness with `baseline_failures`) and set `deferred_integration_regressions := deferred_integration_regressions ∪ additions`. The wave commit remains. Warn: "⚠️ Proceeding with deferred integration regressions. Final plan completion is BLOCKED until every deferred regression is resolved — the final wave's menu will not offer a defer option, so these failures must be debugged (or explicitly accepted via `Stop execution`) before the plan can report success." Then proceed to wave `<N+1>`.
-- **(c) Stop execution:** Halt execution. All prior wave commits remain in git history. Report partial progress (Step 14).
+- **(c) Stop execution:** Halt execution. All prior wave commits remain in git history. Report partial progress (Step 14). The per-plan .pi/test-runs/<plan-name>/ directory is preserved on this exit path so the user can inspect run artifacts after stop.
 
 **Final-wave menu** (wave `<N>` where `<N> == total_waves`):
 
@@ -580,7 +582,7 @@ Options:
 The defer option is intentionally removed on the final wave: there is no subsequent wave to carry deferred regressions into, and the precondition that final completion is blocked until all plan-introduced regressions are resolved forbids silently shipping them. On the final wave, the user MUST either debug or stop.
 
 - **(a) Debug failures:** Same as the intermediate-wave `(a)` — run the `Debugger-first flow` (below) with the **Step 12 (post-wave)** parameter row, scoped to `new_regressions_after_deferment`, counting toward the Step 13 retry limit. Deferred regressions from prior waves are NOT handled here; they are cleared by Step 16's "Final integration regression gate (precondition)" before the plan can report success. The same final gate also catches any regression introduced after this final wave (e.g. by Step 15 review/remediation) via the same three-set classification used here.
-- **(c) Stop execution:** Halt execution. Prior wave commits remain in git history. Report partial progress (Step 14).
+- **(c) Stop execution:** Halt execution. Prior wave commits remain in git history. Report partial progress (Step 14). The per-plan .pi/test-runs/<plan-name>/ directory is preserved on this exit path so the user can inspect run artifacts after stop.
 
 ### Debugger-first flow
 
@@ -593,7 +595,7 @@ Shared by Step 12 (post-wave integration failures) and Step 16 (final integratio
 | Scope | Triggered by Step 12's post-wave integration-test menu, while a current wave `<N>` exists. | Triggered by Step 16's "Final integration regression gate (precondition)" after all waves and any Step 15 remediation. No current wave exists; `HEAD` may be a Step 15 commit. |
 | Range / changed-file universe | The wave commit: use `git show HEAD --stat` and `git show HEAD` to enumerate the files introduced by the wave. | The plan execution range: `BASE_SHA` = `PRE_EXECUTION_SHA` (recorded in Step 8, immediately before the first wave dispatched); `HEAD_SHA` = `git rev-parse HEAD` at this moment. Use `git diff --name-only BASE_SHA HEAD_SHA` — NOT `git show HEAD`, since HEAD at final-gate time is not guaranteed to be a wave commit. |
 | Suspect task universe | Wave `<N>`'s tasks whose modified files appear in the failing stack traces or whose behavior the failing tests cover. If the mapping is ambiguous, include every wave task. | Every plan task whose declared `**Files:**` scope (from the plan file) intersects the failing stack traces or whose behavior the failing tests cover. If the mapping is ambiguous, include every plan task whose `**Files:**` scope intersects `git diff --name-only BASE_SHA HEAD_SHA` — i.e., every task whose output was touched by plan execution. Do NOT constrain to a single wave. |
-| Success condition | On re-running the test command and applying the Step 7 reconciliation algorithm, `new_regressions_after_deferment` is empty. Pre-existing baseline failures and previously-deferred regressions may remain; incidentally-cleared deferred regressions are reported under "Cleared deferred regressions" via the normal reconciliation rule. On success, proceed to the next wave. | On re-entering the Step 16 gate at its step 1 (re-run the suite, re-reconcile, recompute both sets), **both** `still_failing_deferred` and `new_regressions_after_deferment` are empty. Pre-existing baseline failures may remain. Unlike the wave-scoped case, the final gate must also clear any `still_failing_deferred` carried from prior waves. On success, the gate passes and normal completion proceeds. |
+| Success condition | On re-dispatching `test-runner` per Step 7's shared test-runner dispatch subsection (with a fresh `wave-<N>-attempt-<K>` filename — increment `<K>`) and applying the Step 7 reconciliation algorithm, `new_regressions_after_deferment` is empty. Pre-existing baseline failures and previously-deferred regressions may remain; incidentally-cleared deferred regressions are reported under "Cleared deferred regressions" via the normal reconciliation rule. On success, proceed to the next wave. | On re-entering the Step 16 gate at its step 1 (re-run the suite, re-reconcile, recompute both sets), **both** `still_failing_deferred` and `new_regressions_after_deferment` are empty. Pre-existing baseline failures may remain. Unlike the wave-scoped case, the final gate must also clear any `still_failing_deferred` carried from prior waves. On success, the gate passes and normal completion proceeds. |
 | Commit template / undo behavior | Remediation commit message: `fix(plan): wave <N> regression — <short summary>`. **Commit-undo fallback is available**: if targeted remediation also fails and the user chooses to retry again, offer to undo the wave commit with `git reset HEAD~1` (working-tree changes preserved unstaged) before a broader retry. Do not undo proactively. | Remediation commit message: `fix(plan): final-gate regression — <short summary>`. **Commit-undo fallback is NOT available**: `HEAD` is not guaranteed to be a wave commit, and prior wave commits must be kept intact for the `(c) Stop execution` exit path. On repeated failure, the only exits are another debugging attempt (costing a Step 13 retry) or `(c) Stop execution`. |
 
 **Flow** (applies to both callers; substitute the parameter values from the row above):
@@ -609,7 +611,7 @@ Shared by Step 12 (post-wave integration failures) and Step 16 (final integratio
 
 3. **Handle the debugging pass result.** Judge success by the caller's **success condition**.
 
-   - **Diagnosed and fixed (`STATUS: DONE`):** Commit any applied fix using the caller's **commit template** (skip the commit if the dispatch returned `DONE` without file changes). Then evaluate the success condition: for Step 12, re-run the test command and apply the Step 7 reconciliation algorithm; for Step 16, re-enter the gate at step 1 (re-run the suite, re-reconcile, recompute both sets). If the condition holds, the remediation succeeded — proceed per the caller's "on success" behavior. If it does not hold, treat this as a failed debugging pass (below).
+   - **Diagnosed and fixed (`STATUS: DONE`):** Commit any applied fix using the caller's **commit template** (skip the commit if the dispatch returned `DONE` without file changes). Then evaluate the success condition: for Step 12, re-dispatch `test-runner` per Step 7's shared test-runner dispatch subsection (incrementing the wave attempt counter) and apply the Step 7 reconciliation algorithm; for Step 16, re-enter the gate at step 1 (re-run the suite, re-reconcile, recompute both sets). If the condition holds, the remediation succeeded — proceed per the caller's "on success" behavior. If it does not hold, treat this as a failed debugging pass (below).
    - **Diagnosis only (`STATUS: DONE_WITH_CONCERNS` with `## Diagnosis`):** Use the diagnosis to dispatch a **targeted remediation** — a second `coder` dispatch scoped to only the implicated task(s)/files from the diagnosis. Include the diagnosis text, the failing test output, and the original task spec(s) for the implicated task(s) from the plan file. After that dispatch returns, commit its changes using the caller's **commit template** (skip if no files changed) and evaluate the caller's success condition as above. If it holds, the remediation succeeded. If it does not, treat this as a failed debugging pass.
    - **Failed debugging pass** (blocker, or the success condition still does not hold): re-present the caller's menu — Step 12's wave-appropriate menu (intermediate-wave `(a)`/`(b)`/`(c)` or final-wave `(a)`/`(c)`) or Step 16's `(a)`/`(c)` menu. Count this attempt toward the Step 13 retry limit for the implicated tasks.
 
@@ -623,7 +625,7 @@ If a worker produces empty, missing, or incorrect output:
 1. Retry automatically up to **3 times** (with improvements to the task prompt if possible). **Shared counter:** All re-dispatches from the Blocked handling phase (Step 10), the Concerns handling phase `(r)` remediation (Step 10), and Step 11 failure routing (verifier `VERDICT: FAIL`) share a single per-task retry counter. Exhaustion in one path exhausts it for all paths — a task that has been re-dispatched twice through the Blocked handling phase and once through the Concerns handling phase has used all 3 retries, and any subsequent Step 11 `VERDICT: FAIL` for that task goes directly to the user-prompt in step 2 below rather than triggering another automatic retry. **Sub-task split budget rule:** Choosing `(s) Split into sub-tasks` in the Blocked handling phase (Step 10) consumes 1 retry against the parent task's budget, and each resulting sub-task inherits the parent's remaining retry count rather than a fresh 3-retry budget. This closes the bypass where an exhausted parent could be split to obtain additional effective retries.
 2. If still failing after 3 retries, **notify the user at the end of the wave** and ask:
    - Retry again (optionally with a different model or more context). Choosing `Retry again` **resets the per-task 3-retry budget for that task** — the user has explicitly authorized a fresh remediation window, so the shared counter described in step 1 (Blocked handling phase re-dispatch + Concerns handling phase `(r)` re-dispatch + Step 11 `VERDICT: FAIL` retries) is cleared back to 3 for this task only. A subsequent failure on that task re-enters the automatic-retry loop at the top of step 1 with a full budget.
-   - Stop the entire plan
+   - Stop the entire plan. The per-plan .pi/test-runs/<plan-name>/ directory is preserved on this exit path so the user can inspect run artifacts after stop.
 
    There is no option to skip a failed task. A wave with any unresolved failure — including a verifier `VERDICT: FAIL` from Step 11 treated as a task failure — must either be retried to resolution or stopped. `VERDICT: FAIL` from Step 11 is routed through this same failure-handling path with no skip option.
 
@@ -668,7 +670,7 @@ After all waves complete successfully (and if the user chose review in Step 3):
 
    **`clean`:** Include the review summary (iteration count, review file path) in the Step 16 completion report. Proceed to Step 16.
 
-   **`max_iterations_reached`:** Present remaining findings to the user; offer: **(a)** keep iterating (budget resets), **(b)** proceed with issues noted, or **(c)** stop execution.
+   **`max_iterations_reached`:** Present remaining findings to the user; offer: **(a)** keep iterating (budget resets), **(b)** proceed with issues noted, or **(c)** stop execution. The per-plan .pi/test-runs/<plan-name>/ directory is preserved on this exit path so the user can inspect run artifacts after stop.
 
    **Review disabled** (user chose to disable in Step 3): Skip directly to Step 16.
 
@@ -682,7 +684,7 @@ Otherwise, always run this gate: re-run the full integration suite and confirm n
 
 **Gate protocol:**
 
-1. **Re-run the full integration suite** using the same test command from Step 3. Apply the Step 7 identifier-extraction contract to the runner's failure output so identifiers are directly comparable with `baseline_failures` and `deferred_integration_regressions`.
+1. **Re-dispatch the integration suite via `test-runner`** per Step 7's shared test-runner dispatch subsection with `{ARTIFACT_PATH} = <working-dir>/.pi/test-runs/<plan-name>/final-gate-<seq>.log` (an absolute path under the plan's working directory, where `<seq>` is a 1-based counter incremented for every gate entry — initial entry is `1`, each subsequent re-entry from `(a) Debug failures now` is `2`, `3`, …) and `{PHASE_LABEL} = final-gate-<seq>`. Read back the failing-identifier set and `EXIT_CODE` from the artifact; the agent has already applied the Step 7 identifier-extraction contract so identifiers are directly comparable with `baseline_failures` and `deferred_integration_regressions`.
 
 2. **Apply the reconciliation algorithm** from [`integration-regression-model.md`](integration-regression-model.md) to compute `current_failing`, reconcile `deferred_integration_regressions`, and derive `new_regressions_after_deferment`.
 
@@ -702,7 +704,7 @@ Otherwise, always run this gate: re-run the full integration suite and confirm n
 
 4. **Menu actions:**
    - **(a) Debug failures now:** Run the shared `Debugger-first flow` (defined under Step 12) with the **Step 16 (final-gate)** parameter row, scoped to `still_failing_deferred ∪ new_regressions_after_deferment`. That flow judges success by re-entering this gate at step 1 (re-run the suite, re-reconcile, recompute both sets), so a remediation attempt succeeds when both `still_failing_deferred` and `new_regressions_after_deferment` are empty on the re-run. Repeat until both sets are empty or the user picks `(c)`. Each debugging attempt counts toward the Step 13 retry budget for the implicated tasks.
-   - **(c) Stop execution:** Halt execution. Report partial progress via Step 14 so the user has a complete picture of plan-introduced failures left on the branch: list any non-empty `deferred_integration_regressions` under the deferred-regressions heading, and list the still-unresolved `new_regressions_after_deferment` separately as newly discovered final-gate regressions — do NOT fold them under the deferred-regressions heading, since they were never deferred by the user. Do NOT move the plan file, close the todo, or run branch completion.
+   - **(c) Stop execution:** Halt execution. Report partial progress via Step 14 so the user has a complete picture of plan-introduced failures left on the branch: list any non-empty `deferred_integration_regressions` under the deferred-regressions heading, and list the still-unresolved `new_regressions_after_deferment` separately as newly discovered final-gate regressions — do NOT fold them under the deferred-regressions heading, since they were never deferred by the user. Do NOT move the plan file, close the todo, or run branch completion. The per-plan .pi/test-runs/<plan-name>/ directory is preserved on this exit path so the user can inspect run artifacts after stop.
 
 **Blocking guarantee:** Steps `### 1. Move plan to done`, `### 2. Close linked todo`, and `### 4. Branch completion` MUST NOT execute while `still_failing_deferred ∪ new_regressions_after_deferment` is non-empty. The only exits from this gate are: (a) both sets become empty (gate passes), or (b) the user selects `(c) Stop execution`.
 
@@ -711,6 +713,7 @@ Otherwise, always run this gate: re-run the full integration suite and confirm n
 **Unconditional** — the plan was executed regardless of what happens to the branch:
 - Create `.pi/plans/done/` if it doesn't exist
 - Move the plan file to `.pi/plans/done/`
+- Delete the per-plan `.pi/test-runs/<plan-name>/` directory now that the final integration regression gate has passed: `rm -rf .pi/test-runs/<plan-name>`. This cleanup runs ONLY on successful gate exit (i.e. when this `### 1. Move plan to done` sub-step executes). Every `(c) Stop execution` exit path — Step 10's wave gate, Step 12's intermediate-wave or final-wave menu, Step 13's failure-handling prompt, Step 15's review max-iterations menu, and Step 16's final-gate menu — leaves `.pi/test-runs/<plan-name>/` in place so the user can inspect run artifacts after stop.
 
 ### 2. Close linked todo
 
