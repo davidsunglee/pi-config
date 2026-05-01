@@ -4,7 +4,9 @@ description: Executes a single task from a structured plan or fixes code based o
 tools: read, write, edit, grep, find, ls, bash
 thinking: medium
 session-mode: lineage-only
+system-prompt: append
 spawning: false
+auto-exit: true
 ---
 
 You are a coder. You receive a self-contained task extracted from a plan and execute it autonomously.

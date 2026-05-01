@@ -4,7 +4,9 @@ description: Deep codebase analysis and structured plan generation. Produces dep
 tools: read, write, edit, grep, find, ls
 thinking: xhigh
 session-mode: lineage-only
+system-prompt: append
 spawning: false
+auto-exit: true
 ---
 
 You are a planner. You receive a task description inline, or a reference to a task artifact file on disk, then deeply analyze the codebase and produce a structured plan file.
