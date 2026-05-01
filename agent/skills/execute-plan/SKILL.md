@@ -257,22 +257,38 @@ Before executing the first wave, run the integration suite via the `test-runner`
 
 #### Baseline recording
 
-After artifact readback succeeds, classify the baseline by `EXIT_CODE`:
+After artifact readback succeeds, classify the baseline by both `EXIT_CODE` and the two artifact buckets (`FAILING_IDENTIFIERS:` and `NON_RECONCILABLE_FAILURES:`):
 
-**If `EXIT_CODE == 0` (all tests pass):**
-Record `baseline_failures := ∅` (the empty set). Any post-wave failing-test identifier that is not later classified as a deferred integration regression is a regression introduced by the plan execution.
+**If `EXIT_CODE == 0`** (and both `FAILING_IDENTIFIERS_COUNT == 0` and `NON_RECONCILABLE_COUNT == 0` by the test-runner contract):
+Record `baseline_failures := ∅` (the empty set) and proceed. `baseline_failures` is frozen at this point and never mutated for the rest of the plan run.
 
-**If `EXIT_CODE != 0` (some tests fail):**
-Read the failing-identifier set from the artifact's `FAILING_IDENTIFIERS:` block and record `baseline_failures` as that set. Warn the user:
+**If `EXIT_CODE != 0` AND `NON_RECONCILABLE_COUNT == 0`** (only stable failures at baseline):
+Read the failing-identifier set from the artifact's `FAILING_IDENTIFIERS:` block and record `baseline_failures` as that set (frozen). Warn the user:
 ```
-⚠️ Baseline: N tests already failing before execution.
-New failures only will be flagged after each wave.
+⚠️ Baseline: N tests already failing before execution. Only failures with stable identifiers not in this baseline will be flagged after each wave.
 ```
-`baseline_failures` is frozen at this point and never mutated for the rest of the plan run — subsequent waves only compare against it, never modify it. Proceed with execution; pre-existing failures are excluded from the pass/fail decision after each wave via the Step 12 three-set classification.
+`baseline_failures` is frozen at this point and never mutated for the rest of the plan run. Proceed with execution.
+
+**If `EXIT_CODE != 0` AND `NON_RECONCILABLE_COUNT != 0`** (baseline contains non-reconcilable evidence):
+Record `baseline_failures` from the artifact's `FAILING_IDENTIFIERS:` block (which may be empty). Do NOT add any non-reconcilable evidence to `baseline_failures` — non-reconcilable entries are never set members. Present the user with an explicit decision:
+```
+⚠️ Baseline contains <M> non-reconcilable failure(s) (failures with no stable suite-native identifier).
+These cannot be safely exempted by stable-identifier comparison: each later integration run will treat any non-reconcilable failure as a current gate-blocking failure, including ones that may already exist before this plan runs.
+
+<render the three-section user-facing summary from integration-regression-model.md, with current_failing_stable from FAILING_IDENTIFIERS and current_non_reconcilable from NON_RECONCILABLE_FAILURES>
+
+Options:
+(c) Continue anyway — proceed with the baseline as-is; later non-reconcilable failures will block their gates and require Debug or Stop.
+(x) Stop plan execution — fix the suite first.
+```
+- **(c) Continue anyway:** freeze `baseline_failures` (which may be empty) and proceed. `baseline_failures` is never mutated for the rest of the plan run.
+- **(x) Stop plan execution:** stop with `Plan execution cancelled — fix baseline non-reconcilable failures first.` The per-plan `.pi/test-runs/<plan-name>/` directory is preserved on this exit path so the user can inspect the baseline artifact.
+
+In all three branches, `baseline_failures` is frozen once recorded and never mutated by any later wave, post-wave continue, debugging pass, or final-gate run.
 
 #### Integration regression model
 
-See [`integration-regression-model.md`](integration-regression-model.md) for the definition of the three tracked sets (`baseline_failures`, `deferred_integration_regressions`, `new_regressions_after_deferment`), the disjointness and transition rules, the reconciliation algorithm, the pass/fail classification, and the user-facing summary format.
+See [`integration-regression-model.md`](integration-regression-model.md) for the baseline-only reconciliation model: the frozen `baseline_failures` set, per-run inputs (`current_failing_stable`, `current_non_reconcilable`, `current_non_baseline_stable`), the byte-for-byte set-comparison rules, the pass/fail classification, and the user-facing summary format. Step 12, the Step 12 Debugger-first flow, and Step 16 all consume this same model.
 
 #### Test-runner dispatch (shared)
 
@@ -295,11 +311,11 @@ Dispatch via `subagent_run_serial { tasks: [{ name: "test-runner: <phase label>"
 1. **Marker extraction.** Find the LAST line in `finalMessage` matching `^TEST_RESULT_ARTIFACT: (.+)$`; if absent, stop with reason `test-runner response missing TEST_RESULT_ARTIFACT marker`.
 2. **Path-equality check.** Compare the marker path to `{ARTIFACT_PATH}`; if they differ, stop with reason `test-runner artifact path mismatch: expected <X>, got <Y>`.
 3. **Existence-and-non-empty check.** Read the marker path from disk; if missing or empty (zero bytes, or only whitespace), stop with reason `test-runner artifact missing or empty at <path>`.
-4. **Header-parse check.** Confirm the structured header has `PHASE`, `COMMAND`, `WORKING_DIRECTORY`, `EXIT_CODE`, `TIMESTAMP`, `FAILING_IDENTIFIERS_COUNT`, `FAILING_IDENTIFIERS:`, and `END_FAILING_IDENTIFIERS` in order, followed by `--- RAW RUN OUTPUT BELOW ---`; if not, stop with reason `test-runner artifact header malformed at <path>: <specific check>`.
+4. **Header-parse check.** Confirm the structured header has `PHASE`, `COMMAND`, `WORKING_DIRECTORY`, `EXIT_CODE`, `TIMESTAMP`, `FAILING_IDENTIFIERS_COUNT`, `FAILING_IDENTIFIERS:`, `END_FAILING_IDENTIFIERS`, `NON_RECONCILABLE_COUNT`, `NON_RECONCILABLE_FAILURES:`, and `END_NON_RECONCILABLE_FAILURES` in this exact order, followed by `--- RAW RUN OUTPUT BELOW ---`; if not, stop with reason `test-runner artifact header malformed at <path>: <specific check>`.
 
 **Dispatch-failure reasons.** If `subagent_run_serial` is unavailable, stop with reason `test-runner dispatch unavailable`. If dispatch returns an error result, stop with reason `test-runner dispatch failed`.
 
-**Reading the failing-identifier set.** On all checks passing, parse lines between `FAILING_IDENTIFIERS:` and `END_FAILING_IDENTIFIERS` as the failing-test identifier set and read `EXIT_CODE`; these are the inputs the integration regression model consumes.
+**Reading run results.** On all checks passing, parse the lines between `FAILING_IDENTIFIERS:` and `END_FAILING_IDENTIFIERS` as the run's stable failing-identifier set; parse the entries between `NON_RECONCILABLE_FAILURES:` and `END_NON_RECONCILABLE_FAILURES` (separated by single blank lines, multi-line entries permitted) as the run's non-reconcilable failure list; and read `EXIT_CODE`. These are the inputs Step 7 baseline classification, Step 12 post-wave reconciliation, the Debugger-first re-test, and Step 16 final-gate reconciliation consume. The integration regression model in `integration-regression-model.md` defines how each consumer applies them.
 
 ## Step 8: Execute waves
 
@@ -546,7 +562,15 @@ git commit -m "feat(plan): wave <N> - <plan_goal_summary>
 
 **Skip if:** Integration test is disabled (Step 3 settings) or no test command is available.
 
-Run the integration suite via the `test-runner` subagent (see Step 7's shared test-runner dispatch subsection) with `{ARTIFACT_PATH} = <working-dir>/.pi/test-runs/<plan-name>/wave-<N>-attempt-<K>.log` (an absolute path under the plan's working directory, where `<N>` is the current wave number and `<K>` is a 1-based attempt counter for this wave, starting at 1 and incremented on each Step 12 Debugger-first re-test) and `{PHASE_LABEL} = wave-<N>-attempt-<K>`. After artifact readback, read the failing-identifier set and `EXIT_CODE` from the artifact and pass them as `current_failing` into the integration regression model from `integration-regression-model.md`. Apply the reconciliation algorithm; pass if `new_regressions_after_deferment` is empty, fail if non-empty.
+Run the integration suite via the `test-runner` subagent (see Step 7's shared test-runner dispatch subsection) with `{ARTIFACT_PATH} = <working-dir>/.pi/test-runs/<plan-name>/wave-<N>-attempt-<K>.log` (an absolute path under the plan's working directory, where `<N>` is the current wave number and `<K>` is a 1-based attempt counter for this wave, starting at 1 and incremented on each Step 12 Debugger-first re-test) and `{PHASE_LABEL} = wave-<N>-attempt-<K>`. After artifact readback, read both the stable failing-identifier set and the non-reconcilable failure list from the artifact and compute the per-run inputs from [`integration-regression-model.md`](integration-regression-model.md):
+
+- `current_failing_stable` := contents of `FAILING_IDENTIFIERS:` in the artifact.
+- `current_non_reconcilable` := contents of `NON_RECONCILABLE_FAILURES:` in the artifact.
+- `current_non_baseline_stable` := `current_failing_stable \ baseline_failures` (byte-for-byte set difference).
+
+**Pass:** both `current_non_baseline_stable` and `current_non_reconcilable` are empty. Render the user-facing summary per the [User-facing summary format](integration-regression-model.md#user-facing-summary-format) section of `integration-regression-model.md` and proceed to wave `<N+1>` (or to Step 15 / Step 16 if this was the final wave).
+
+**Fail:** `current_non_baseline_stable` is non-empty OR `current_non_reconcilable` is non-empty. Render the three-section user-facing summary per `integration-regression-model.md` with the appropriate Step 12 fail-path header, then present the menu below.
 
 #### Menu
 
@@ -556,31 +580,31 @@ The menu differs between intermediate waves (any wave before the final wave of t
 
 ```
 Options:
-(a) Debug failures                  — dispatch a systematic-debugging pass against new_regressions_after_deferment, then remediate
-(b) Defer integration debugging     — add new_regressions_after_deferment to deferred_integration_regressions and proceed to wave <N+1>
-(c) Stop execution                  — halt plan execution; prior wave commits remain in git history
+(d) Debug failures now       — dispatch the Debugger-first flow against current_non_baseline_stable ∪ current_non_reconcilable, then re-test
+(c) Continue despite failures — proceed to wave <N+1> without modifying baseline_failures
+(x) Stop plan execution      — halt plan execution; prior wave commits remain in git history
 ```
 
-- **(a) Debug failures:** Run the `Debugger-first flow` (below) with the **Step 12 (post-wave)** parameter row, scoped to the tests in `new_regressions_after_deferment`. Do NOT undo the wave commit up front; the debugging dispatch inspects the committed state. This path counts as a retry toward the 3-retry limit in Step 13.
-- **(b) Defer integration debugging:** Compute `additions := new_regressions_after_deferment \ baseline_failures` (preserving disjointness with `baseline_failures`) and set `deferred_integration_regressions := deferred_integration_regressions ∪ additions`. The wave commit remains. Warn: "⚠️ Proceeding with deferred integration regressions. Final plan completion is BLOCKED until every deferred regression is resolved — the final wave's menu will not offer a defer option, so these failures must be debugged (or explicitly accepted via `Stop execution`) before the plan can report success." Then proceed to wave `<N+1>`.
-- **(c) Stop execution:** Halt execution. All prior wave commits remain in git history. Report partial progress (Step 14). The per-plan .pi/test-runs/<plan-name>/ directory is preserved on this exit path so the user can inspect run artifacts after stop.
+- **(d) Debug failures now:** Run the `Debugger-first flow` (below) with the **Step 12 (post-wave)** parameter row, scoped to `current_non_baseline_stable ∪ current_non_reconcilable`. Do NOT undo the wave commit up front; the debugging dispatch inspects the committed state. This path counts as a retry toward the 3-retry limit in Step 13.
+- **(c) Continue despite failures:** Proceed to wave `<N+1>`. **`baseline_failures` is NOT mutated.** No deferred state is persisted across waves. The next wave's integration run is reconciled solely against the frozen `baseline_failures` set, so any failure surfaced this wave that persists into the next wave will be flagged again under `current_non_baseline_stable` (or `current_non_reconcilable`) until it is fixed or the user stops execution. Warn: "⚠️ Continuing past wave `<N>` integration failures. These failures are NOT being recorded as baseline; the next wave will reconcile against the original frozen baseline, so unresolved failures will be flagged again."
+- **(x) Stop plan execution:** Halt execution. All prior wave commits remain in git history. Report partial progress (Step 14). The per-plan `.pi/test-runs/<plan-name>/` directory is preserved on this exit path so the user can inspect run artifacts after stop.
 
 **Final-wave menu** (wave `<N>` where `<N> == total_waves`):
 
 ```
 Options:
-(a) Debug failures  — dispatch a systematic-debugging pass against new_regressions_after_deferment, then remediate
-(c) Stop execution  — halt plan execution; prior wave commits remain in git history
+(d) Debug failures now   — dispatch the Debugger-first flow against current_non_baseline_stable ∪ current_non_reconcilable, then re-test
+(x) Stop plan execution  — halt plan execution; prior wave commits remain in git history
 ```
 
-The defer option is intentionally removed on the final wave: there is no subsequent wave to carry deferred regressions into, and the precondition that final completion is blocked until all plan-introduced regressions are resolved forbids silently shipping them. On the final wave, the user MUST either debug or stop.
+The continue option is intentionally absent on the final wave by design: there is no subsequent wave to absorb unresolved failures, and the precondition that final completion is blocked until current non-baseline stable failures and non-reconcilable failures are both empty forbids silently shipping them. On the final wave, the user MUST either debug or stop.
 
-- **(a) Debug failures:** Same as the intermediate-wave `(a)` — run the `Debugger-first flow` (below) with the **Step 12 (post-wave)** parameter row, scoped to `new_regressions_after_deferment`, counting toward the Step 13 retry limit. Deferred regressions from prior waves are NOT handled here; they are cleared by Step 16's "Final integration regression gate (precondition)" before the plan can report success. The same final gate also catches any regression introduced after this final wave (e.g. by Step 15 review/remediation) via the same three-set classification used here.
-- **(c) Stop execution:** Halt execution. Prior wave commits remain in git history. Report partial progress (Step 14). The per-plan .pi/test-runs/<plan-name>/ directory is preserved on this exit path so the user can inspect run artifacts after stop.
+- **(d) Debug failures now:** Same as the intermediate-wave `(d)` — run the `Debugger-first flow` (below) with the **Step 12 (post-wave)** parameter row, scoped to `current_non_baseline_stable ∪ current_non_reconcilable`, counting toward the Step 13 retry limit. Step 16's "Final integration regression gate (precondition)" applies the same baseline-only reconciliation against the most recent integration run before the plan can report success.
+- **(x) Stop plan execution:** Halt execution. Prior wave commits remain in git history. Report partial progress (Step 14). The per-plan `.pi/test-runs/<plan-name>/` directory is preserved on this exit path so the user can inspect run artifacts after stop.
 
 ### Debugger-first flow
 
-Shared by Step 12 (post-wave integration failures) and Step 16 (final integration regression gate). When the caller's `(a) Debug failures` option is chosen, do NOT re-dispatch every task in scope. Instead, follow the parameterized flow below with the caller's parameter row.
+Shared by Step 12 (post-wave integration failures) and Step 16 (final integration regression gate). When the caller's `(d) Debug failures now` option is chosen, do NOT re-dispatch every task in scope. Instead, follow the parameterized flow below with the caller's parameter row.
 
 **Parameter values by caller**
 
@@ -588,30 +612,31 @@ Shared by Step 12 (post-wave integration failures) and Step 16 (final integratio
 |---|---|---|
 | Scope | Triggered by Step 12's post-wave integration-test menu, while a current wave `<N>` exists. | Triggered by Step 16's "Final integration regression gate (precondition)" after all waves and any Step 15 remediation. No current wave exists; `HEAD` may be a Step 15 commit. |
 | Range / changed-file universe | The wave commit: use `git show HEAD --stat` and `git show HEAD` to enumerate the files introduced by the wave. | The plan execution range: `BASE_SHA` = `PRE_EXECUTION_SHA` (recorded in Step 8, immediately before the first wave dispatched); `HEAD_SHA` = `git rev-parse HEAD` at this moment. Use `git diff --name-only BASE_SHA HEAD_SHA` — NOT `git show HEAD`, since HEAD at final-gate time is not guaranteed to be a wave commit. |
+| Suspect / failure scope | The current run's `current_non_baseline_stable ∪ current_non_reconcilable` — the stable failures not in `baseline_failures` plus any non-reconcilable evidence from the same artifact. | Same: the final-gate run's `current_non_baseline_stable ∪ current_non_reconcilable`. |
 | Suspect task universe | Wave `<N>`'s tasks whose modified files appear in the failing stack traces or whose behavior the failing tests cover. If the mapping is ambiguous, include every wave task. | Every plan task whose declared `**Files:**` scope (from the plan file) intersects the failing stack traces or whose behavior the failing tests cover. If the mapping is ambiguous, include every plan task whose `**Files:**` scope intersects `git diff --name-only BASE_SHA HEAD_SHA` — i.e., every task whose output was touched by plan execution. Do NOT constrain to a single wave. |
-| Success condition | On re-dispatching `test-runner` per Step 7's shared test-runner dispatch subsection (with a fresh `wave-<N>-attempt-<K>` filename — increment `<K>`) and applying the Step 7 reconciliation algorithm, `new_regressions_after_deferment` is empty. Pre-existing baseline failures and previously-deferred regressions may remain; incidentally-cleared deferred regressions are reported under "Cleared deferred regressions" via the normal reconciliation rule. On success, proceed to the next wave. | On re-entering the Step 16 gate at its step 1 (re-run the suite, re-reconcile, recompute both sets), **both** `still_failing_deferred` and `new_regressions_after_deferment` are empty. Pre-existing baseline failures may remain. Unlike the wave-scoped case, the final gate must also clear any `still_failing_deferred` carried from prior waves. On success, the gate passes and normal completion proceeds. |
-| Commit template / undo behavior | Remediation commit message: `fix(plan): wave <N> regression — <short summary>`. **Commit-undo fallback is available**: if targeted remediation also fails and the user chooses to retry again, offer to undo the wave commit with `git reset HEAD~1` (working-tree changes preserved unstaged) before a broader retry. Do not undo proactively. | Remediation commit message: `fix(plan): final-gate regression — <short summary>`. **Commit-undo fallback is NOT available**: `HEAD` is not guaranteed to be a wave commit, and prior wave commits must be kept intact for the `(c) Stop execution` exit path. On repeated failure, the only exits are another debugging attempt (costing a Step 13 retry) or `(c) Stop execution`. |
+| Success condition | On re-dispatching `test-runner` per Step 7's shared test-runner dispatch subsection (with a fresh `wave-<N>-attempt-<K>` filename — increment `<K>`) and recomputing per `integration-regression-model.md`, **both** `current_non_baseline_stable` and `current_non_reconcilable` are empty. Pre-existing baseline failures (members of `baseline_failures ∩ current_failing_stable`) may remain. On success, proceed to the next wave. | On re-entering the Step 16 gate at its step 1 (re-run the suite, recompute the per-run inputs), **both** `current_non_baseline_stable` and `current_non_reconcilable` are empty. Pre-existing baseline failures may remain. On success, the gate passes and normal completion proceeds. |
+| Commit template / undo behavior | Remediation commit message: `fix(plan): wave <N> regression — <short summary>`. **Commit-undo fallback is available**: if targeted remediation also fails and the user chooses to retry again, offer to undo the wave commit with `git reset HEAD~1` (working-tree changes preserved unstaged) before a broader retry. Do not undo proactively. | Remediation commit message: `fix(plan): final-gate regression — <short summary>`. **Commit-undo fallback is NOT available**: `HEAD` is not guaranteed to be a wave commit, and prior wave commits must be kept intact for the `(x) Stop plan execution` exit path. On repeated failure, the only exits are another debugging attempt (costing a Step 13 retry) or `(x) Stop plan execution`. |
 
 **Flow** (applies to both callers; substitute the parameter values from the row above):
 
-1. **Identify suspects from the failure output.** Inspect the new failing test names, file paths in stack traces, and the diff of the caller's **range / changed-file universe**. Build a short suspect list drawn from the caller's **suspect task universe**, including each candidate task's title (and, for Step 16, its declared `**Files:**` scope). If the mapping is ambiguous, fall back to the "include every …" rule spelled out for the caller.
+1. **Identify suspects from the failure output.** Inspect the failing test identifiers in `current_non_baseline_stable`, the non-reconcilable evidence entries in `current_non_reconcilable`, file paths in stack traces, and the diff of the caller's **range / changed-file universe**. Build a short suspect list drawn from the caller's **suspect task universe**, including each candidate task's title (and, for Step 16, its declared `**Files:**` scope). If the mapping is ambiguous, fall back to the "include every …" rule spelled out for the caller.
 
 2. **Dispatch a single debugging pass** using the `coder` agent with a prompt that follows the `systematic-debugging` skill (using `subagent_run_serial` per Step 8). The prompt MUST include:
-   - The failing test output (full, not truncated). For Step 16, provide this for the union `still_failing_deferred ∪ new_regressions_after_deferment`, with a labeled breakdown of which identifiers were previously deferred vs. first surfaced at the final gate so the diagnosis can reason about cause (e.g., long-deferred regressions vs. regressions newly introduced by Step 15 remediation).
+   - The failing test output (full, not truncated) for the union `current_non_baseline_stable ∪ current_non_reconcilable`, with a labeled breakdown distinguishing stable identifiers (from `current_non_baseline_stable`) from non-reconcilable evidence entries (from `current_non_reconcilable`, copied verbatim from the artifact's `NON_RECONCILABLE_FAILURES:` block) so the diagnosis can reason about cause (e.g., test-level assertion failure vs. crash or collection error).
    - The range identifier from the caller's parameter row (Step 12: the wave commit SHA; Step 16: `BASE_SHA..HEAD_SHA`) and the list of files changed across it.
    - The suspect task list from step 1, with each task's title.
    - An explicit instruction: "Follow the `systematic-debugging` skill. Complete Phase 1 (root cause investigation) before proposing any fix. If the root cause is a clear, localized defect in one or two files, you MAY apply the fix in this same dispatch — follow TDD (write a failing test reproducing the regression, then fix). If the root cause spans multiple tasks or requires design judgment, return a diagnosis only and do NOT modify code."
    - The required report shape: either `STATUS: DONE` with the fix applied and RED/GREEN evidence for the regression test, or `STATUS: DONE_WITH_CONCERNS` containing a `## Diagnosis` section naming the implicated task(s), the root cause, and the minimal change needed.
 
-3. **Handle the debugging pass result.** Judge success by the caller's **success condition**.
+3. **Handle the debugging pass result.** Judge success by the caller's **success condition** (both `current_non_baseline_stable` and `current_non_reconcilable` empty on the re-test).
 
-   - **Diagnosed and fixed (`STATUS: DONE`):** Commit any applied fix using the caller's **commit template** (skip the commit if the dispatch returned `DONE` without file changes). Then evaluate the success condition: for Step 12, re-dispatch `test-runner` per Step 7's shared test-runner dispatch subsection (incrementing the wave attempt counter) and apply the Step 7 reconciliation algorithm; for Step 16, re-enter the gate at step 1 (re-run the suite, re-reconcile, recompute both sets). If the condition holds, the remediation succeeded — proceed per the caller's "on success" behavior. If it does not hold, treat this as a failed debugging pass (below).
+   - **Diagnosed and fixed (`STATUS: DONE`):** Commit any applied fix using the caller's **commit template** (skip the commit if the dispatch returned `DONE` without file changes). Then evaluate the success condition: for Step 12, re-dispatch `test-runner` per Step 7's shared test-runner dispatch subsection (incrementing the wave attempt counter) and recompute the per-run inputs from `integration-regression-model.md`; for Step 16, re-enter the gate at step 1 (re-run the suite, recompute both sets). If both sets are empty on the re-test, the remediation succeeded — proceed per the caller's "on success" behavior. If either set is still non-empty, treat this as a failed debugging pass (below).
    - **Diagnosis only (`STATUS: DONE_WITH_CONCERNS` with `## Diagnosis`):** Use the diagnosis to dispatch a **targeted remediation** — a second `coder` dispatch scoped to only the implicated task(s)/files from the diagnosis. Include the diagnosis text, the failing test output, and the original task spec(s) for the implicated task(s) from the plan file. After that dispatch returns, commit its changes using the caller's **commit template** (skip if no files changed) and evaluate the caller's success condition as above. If it holds, the remediation succeeded. If it does not, treat this as a failed debugging pass.
-   - **Failed debugging pass** (blocker, or the success condition still does not hold): re-present the caller's menu — Step 12's wave-appropriate menu (intermediate-wave `(a)`/`(b)`/`(c)` or final-wave `(a)`/`(c)`) or Step 16's `(a)`/`(c)` menu. Count this attempt toward the Step 13 retry limit for the implicated tasks.
+   - **Failed debugging pass** (blocker, or the success condition still does not hold): re-present the caller's menu — Step 12's wave-appropriate menu (intermediate-wave `(d)`/`(c)`/`(x)` or final-wave `(d)`/`(x)`) or Step 16's `(d)`/`(x)` menu. Count this attempt toward the Step 13 retry limit for the implicated tasks.
 
 4. **Do NOT blanket re-dispatch tasks outside the diagnosis.** Avoiding re-runs of unaffected tasks is the point of this flow — only the tasks explicitly implicated by the diagnosis are re-dispatched.
 
-5. **Commit-undo fallback** availability is governed by the caller's **commit template / undo behavior** parameter. When available (Step 12), it is used only after targeted remediation has also failed and the user chooses to retry again — never proactively. When not available (Step 16), the only exits on repeated failure are another debugging attempt (costing a Step 13 retry) or `(c) Stop execution`.
+5. **Commit-undo fallback** availability is governed by the caller's **commit template / undo behavior** parameter. When available (Step 12), it is used only after targeted remediation has also failed and the user chooses to retry again — never proactively. When not available (Step 16), the only exits on repeated failure are another debugging attempt (costing a Step 13 retry) or `(x) Stop plan execution`.
 
 ## Step 13: Handle failures and retries
 
@@ -635,15 +660,20 @@ Apply wave pacing from Step 3. These options only govern the cadence of waves wh
 - Leave the plan file in `.pi/plans/` for reference and any manual follow-up.
 - Report which tasks completed, which failed, and which remain.
 
-**Deferred integration regressions:** If `deferred_integration_regressions` is non-empty at the time execution stops, include them under a dedicated heading in the partial-progress report:
+**Most recent integration run failures:** If a `test-runner` artifact exists for this plan (any of the post-wave `wave-<N>-attempt-<K>.log` or final-gate `final-gate-<seq>.log` files), use the most recent artifact and recompute `current_non_baseline_stable` and `current_non_reconcilable` against the frozen `baseline_failures` set. Include the unresolved failures under dedicated headings in the partial-progress report:
 
 ```
-### Deferred integration regressions (unresolved)
-<list of tests in deferred_integration_regressions>
+### Most recent integration run failures (unresolved)
+<list of stable identifiers in current_non_baseline_stable from the most recent artifact, or `(none)` if empty>
 
-These regressions were introduced by this plan and deferred during intermediate waves.
-They remain unresolved and must be addressed before this branch is considered shippable.
+### Non-reconcilable failures from the most recent integration run
+<list of evidence entries from current_non_reconcilable from the most recent artifact, or `(none)` if empty>
+
+These failures were observed in the most recent integration run on this branch and remain unresolved.
+They must be debugged before this branch is considered shippable.
 ```
+
+The most recent artifact path itself is preserved on every `(x) Stop plan execution` exit path (the per-plan `.pi/test-runs/<plan-name>/` directory is kept on stop) so the user can inspect the raw run output alongside this report.
 
 ## Step 15: Request code review
 
@@ -674,33 +704,36 @@ After all waves complete successfully (and if the user chose review in Step 3):
 
 **Skip if:** Integration tests are disabled (Step 3 settings) or no test command is available.
 
-Otherwise, always run this gate: re-run the full integration suite and confirm no plan-introduced regression (deferred or freshly surfaced by Step 15 remediation) remains before moving the plan to done.
+Otherwise, always run this gate: re-run the full integration suite and confirm no plan-introduced regression remains before moving the plan to done. The gate uses the same baseline-only reconciliation defined in [`integration-regression-model.md`](integration-regression-model.md) — comparing the final-gate run's stable failures against the frozen `baseline_failures` and treating any non-reconcilable failure as a blocker.
 
 **Gate protocol:**
 
-1. **Re-dispatch the integration suite via `test-runner`** per Step 7's shared test-runner dispatch subsection with `{ARTIFACT_PATH} = <working-dir>/.pi/test-runs/<plan-name>/final-gate-<seq>.log` (an absolute path under the plan's working directory, where `<seq>` is a 1-based counter incremented for every gate entry — initial entry is `1`, each subsequent re-entry from `(a) Debug failures now` is `2`, `3`, …) and `{PHASE_LABEL} = final-gate-<seq>`. Read back the failing-identifier set and `EXIT_CODE` from the artifact; the agent has already applied the Step 7 identifier-extraction contract so identifiers are directly comparable with `baseline_failures` and `deferred_integration_regressions`.
+1. **Re-dispatch the integration suite via `test-runner`** per Step 7's shared test-runner dispatch subsection with `{ARTIFACT_PATH} = <working-dir>/.pi/test-runs/<plan-name>/final-gate-<seq>.log` (an absolute path under the plan's working directory, where `<seq>` is a 1-based counter incremented for every gate entry — initial entry is `1`, each subsequent re-entry from `(d) Debug failures now` is `2`, `3`, …) and `{PHASE_LABEL} = final-gate-<seq>`. Read back the artifact per Step 7's "Reading run results" rule.
 
-2. **Apply the reconciliation algorithm** from [`integration-regression-model.md`](integration-regression-model.md) to compute `current_failing`, reconcile `deferred_integration_regressions`, and derive `new_regressions_after_deferment`.
+2. **Compute the per-run inputs** from [`integration-regression-model.md`](integration-regression-model.md):
+   - `current_failing_stable` := contents of `FAILING_IDENTIFIERS:` in the final-gate artifact.
+   - `current_non_reconcilable` := contents of `NON_RECONCILABLE_FAILURES:` in the final-gate artifact.
+   - `current_non_baseline_stable` := `current_failing_stable \ baseline_failures` (byte-for-byte set difference).
 
-3. **Gate on the union `still_failing_deferred ∪ new_regressions_after_deferment`:**
-   - If **both** sets are empty: the gate passes. Proceed to `### 1. Move plan to done`.
-   - If **either** `still_failing_deferred` or `new_regressions_after_deferment` is non-empty: the plan cannot be marked complete while either set is non-empty. Present the report and menu below.
+3. **Gate on the union `current_non_baseline_stable ∪ current_non_reconcilable`:**
+   - If **both** `current_non_baseline_stable` and `current_non_reconcilable` are empty: the gate passes. Proceed to `### 1. Move plan to done`.
+   - If **either** `current_non_baseline_stable` or `current_non_reconcilable` is non-empty: the plan cannot be marked complete. Present the report and menu below.
 
-   Use the three-section format defined in the [User-facing summary format](integration-regression-model.md#user-facing-summary-format) section of `integration-regression-model.md` with the header `⚠️ Final completion blocked: plan-introduced integration regressions remain.` and a trailing note `These regressions were introduced by this plan. They must be resolved before the plan can be marked complete.` followed by this menu:
+   Use the three-section format defined in the [User-facing summary format](integration-regression-model.md#user-facing-summary-format) section of `integration-regression-model.md` with the header `⚠️ Final completion blocked: current integration failures remain.` and a trailing note `These current failures must be resolved before the plan can be marked complete (current_non_baseline_stable and current_non_reconcilable must both be empty).` followed by this menu:
 
    ```
    Options:
-   (a) Debug failures now — run the `Debugger-first flow` (defined in Step 12) with the Step 16 (final-gate) parameter row, against the plan-introduced regressions (deferred ∪ new); on success, re-enter this gate.
-   (c) Stop execution     — halt plan execution; prior wave commits remain in git history.
+   (d) Debug failures now — run the `Debugger-first flow` (defined in Step 12) with the Step 16 (final-gate) parameter row, against current_non_baseline_stable ∪ current_non_reconcilable; on success, re-enter this gate.
+   (x) Stop execution     — halt plan execution; prior wave commits remain in git history.
    ```
 
-   Empty lists render as `(none)`. The menu mirrors the Step 12 **final-wave menu** — there is no `(b) Defer` option here by design, matching the final-wave rule that plan-introduced regressions cannot be silently deferred past the point where the plan reports success.
+   Empty sections render as `(none)`. The menu mirrors the Step 12 **final-wave menu** — there is no continue option here by design, matching the rule that plan-introduced regressions cannot be silently shipped past the point where the plan reports success.
 
 4. **Menu actions:**
-   - **(a) Debug failures now:** Run the shared `Debugger-first flow` (defined under Step 12) with the **Step 16 (final-gate)** parameter row, scoped to `still_failing_deferred ∪ new_regressions_after_deferment`. That flow judges success by re-entering this gate at step 1 (re-run the suite, re-reconcile, recompute both sets), so a remediation attempt succeeds when both `still_failing_deferred` and `new_regressions_after_deferment` are empty on the re-run. Repeat until both sets are empty or the user picks `(c)`. Each debugging attempt counts toward the Step 13 retry budget for the implicated tasks.
-   - **(c) Stop execution:** Halt execution. Report partial progress via Step 14 so the user has a complete picture of plan-introduced failures left on the branch: list any non-empty `deferred_integration_regressions` under the deferred-regressions heading, and list the still-unresolved `new_regressions_after_deferment` separately as newly discovered final-gate regressions — do NOT fold them under the deferred-regressions heading, since they were never deferred by the user. Do NOT move the plan file, close the todo, or run branch completion. The per-plan .pi/test-runs/<plan-name>/ directory is preserved on this exit path so the user can inspect run artifacts after stop.
+   - **(d) Debug failures now:** Run the shared `Debugger-first flow` (defined under Step 12) with the **Step 16 (final-gate)** parameter row, scoped to `current_non_baseline_stable ∪ current_non_reconcilable`. That flow judges success by re-entering this gate at step 1 (re-run the suite, recompute `current_failing_stable`, `current_non_reconcilable`, and `current_non_baseline_stable`), so a remediation attempt succeeds when both gate-blocking sets are empty on the re-run. Repeat until both gate-blocking sets are empty or the user picks `(x)`. Each debugging attempt counts toward the Step 13 retry budget for the implicated tasks.
+   - **(x) Stop execution:** Halt execution. Report partial progress via Step 14 so the user has a complete picture of failures left on the branch: list the unresolved `current_non_baseline_stable` and `current_non_reconcilable` from the most recent final-gate artifact under the Step 14 most-recent-run headings. Do NOT move the plan file, close the todo, or run branch completion. The per-plan `.pi/test-runs/<plan-name>/` directory is preserved on this exit path so the user can inspect run artifacts after stop.
 
-**Blocking guarantee:** Steps `### 1. Move plan to done`, `### 2. Close linked todo`, and `### 4. Branch completion` MUST NOT execute while `still_failing_deferred ∪ new_regressions_after_deferment` is non-empty. The only exits from this gate are: (a) both sets become empty (gate passes), or (b) the user selects `(c) Stop execution`.
+**Blocking guarantee:** Steps `### 1. Move plan to done`, `### 2. Close linked todo`, and `### 4. Branch completion` MUST NOT execute while `current_non_baseline_stable ∪ current_non_reconcilable` is non-empty. The only exits from this gate are: (a) both sets become empty (gate passes), or (b) the user selects `(x) Stop execution`.
 
 ### 1. Move plan to done
 
