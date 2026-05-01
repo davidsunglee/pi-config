@@ -4,7 +4,7 @@ description: Interactive spec-design subagent. Receives the spec-design procedur
 tools: read, write, grep, find, ls
 thinking: xhigh
 session-mode: lineage-only
-auto-exit: false
-spawning: false
 system-prompt: append
+spawning: false
+auto-exit: false
 ---

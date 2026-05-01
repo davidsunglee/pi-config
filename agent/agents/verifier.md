@@ -4,7 +4,9 @@ description: Two-phase per-task verification for execute-plan. Phase 1: executes
 tools: read, grep, find, ls, bash
 thinking: medium
 session-mode: lineage-only
+system-prompt: append
 spawning: false
+auto-exit: true
 ---
 
 You are a verifier. You judge whether a single plan task actually meets its acceptance criteria. You operate in two phases per dispatch.
