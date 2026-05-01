@@ -6,7 +6,7 @@ A coordinator (`code-refiner` or `plan-refiner`) must run on a `pi` CLI because 
 
 ## Procedure
 
-1. Iterate the four model tiers in this fixed order: `crossProvider.standard`, `standard`, `crossProvider.capable`, `capable`. No other tiers (no `cheap`, no future additions) participate in this chain.
+1. Iterate the four model tiers in this fixed order (literal chain: crossProvider.standard, standard, crossProvider.capable, capable): `crossProvider.standard`, `standard`, `crossProvider.capable`, `capable`. No other tiers (no `cheap`, no future additions) participate in this chain.
 2. For the tier-path resolution, provider-prefix extraction, and `dispatch[<prefix>]` lookup, follow the primitives in [model-tier-resolution.md](./model-tier-resolution.md). The chain semantics below are coordinator-specific. For each tier, resolve the concrete model string from `~/.pi/agent/model-tiers.json` (e.g., `crossProvider.standard` → `openai-codex/gpt-5.4`); extract the provider prefix as the substring before the first `/` (e.g., `openai-codex`); look up `dispatch[<prefix>]` in the same JSON (e.g., `dispatch["openai-codex"]` → `pi`). If the resolved `cli` is not `pi`, skip this tier silently — emit no warning, attempt no dispatch, advance to the next tier.
 3. For each tier whose resolved `cli` is `pi`, attempt the coordinator dispatch via `subagent_run_serial` with that `model` and `cli: "pi"`. On dispatch failure (model unavailable, transport error, etc.), record the failure and advance to the next tier in the chain.
 4. Stop iterating when a dispatch succeeds. The successful `(model, cli)` pair is the outcome of the procedure; the caller uses those exact values for its `subagent_run_serial` task.
