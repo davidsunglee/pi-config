@@ -461,36 +461,21 @@ This gate exits when `BLOCKED_TASKS` is empty and `CONCERNED_TASKS` is either em
 
 ## Step 11: Verify wave output
 
-**Precondition:** Step 10 (wave gate) must have exited. Verification for each task runs in a fresh-context `verifier` subagent via `agent/skills/execute-plan/verify-task-prompt.md`; the orchestrator only collects command evidence and routes the verifier's verdict.
+**Precondition:** Step 10 (wave gate) must have exited. Verification for each task runs in a fresh-context `verifier` subagent via `agent/skills/execute-plan/verify-task-prompt.md`. The verifier collects command evidence in Phase 1 (executing each command-style `Verify:` recipe byte-equal verbatim) and judges each criterion in Phase 2; the orchestrator dispatches and routes the verdict.
 
 **Protocol-error stop — missing `Verify:` recipes:** Before dispatching the verifier, check that every acceptance criterion for the task has an attached `Verify:` recipe in the plan. If any acceptance criterion is missing a `Verify:` recipe at execute time, STOP execution for this wave. Report the offending task number and criterion text to the user, recommend re-running `generate-plan` to regenerate the plan, and do not dispatch the verifier, do not treat the task as passing, and do not silently skip verification. A plan without complete `Verify:` recipes is a protocol error from generate-plan and must be regenerated before execution can continue.
 
-### Step 11.1: Orchestrator collects command evidence
-
-For every acceptance criterion whose `Verify:` recipe is a shell command (e.g. `grep ...`, `cat ...`, `test -f ...`, `go vet ./...`), the orchestrator — NOT the verifier — runs the command and captures:
-
-- the exact command string,
-- the exit status,
-- the relevant portion of stdout,
-- the relevant portion of stderr.
-
-**Truncation rule (command evidence).** Apply this rule independently to each stream (stdout and stderr) of a recipe. If a single stream exceeds 200 lines or 20 KB, truncate it by keeping the first 100 lines and the last 50 lines, separated by a single marker line that records the pre-truncation line count and byte count (e.g., `[<N> lines, <B> bytes; truncated to first 100 + last 50]`). Apply the rule to each stream independently; never combine streams for the threshold calculation, and never silently drop output. If the relevant evidence for a criterion falls inside the truncated window, the verifier MUST return `FAIL` with `reason: insufficient evidence` for that criterion rather than guessing.
-
-Emit one evidence block per command-style recipe, with the header `[Evidence for Criterion N]` where `N` is the 1-based criterion number in plan order. Each block contains `command: <exact command>`, `exit_code: <status>`, `stdout:` (fenced), and `stderr:` (fenced), in that order, after the truncation rule. If a criterion has no command-style recipe, no evidence block is emitted for it (gaps in numbering are expected and correct). These blocks are what the orchestrator passes as `{ORCHESTRATOR_COMMAND_EVIDENCE}` in the verifier prompt; the verifier cites them by criterion number (e.g. `evidence: Evidence for Criterion 2`).
-
-File-inspection and prose-inspection recipes (e.g. "read Step 11.2 and confirm …", "confirm the file contains section X") are NOT executed by the orchestrator. The verifier evaluates them directly against the named files.
-
 ### Step 11.2: Dispatch the verifier
 
-For each task in the wave (regardless of its Step 9 status, except `BLOCKED` which is already handled in Step 10), dispatch a fresh `verifier` subagent using the template at `agent/skills/execute-plan/verify-task-prompt.md`. The verifier does NOT run commands. It reads the command-evidence blocks produced in Step 11.1, reads only the files listed under `## Verifier-Visible Files` (plus any files explicitly named by a recipe), and returns per-criterion verdicts.
+For each task in the wave (regardless of its Step 9 status, except `BLOCKED` which is already handled in Step 10), dispatch a fresh `verifier` subagent using the template at `agent/skills/execute-plan/verify-task-prompt.md`. The verifier executes command-style `Verify:` recipes in Phase 1 and judges every criterion in Phase 2, then returns per-criterion verdicts under `## Per-Criterion Verdicts` and an overall `VERDICT:` line under `## Overall Verdict`. The orchestrator does not pre-collect command evidence — that work moved into the verifier itself per `agent/agents/verifier.md`.
 
-Verifier dispatches for the wave run in parallel, bounded by the pi-interactive-subagent `MAX_PARALLEL_HARD_CAP` cap (see Step 5). Do not verify sequentially — issue all verifier subagents concurrently up to the cap and wait for all of them to return before parsing in Step 11.3.
+Verifier dispatches for the wave run in parallel, bounded by the pi-interactive-subagent `MAX_PARALLEL_HARD_CAP` cap (see Step 5). Issue all verifier subagents concurrently up to the cap and wait for all of them to return before parsing in Step 11.3.
 
 Fill the template's placeholders as follows:
 
 - `{TASK_SPEC}` — the task block from the plan, verbatim.
 - `{ACCEPTANCE_CRITERIA_WITH_VERIFY}` — the acceptance criteria list for the task, each paired with its `Verify:` recipe, numbered starting at 1.
-- `{ORCHESTRATOR_COMMAND_EVIDENCE}` — the evidence blocks collected in Step 11.1, in criterion order. If the task has no command-style recipes, leave this section empty.
+- `{PHASE_1_RECIPES}` — the orchestrator-extracted, command-style `Verify:` recipes for this task, numbered to match the criterion index in `{ACCEPTANCE_CRITERIA_WITH_VERIFY}`. Format each entry as `[Recipe for Criterion N] <recipe text>` on its own line. A criterion whose `Verify:` recipe is file-inspection or prose-inspection produces no entry — gaps in numbering are expected and correct. If the task has no command-style recipes, leave this section empty.
 - `{MODIFIED_FILES}` — the orchestrator-assembled verifier-visible file set, as a newline-separated, deduplicated list of paths. The orchestrator MUST compute this set as the union of three inputs so that the worker being judged cannot narrow its own verification surface:
   1. **Task-declared scope.** Every path listed in the plan task's `**Files:**` section, verbatim. A task that declares a file is on the hook for that file regardless of whether the worker reported touching it.
   2. **Worker-reported changes.** The paths listed in the worker's `## Files Changed` section. These are informative but NOT authoritative on their own — a worker that omits a file it actually modified cannot hide that file from the verifier.
@@ -499,9 +484,9 @@ Fill the template's placeholders as follows:
 - `{DIFF_CONTEXT}` — the uncommitted wave diff against `HEAD`, produced as follows. For tracked files modified in this wave, use `git diff HEAD -- <modified files>`. For newly created (untracked) files, `git diff HEAD` does not produce output; instead, generate a diff for each new file via `git diff --no-index /dev/null -- <file>` (which produces a unified diff showing the entire file as added). Concatenate both outputs into a single diff block. To identify which files are new vs. modified, check `git status --porcelain -- <modified files>`: entries prefixed with `??` are untracked/new; all others are tracked modifications. This reflects the working tree vs. the last commit, which is where wave changes live before Step 12's commit. Do NOT substitute a committed-range diff (e.g. a diff between `HEAD` and a prior commit) or a `--staged` diff; wave changes have not been committed yet. **Diff truncation rule.** If the combined diff output exceeds 500 lines or 40 KB, truncate it by keeping the first 300 lines and the last 100 lines, separated by a single marker line that records the pre-truncation line count and byte count (e.g., `[diff truncated — <N> lines, <B> bytes total; verifier should note this and fall back to reading the named files for file-inspection criteria whose relevant code may lie in the truncated window]`). Never silently drop diff output. If a file-inspection criterion cannot be judged because the relevant hunk is inside the truncated window, the verifier should read the named file(s) directly from `## Verifier-Visible Files` rather than guessing. **Sub-task dispatch carve-out:** Sub-task dispatches from the Blocked handling phase of Step 10 (split-into-sub-tasks) MUST occur pre-commit — their changes must remain in the working tree at Step 11 time so `git diff HEAD` captures them alongside the rest of the wave. Step 12's commit is the only sanctioned transition from working tree to committed state for wave changes, and it runs after Step 11. If for any reason a sub-task's changes were committed before Step 11 runs for this wave (a protocol violation that should not normally occur), substitute `git diff <pre-subtask-commit>..HEAD -- <modified files>` for those criteria so the verifier still sees the sub-task's changes; otherwise file-inspection criteria will fail for insufficient evidence even though the work was done.
 - `{WORKING_DIR}` — the plan's working directory.
 
-**Verifier model tier:** Default the verifier's model to `standard`. If the verified task itself ran at `capable`, upgrade the verifier to `capable` so its judgment matches the task's complexity. Never downgrade below `standard`.
+**Verifier model tier:** Every verifier dispatch in execute-plan uses the model resolved from `crossProvider.standard` in `~/.pi/agent/model-tiers.json`, with `cli` resolved through `dispatch[<provider>]` for that model's provider prefix. Verifier model selection is no longer based on the model tier used by the task under review (the prior `standard` default plus `capable` upgrade rule is removed). Do not silently fall back to a non-cross-provider tier; if `crossProvider.standard` cannot be resolved, surface the resolution failure to the user.
 
-Dispatch the verifier wave as `subagent_run_parallel { tasks: [{ name: "<task-N>: <task-title>", agent: "verifier", task: "<filled verify-task-prompt.md>", model: "<resolved>", cli: "<resolved>" }, ...] }` — using the Step 6 model-tier resolution to map `standard`/`capable` to the concrete model and cli strings.
+Dispatch the verifier wave as `subagent_run_parallel { tasks: [{ name: "<task-N>: <task-title>", agent: "verifier", task: "<filled verify-task-prompt.md>", model: "<resolved crossProvider.standard model>", cli: "<dispatch[<provider>] for that model>" }, ...] }`.
 
 ### Step 11.3: Parse verifier output and gate the wave
 
@@ -521,7 +506,13 @@ Route the parsed result:
 - `VERDICT: PASS` — the task passes wave verification.
 - `VERDICT: FAIL` — route the task into Step 13's retry loop, including the per-criterion `FAIL` entries and their `reason:` text so the retry has concrete remediation targets.
 
-**Protocol-error routing.** Any malformed verifier output — missing or extra criterion blocks, duplicate criterion numbers, out-of-range numbers, a `verdict:` prefix, lowercase verdict tokens, or an unparseable overall verdict line — is treated exactly as `VERDICT: FAIL` for the task. The orchestrator routes it into Step 13's retry loop with a concrete description of the protocol violation (e.g. "missing [Criterion 3]", "duplicate [Criterion 2]", "out-of-range [Criterion 5] when K=4") so the re-dispatched verifier has a concrete target to fix. Protocol errors never pass the wave gate and are never silently interpreted as `PASS`.
+**Protocol-error routing.** Any malformed verifier output — missing or extra criterion blocks, duplicate criterion numbers, out-of-range numbers, a `verdict:` prefix, lowercase verdict tokens, or an unparseable overall verdict line — is treated exactly as `VERDICT: FAIL` for the task. Three additional protocol errors apply specifically to the two-phase verifier introduced for the Phase 1 evidence-collection path:
+
+- **`verifier phase-1 evidence block malformed at criterion N: <specific check>`** — a `[Evidence for Criterion N]` block is present in the verifier's `## Phase 1 Evidence` section but does not contain all four labelled fields (`command:`, `exit_code:`, `stdout:`, `stderr:`) in that order, or a labelled field is unparseable. `<specific check>` names the missing or malformed field.
+- **`verifier missing evidence block for command-style criterion N`** — the orchestrator supplied a recipe for criterion N in `{PHASE_1_RECIPES}` but the verifier's `## Phase 1 Evidence` section contains no `[Evidence for Criterion N]` block.
+- **`verifier ran command not matching any phase-1 recipe: <command>`** — a `[Evidence for Criterion N]` block's `command:` line is not BYTE-EQUAL to any recipe text supplied in `{PHASE_1_RECIPES}` (recipe-verbatim discipline violation).
+
+All protocol errors — including these three — route into Step 13's retry loop with a concrete description so the re-dispatched verifier has a concrete target to fix. Protocol errors never pass the wave gate and are never silently interpreted as `PASS`.
 
 **Wave gate exit:** The wave exits Step 11 successfully only when every task in the wave has `VERDICT: PASS`. If any task has `VERDICT: FAIL`, the wave is not verified and Step 12 MUST NOT run until Step 13's retry loop produces a `VERDICT: PASS` for every failed task.
 
