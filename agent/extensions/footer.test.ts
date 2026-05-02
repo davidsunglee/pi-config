@@ -3,11 +3,13 @@ import assert from "node:assert/strict";
 
 import footerFactory, {
 	computeVisibility,
+	DEFAULT_TOKENS,
 	formatContextDenominator,
 	getProviderPrefix,
 	getThinkingLabel,
 	joinMetrics,
 	sanitizeStatusTexts,
+	THEME_COLORS,
 	type FieldWidths,
 } from "./footer.ts";
 
@@ -82,8 +84,8 @@ test("tokens drop as a single unit (both arrows + values)", () => {
 		hasBranch: false, hasSessionName: false, hasThinking: false,
 		hasProvider: true, hasTokens: true,
 	};
-	// With tokens: 14 + 12 + 2 + (6 + 8) + 14 + 1 separator = 59
-	const withTokens = 59;
+	// With tokens: 14 + 12 + 2 + (6 + 8) + 14 + 1*1 = 57
+	const withTokens = 57;
 
 	const flags = computeVisibility(fw(withTokens - 1, fields));
 	assert.ok(!flags.showTokens, "tokens should drop as a unit");
@@ -132,7 +134,7 @@ test("model name and context percent are never hidden", () => {
 });
 
 test("long cwd does NOT cause row-2 fields to drop when truncation suffices", () => {
-	// Row 2 full need: 14 + 12 + 2 + (6 + 8) + 14 + 1*3 sep = 59
+	// Row 2 full need: 14 + 12 + 2 + (6 + 8) + 14 + 1*1 sep = 57
 	const flags = computeVisibility(fw(72, {
 		pwdStrWidth: 100, // very long cwd
 		branchWidth: 9,
@@ -159,9 +161,10 @@ test("context denominator drops as a unit with / separator", () => {
 });
 
 test("cross-row priority: row-2 tokens drop before row-1 session name", () => {
-	// With the current 3-char ' · ' separator, row 2 with tokens needs:
-	// 14 + 2 + (6 + 8) + 14 + 3 = 47
-	const flags = computeVisibility(fw(46, {
+	// Row 2 with tokens: 14 + 2 + (6 + 8) + 14 + 1 = 45. Row 2 without tokens: 14 + 2 + (6 + 8) = 30.
+	// With session row 1 needs ellipsis(3) + 4 + branch(9) + padding(2) + sessionName(15) = 33 ≤ 44.
+	// So at width 44 tokens drops and session survives.
+	const flags = computeVisibility(fw(44, {
 		pwdStrWidth: 20, branchWidth: 9, sessionNameWidth: 15,
 		modelNameWidth: 14,
 		contextPercentWidth: 6, contextDenomWidth: 8,
@@ -211,27 +214,27 @@ test("context denominator wraps ' / ' in symbols color (spaces around slash)", (
 	);
 });
 
-test("joinMetrics inserts grey-dot separators only between present metrics", () => {
+test("joinMetrics joins present metrics with a single literal space", () => {
 	assert.equal(
 		joinMetrics(["A", "B", "C"], mockColorize),
-		"A[symbols: · ]B[symbols: · ]C",
+		"A B C",
 	);
-	assert.equal(joinMetrics(["A", "B"], mockColorize), "A[symbols: · ]B");
+	assert.equal(joinMetrics(["A", "B"], mockColorize), "A B");
 	assert.equal(joinMetrics(["A"], mockColorize), "A");
 	assert.equal(joinMetrics([], mockColorize), "");
-	// Empty entries must not produce dead separators.
+	// Empty entries must not produce doubled spaces or dead separators.
 	assert.equal(
 		joinMetrics(["A", "", "C"], mockColorize),
-		"A[symbols: · ]C",
+		"A C",
 	);
 });
 
-test("row 2 width budget accounts for 3-char ' · ' metric separators", () => {
-	// With 3-char separator between 2 metrics (ctx, tokens), no cost:
+test("row 2 width budget accounts for 1-char ' ' metric separators", () => {
+	// With 1-char separator between 2 metrics (ctx, tokens), no cost:
 	//   left: modelName=14 + provider=12 = 26
 	//   padding: 2
-	//   right: (6 + 8) + 14 + 1*3 = 31
-	//   total: 59
+	//   right: (6 + 8) + 14 + 1*1 = 29
+	//   total: 57
 	const fields = {
 		pwdStrWidth: 10,
 		modelNameWidth: 14, providerWidth: 12,
@@ -239,11 +242,18 @@ test("row 2 width budget accounts for 3-char ' · ' metric separators", () => {
 		tokensWidth: 14,
 		hasProvider: true, hasTokens: true,
 	};
-	const fits = computeVisibility(fw(59, fields));
-	assert.ok(fits.showTokens, "tokens should fit exactly at width 59");
+	const fits = computeVisibility(fw(57, fields));
+	assert.ok(fits.showTokens, "tokens should fit exactly at width 57");
 
-	const justUnder = computeVisibility(fw(58, fields));
-	assert.ok(!justUnder.showTokens, "tokens should drop when row 2 needs 59 but width is 58");
+	const justUnder = computeVisibility(fw(56, fields));
+	assert.ok(!justUnder.showTokens, "tokens should drop when row 2 needs 57 but width is 56");
+});
+
+test("nord theme override sets provider prefix color to nord3 (#4c566a)", () => {
+	assert.equal(THEME_COLORS.nord?.provider, "#4c566a", "Nord override must use nord3 hex");
+	assert.equal(DEFAULT_TOKENS.provider, "dim", "default provider color must fall back to the theme's dim token");
+	assert.equal(THEME_COLORS.carbonfox?.provider, undefined, "non-Nord themes must not override provider so they keep their dim-token rendering");
+	assert.equal(THEME_COLORS.everblush?.provider, undefined, "non-Nord themes must not override provider so they keep their dim-token rendering");
 });
 
 test("session_shutdown restores the built-in footer", async () => {

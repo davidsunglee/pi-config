@@ -6,7 +6,7 @@
  *
  * Layout:
  *   Line 1: ~/path · branch                               session-name
- *   Line 2: provider model · thinking    context% / window · ↑in ↓out
+ *   Line 2: provider model thinking    context%/window ↑in ↓out
  *   Line 3: extension statuses (optional)
  *
  * Context usage escalation is preserved:
@@ -25,13 +25,14 @@
  * Fields with no override in THEME_COLORS fall back to the theme's own token
  * (DEFAULT_TOKENS), so colors adapt automatically when the user switches themes.
  *
- * The modelProvider prefix is always rendered in the "dim" theme token.
+ * The modelProvider prefix uses the configurable "provider" field, which falls back to the
+ * theme's "dim" token by default and is overridden to nord3 (#4c566a) in the Nord theme block.
  * The thinking level always matches the thinking border bar colors from the theme.
- * Neither is user-configurable.
  *
  * Example:
  *   const THEME_COLORS: Record<string, Partial<FooterColors>> = {
  *     dracula: { modelName: "magenta", branch: "brightCyan" },
+ *     nord: { provider: "#4c566a", modelName: "#88c0d0" },
  *   };
  */
 
@@ -45,6 +46,7 @@ import { truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
 // ─── Colour type and user-configurable map ────────────────────────────────────
 
 export type FooterColors = {
+  provider: string | number;
   modelName: string | number;
   tokens: string | number;
   contextUsage: string | number;
@@ -161,7 +163,7 @@ export function computeVisibility(f: FieldWidths): VisibilityFlags {
   };
 }
 
-const THEME_COLORS: Record<string, Partial<FooterColors>> = {
+export const THEME_COLORS: Record<string, Partial<FooterColors>> = {
   // Add entries here to override defaults for specific themes, e.g.:
   // "dracula": { modelName: "magenta", cost: "#ffb86c" },
   carbonfox: {
@@ -187,6 +189,7 @@ const THEME_COLORS: Record<string, Partial<FooterColors>> = {
     symbols: "#5c6466", // dim gray — slightly brighter separators and punctuation
   },
   nord: {
+    provider: "#4c566a", // nord3 — slightly lighter than the dim token (nord2) so the prefix is readable but still subordinate to modelName
     modelName: "#88c0d0", // nord8 — accent blue
     tokens: "#81a1c1", // nord9 — subtle/muted blue
     contextUsage: "#88c0d0", // nord8 — slightly brighter blue than tokens
@@ -201,7 +204,8 @@ const THEME_COLORS: Record<string, Partial<FooterColors>> = {
 
 // ─── Default theme-token fallbacks ───────────────────────────────────────────
 
-const DEFAULT_TOKENS: Record<keyof FooterColors, ThemeColor> = {
+export const DEFAULT_TOKENS: Record<keyof FooterColors, ThemeColor> = {
+  provider: "dim",
   modelName: "accent",
   tokens: "border",
   contextUsage: "accent",
@@ -382,14 +386,11 @@ export function formatContextDenominator(
   );
 }
 
-/** Separator width (" · ") used between adjacent row-2 metrics. */
-export const METRIC_SEP_WIDTH = 3;
+/** Separator width (" ") used between adjacent row-2 metrics. */
+export const METRIC_SEP_WIDTH = 1;
 
 /**
- * Join row-2 metrics with a grey-dot separator (" · ") colored by `symbols`.
- *
- * Empty/blank entries are skipped so a missing metric cannot produce a
- * dead separator like "ctx ·  · cost".
+ * Join row-2 metrics with a single literal space. Empty/blank entries are skipped so a missing metric cannot produce doubled spaces, leading spaces, trailing spaces, or dead separators.
  */
 export function joinMetrics(
   metrics: readonly string[],
@@ -397,7 +398,7 @@ export function joinMetrics(
 ): string {
   const present = metrics.filter((m) => m.length > 0);
   if (present.length === 0) return "";
-  const sep = colorize("symbols", " · ");
+  const sep = " ";
   return present.join(sep);
 }
 
@@ -518,7 +519,7 @@ export default function (pi: ExtensionAPI) {
             const thinkingLabel = getThinkingLabel(thinkingLevel);
             if (thinkingLabel) {
               thinkingStr =
-                colorize("symbols", " · ") +
+                " " +
                 theme.getThinkingBorderColor(thinkingLevel)(thinkingLabel);
             }
           }
@@ -533,7 +534,7 @@ export default function (pi: ExtensionAPI) {
             footerData.getAvailableProviderCount(),
           );
           const providerPrefix = providerPrefixLabel
-            ? theme.fg("dim", providerPrefixLabel)
+            ? colorize("provider", providerPrefixLabel)
             : "";
 
           // ── Row 2 data extraction ─────────────────────────────────────────
