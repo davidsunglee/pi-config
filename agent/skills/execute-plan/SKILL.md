@@ -253,7 +253,7 @@ Always pass `cli` explicitly on every orchestration call, even when it resolves 
 
 **Skip if:** Integration test is disabled (Step 3 settings) or no test command is available.
 
-Before executing the first wave, run the integration suite via the `test-runner` subagent (see the shared test-runner dispatch subsection below) with `{ARTIFACT_PATH} = <working-dir>/.pi/test-runs/<plan-name>/baseline.log` (an absolute path under the plan's working directory) and `{PHASE_LABEL} = baseline`. The agent applies the same Step 7 identifier-extraction contract documented in `agent/agents/test-runner.md` so the failing-identifier set the orchestrator reads back is byte-equal to the legacy in-orchestrator extraction.
+Before executing the first wave, run the integration suite via the `test-runner` subagent (see the shared test-runner dispatch subsection below) with `{ARTIFACT_PATH} = <working-dir>/.pi/test-runs/<plan-name>/baseline.log` (an absolute path under the plan's working directory) and `{PHASE_LABEL} = baseline`. The agent applies the two-bucket extraction contract documented in `agent/agents/test-runner.md`: stable suite-native identifiers in `FAILING_IDENTIFIERS:` and non-reconcilable failure evidence (panics, build errors, collection errors with no per-test identifier) in `NON_RECONCILABLE_FAILURES:`. The orchestrator reads both buckets back from the artifact.
 
 #### Baseline recording
 
@@ -740,7 +740,7 @@ Otherwise, always run this gate: re-run the full integration suite and confirm n
 **Unconditional** — the plan was executed regardless of what happens to the branch:
 - Create `.pi/plans/done/` if it doesn't exist
 - Move the plan file to `.pi/plans/done/`
-- Delete the per-plan `.pi/test-runs/<plan-name>/` directory now that the final integration regression gate has passed: `rm -rf .pi/test-runs/<plan-name>`. This cleanup runs ONLY on successful gate exit (i.e. when this `### 1. Move plan to done` sub-step executes). Every `(c) Stop execution` exit path — Step 10's wave gate, Step 12's intermediate-wave or final-wave menu, Step 13's failure-handling prompt, Step 15's review max-iterations menu, and Step 16's final-gate menu — leaves `.pi/test-runs/<plan-name>/` in place so the user can inspect run artifacts after stop.
+- Delete the per-plan `.pi/test-runs/<plan-name>/` directory now that the final integration regression gate has passed: `rm -rf .pi/test-runs/<plan-name>`. This cleanup runs ONLY on successful gate exit (i.e. when this `### 1. Move plan to done` sub-step executes). Every stop exit path — Step 10's wave gate, Step 12's intermediate-wave or final-wave menu, Step 13's failure-handling prompt, Step 15's review max-iterations menu, and Step 16's final-gate menu — leaves `.pi/test-runs/<plan-name>/` in place so the user can inspect run artifacts after stop.
 
 ### 2. Close linked todo
 
