@@ -6,6 +6,8 @@ This document is the single canonical definition of the baseline-only integratio
 
 A **stable identifier** is the suite-native unique name for a single failing test, taken verbatim from the runner output. No normalization is applied: no lowercasing, no reordering of path components, no synthesis from multiple fields. The identifier is the exact string the runner emits to name the failing test.
 
+**Narrow exception — Go.** `go test ./...` does not print a single line containing both the package path and the failing test name; instead, the package is printed on the trailing `FAIL\t<package>\t<duration>` summary line and the test name on a separate `--- FAIL: <TestName>` line. For Go, the canonical suite-native stable identifier is the package-qualified test name `<package>.<TestName>`, constructed by joining the package printed by `go test ./...` on its `FAIL\t<package>\t<duration>` summary line with the failing `<TestName>` from the corresponding `--- FAIL: <TestName>` line, separated by a single `.`. Both components are taken verbatim from the runner's output; only the `.` join is added. This is the only synthesis permitted by the contract, and the resulting string is treated as a fully stable identifier for byte-for-byte comparison. All other runners follow the strict no-synthesis rule above.
+
 Any failure for which no stable suite-native identifier is available (panics before test execution, collection errors, process crashes) is a **non-reconcilable failure**. Non-reconcilable failures are recorded verbatim under the `NON_RECONCILABLE_FAILURES:` block of the test-runner artifact. They are never placed in `FAILING_IDENTIFIERS:` and never used as set members for comparison.
 
 See `agent/agents/test-runner.md` for the per-runner extraction rules that produce `FAILING_IDENTIFIERS:` and `NON_RECONCILABLE_FAILURES:`.
@@ -108,7 +110,7 @@ NON_RECONCILABLE_FAILURES:
 END_NON_RECONCILABLE_FAILURES
 ```
 
-The identifier is `<package>.<TestName>` where the package portion is exactly the module path the runner prints after `FAIL\t`. `NON_RECONCILABLE_FAILURES:` has no lines between its markers because `NON_RECONCILABLE_COUNT` is `0`.
+The identifier is `<package>.<TestName>`, constructed per the Go exception in the [Identifier contract](#identifier-contract) above: the package portion (`github.com/example/myrepo/pkg/foo`) is the module path the runner prints verbatim after `FAIL\t` on the summary line, the test-name portion (`TestFoo`) is taken verbatim from the `--- FAIL: TestFoo` line, and the two components are joined with a single `.`. The combined string is NOT printed directly on the `--- FAIL:` line; the join is the narrow synthesis the contract explicitly permits for Go. `NON_RECONCILABLE_FAILURES:` has no lines between its markers because `NON_RECONCILABLE_COUNT` is `0`.
 
 ### pytest
 
