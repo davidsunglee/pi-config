@@ -21,7 +21,7 @@ const mockColorize = (field: string, text: string) => `[${field}:${text}]`;
  * from ./footer.ts) to guarantee production divergence cannot slip through.
  *
  * FieldWidths semantics reminder:
- *   - branchWidth includes the " · " separator (matches production measurement).
+ *   - branchWidth includes the single-space branch separator (matches production measurement).
  *   - sessionNameWidth is the raw session label width (no padding).
  *   - ellipsisWidth is the "..." glyph width used by the cwd truncation path.
  */
@@ -93,14 +93,14 @@ test("tokens drop as a single unit (both arrows + values)", () => {
 });
 
 test("session name drops before branch on row 1", () => {
-	// branchWidth includes " · " separator, so 3 + 8 = 11.
+	// branchWidth includes one literal space separator, so 1 + 8 = 9.
 	// With session: right = 2 + 15 = 17, left max = width - 17.
-	//   min left keeping branch = ellipsis(3) + 4 + 11 = 18, needs width >= 35.
-	// Without session: left max = width, needs >= 18.
+	//   min left keeping branch = ellipsis(3) + 4 + 9 = 16, needs width >= 33.
+	// Without session: left max = width, needs >= 16.
 	// Row 2: 10 + 2 + 6 + 8 = 26, fits easily.
-	// Width = 34: can't fit with session, can without.
-	const flags = computeVisibility(fw(34, {
-		pwdStrWidth: 30, branchWidth: 11, sessionNameWidth: 15,
+	// Width = 32: can't fit with session, can without.
+	const flags = computeVisibility(fw(32, {
+		pwdStrWidth: 30, branchWidth: 9, sessionNameWidth: 15,
 		modelNameWidth: 10, contextPercentWidth: 6, contextDenomWidth: 8,
 		hasBranch: true, hasSessionName: true,
 	}));
@@ -110,9 +110,9 @@ test("session name drops before branch on row 1", () => {
 
 test("branch drops after session name", () => {
 	// Very narrow: can't even fit truncated pwd + branch.
-	// Need: ellipsis(3) + 4 chars + branchWidth(11) = 18
+	// Need: ellipsis(3) + 4 chars + branchWidth(9) = 16
 	const flags = computeVisibility(fw(15, {
-		pwdStrWidth: 30, branchWidth: 11,
+		pwdStrWidth: 30, branchWidth: 9,
 		modelNameWidth: 10, contextPercentWidth: 6,
 		hasBranch: true,
 	}));
@@ -214,6 +214,74 @@ test("context denominator wraps '/' in symbols color (no spaces around slash)", 
 	);
 });
 
+test("row 1 renders cwd and branch with one literal space separator", async () => {
+	const handlers = new Map<string, (event: any, ctx: any) => void | Promise<void>>();
+	footerFactory({
+		on(event: string, handler: (event: any, ctx: any) => void | Promise<void>) {
+			handlers.set(event, handler);
+		},
+		getSessionName() {
+			return "";
+		},
+		getThinkingLevel() {
+			return "off";
+		},
+	} as any);
+
+	let footerBuilder: any;
+	const ctx = {
+		cwd: "/repo/main",
+		model: { id: "model", contextWindow: 200000 },
+		getContextUsage() {
+			return { percent: 12.3, contextWindow: 200000 };
+		},
+		sessionManager: {
+			getEntries() {
+				return [];
+			},
+		},
+		ui: {
+			setFooter(builder: unknown) {
+				footerBuilder = builder;
+			},
+		},
+	};
+	const footerData = {
+		onBranchChange() {
+			return () => {};
+		},
+		getGitBranch() {
+			return "feature";
+		},
+		getAvailableProviderCount() {
+			return 1;
+		},
+		getExtensionStatuses() {
+			return new Map();
+		},
+	};
+	const theme = {
+		name: "test",
+		getColorMode() {
+			return "truecolor";
+		},
+		fg(_token: string, text: string) {
+			return text;
+		},
+		getThinkingBorderColor() {
+			return (text: string) => text;
+		},
+	};
+
+	await handlers.get("session_start")!({}, ctx);
+	const footer = footerBuilder({ requestRender() {} }, theme, footerData);
+	const [line1, line2] = footer.render(80);
+
+	assert.equal(line1, "/repo/main feature");
+	assert.equal(line1.includes(" · "), false);
+	assert.equal(line2.includes(" · "), false, "row 2 should remain free of dot separators");
+});
+
 test("joinMetrics joins present metrics with a single literal space", () => {
 	assert.equal(
 		joinMetrics(["A", "B", "C"], mockColorize),
@@ -251,7 +319,7 @@ test("row 2 width budget accounts for 1-char ' ' metric separators", () => {
 
 test("extremely narrow width keeps only model name and context percent", () => {
 	const flags = computeVisibility(fw(20, {
-		pwdStrWidth: 30, branchWidth: 11, sessionNameWidth: 15,
+		pwdStrWidth: 30, branchWidth: 9, sessionNameWidth: 15,
 		modelNameWidth: 10, thinkingWidth: 8, providerWidth: 12,
 		contextPercentWidth: 6, contextDenomWidth: 5, tokensWidth: 14,
 		hasBranch: true, hasSessionName: true, hasThinking: true,
