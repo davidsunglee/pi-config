@@ -206,11 +206,11 @@ test("blank extension statuses are filtered out", () => {
 	]);
 });
 
-test("context denominator wraps ' / ' in symbols color (spaces around slash)", () => {
+test("context denominator wraps '/' in symbols color (no spaces around slash)", () => {
 	// formatTokens(200000) === "200k"
 	assert.equal(
 		formatContextDenominator(200000, mockColorize),
-		"[symbols: / ][contextWindow:200k]",
+		"[symbols:/][contextWindow:200k]",
 	);
 });
 
