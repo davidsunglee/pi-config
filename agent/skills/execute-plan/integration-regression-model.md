@@ -99,14 +99,16 @@ FAIL    github.com/example/myrepo/pkg/foo    0.012s
 ```
 
 ```
+FAILING_IDENTIFIERS_COUNT: 1
 FAILING_IDENTIFIERS:
-- github.com/example/myrepo/pkg/foo.TestFoo
-
+github.com/example/myrepo/pkg/foo.TestFoo
+END_FAILING_IDENTIFIERS
+NON_RECONCILABLE_COUNT: 0
 NON_RECONCILABLE_FAILURES:
-(none)
+END_NON_RECONCILABLE_FAILURES
 ```
 
-The identifier is `<package>.<TestName>` where the package portion is exactly the module path the runner prints after `FAIL\t`.
+The identifier is `<package>.<TestName>` where the package portion is exactly the module path the runner prints after `FAIL\t`. `NON_RECONCILABLE_FAILURES:` has no lines between its markers because `NON_RECONCILABLE_COUNT` is `0`.
 
 ### pytest
 
@@ -115,11 +117,13 @@ FAILED tests/test_foo.py::TestX::test_bar - AssertionError: expected True
 ```
 
 ```
+FAILING_IDENTIFIERS_COUNT: 1
 FAILING_IDENTIFIERS:
-- tests/test_foo.py::TestX::test_bar
-
+tests/test_foo.py::TestX::test_bar
+END_FAILING_IDENTIFIERS
+NON_RECONCILABLE_COUNT: 0
 NON_RECONCILABLE_FAILURES:
-(none)
+END_NON_RECONCILABLE_FAILURES
 ```
 
 The identifier is the pytest nodeid as printed: `tests/test_foo.py::TestX::test_bar`.
@@ -134,11 +138,13 @@ test result: FAILED. 0 passed; 1 failed
 ```
 
 ```
+FAILING_IDENTIFIERS_COUNT: 1
 FAILING_IDENTIFIERS:
-- tests::name_of_test
-
+tests::name_of_test
+END_FAILING_IDENTIFIERS
+NON_RECONCILABLE_COUNT: 0
 NON_RECONCILABLE_FAILURES:
-(none)
+END_NON_RECONCILABLE_FAILURES
 ```
 
 The identifier is the module path as listed in the `failures:` block, taken verbatim.
@@ -151,11 +157,13 @@ FAIL src/foo.test.ts
 ```
 
 ```
+FAILING_IDENTIFIERS_COUNT: 1
 FAILING_IDENTIFIERS:
-- src/foo.test.ts > describe block > it should X
-
+src/foo.test.ts > describe block > it should X
+END_FAILING_IDENTIFIERS
+NON_RECONCILABLE_COUNT: 0
 NON_RECONCILABLE_FAILURES:
-(none)
+END_NON_RECONCILABLE_FAILURES
 ```
 
 The identifier is the file path and the full nested test name, joined with ` > ` exactly as the runner prints it.
@@ -182,12 +190,22 @@ ERROR tests/test_x.py - ImportError: cannot import name 'bar' from 'mymodule'
 Both are recorded as one entry each in `NON_RECONCILABLE_FAILURES:` (verbatim multi-line evidence is permitted). `FAILING_IDENTIFIERS:` does NOT include any synthesized or ad-hoc fallback identifier for them.
 
 ```
+FAILING_IDENTIFIERS_COUNT: 0
 FAILING_IDENTIFIERS:
-(none)
-
+END_FAILING_IDENTIFIERS
+NON_RECONCILABLE_COUNT: 2
 NON_RECONCILABLE_FAILURES:
-- panic: runtime error: index out of range [3] with length 2\n  goroutine 1 [running]: ...
-- ERROR tests/test_x.py - ImportError: cannot import name 'bar' from 'mymodule'\n  ...
+panic: runtime error: index out of range [3] with length 2
+goroutine 1 [running]:
+github.com/example/myrepo/pkg/foo.init(...)
+    /src/foo.go:10
+
+ERROR tests/test_x.py - ImportError: cannot import name 'bar' from 'mymodule'
+    tests/test_x.py:5: in <module>
+        from mymodule import bar
+END_NON_RECONCILABLE_FAILURES
 ```
+
+`FAILING_IDENTIFIERS:` has no lines between its markers because `FAILING_IDENTIFIERS_COUNT` is `0`. Each non-reconcilable entry spans multiple lines and entries are separated from each other by a single blank line.
 
 Because `current_non_reconcilable` is non-empty, the orchestrator presents the menu defined in `## Pass/fail classification` for the appropriate phase rather than treating the failures as comparable to baseline.
