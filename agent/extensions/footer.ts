@@ -392,7 +392,7 @@ export const METRIC_SEP_WIDTH = 1;
  */
 export function joinMetrics(
   metrics: readonly string[],
-  colorize: Colorize,
+  _colorize: Colorize,
 ): string {
   const present = metrics.filter((m) => m.length > 0);
   if (present.length === 0) return "";

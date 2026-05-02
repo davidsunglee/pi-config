@@ -249,6 +249,33 @@ test("row 2 width budget accounts for 1-char ' ' metric separators", () => {
 	assert.ok(!justUnder.showTokens, "tokens should drop when row 2 needs 57 but width is 56");
 });
 
+test("extremely narrow width keeps only model name and context percent", () => {
+	const flags = computeVisibility(fw(20, {
+		pwdStrWidth: 30, branchWidth: 11, sessionNameWidth: 15,
+		modelNameWidth: 10, thinkingWidth: 8, providerWidth: 12,
+		contextPercentWidth: 6, contextDenomWidth: 5, tokensWidth: 14,
+		hasBranch: true, hasSessionName: true, hasThinking: true,
+		hasProvider: true, hasTokens: true,
+	}));
+	assert.ok(!flags.showTokens, "tokens drop");
+	assert.ok(!flags.showProvider, "provider drops");
+	assert.ok(!flags.showContextDenom, "context denom drops");
+	assert.ok(!flags.showSessionName, "session name drops");
+	assert.ok(!flags.showBranch, "branch drops");
+	assert.ok(!flags.showThinking, "thinking drops");
+});
+
+test("provider drops before model name when row 2 is constrained", () => {
+	const flags = computeVisibility(fw(22, {
+		pwdStrWidth: 5,
+		modelNameWidth: 14, providerWidth: 12,
+		contextPercentWidth: 6,
+		hasProvider: true,
+	}));
+	assert.ok(!flags.showProvider, "provider drops first");
+	// Without provider: 14 + 2 + 6 = 22, fits exactly at width 22.
+});
+
 test("nord theme override sets provider prefix color to nord3 (#4c566a)", () => {
 	assert.equal(THEME_COLORS.nord?.provider, "#4c566a", "Nord override must use nord3 hex");
 	assert.equal(DEFAULT_TOKENS.provider, "dim", "default provider color must fall back to the theme's dim token");
