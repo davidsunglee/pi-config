@@ -1,19 +1,11 @@
 {
-  "lastChangelogVersion": "0.70.6",
+  "lastChangelogVersion": "0.71.1",
   "defaultProvider": "openai-codex",
   "defaultModel": "gpt-5.5",
   "defaultThinkingLevel": "high",
   "compaction": {
     "enabled": true
   },
-  "hideThinkingBlock": false,
-  "theme": "nord",
-  "packages": [
-    "~/Code/pi-interactive-subagent",
-    "npm:pi-ghostty",
-    "npm:pi-token-burden",
-    "npm:pi-web-access"
-  ],
   "enabledModels": [
     "anthropic/claude-opus-4-7",
     "anthropic/claude-sonnet-4-6",
@@ -22,6 +14,18 @@
     "openai-codex/gpt-5.4",
     "openai-codex/gpt-5.4-mini"
   ],
+  "packages": [
+    "~/Code/pi-interactive-subagent",
+    "npm:pi-ghostty",
+    "npm:pi-token-burden",
+    "npm:pi-web-access",
+    "npm:@aliou/pi-processes"
+  ],
+  "autocompleteMaxVisible": 10,
   "editorPaddingX": 1,
-  "autocompleteMaxVisible": 10
+  "hideThinkingBlock": false,
+  "theme": "nord",
+  "warnings": {
+    "anthropicExtraUsage": false
+  }
 }
