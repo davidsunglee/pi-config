@@ -131,7 +131,7 @@ export function computeVisibility(f: FieldWidths): VisibilityFlags {
     if (showProvider) left += f.providerWidth;
     const rightParts: number[] = [];
     let ctxW = f.contextPercentWidth;
-    // contextDenomWidth already includes the " / " separator rendered by
+    // contextDenomWidth already includes the "/" rendered by
     // formatContextDenominator — do NOT add the slash-separator width again here.
     if (showContextDenom) ctxW += f.contextDenomWidth;
     rightParts.push(ctxW);
@@ -369,19 +369,17 @@ export function getProviderPrefix(
 }
 
 /**
- * Context denominator "/window" segment.
- *
- * Renders " / " (spaces around the slash) in the symbols/punctuation color,
- * then the formatted context window size in the contextWindow color. The
- * leading and trailing space are part of the punctuation so they adopt the
- * same grey as the other separators on the row.
+ * Context denominator "/window" segment. Renders "/" (no spaces around the slash)
+ * in the symbols/punctuation color, then the formatted context window size in the
+ * contextWindow color. The slash glyph itself takes the symbols color so it stays
+ * muted relative to the percentage and the window size.
  */
 export function formatContextDenominator(
   contextWindow: number,
   colorize: Colorize,
 ): string {
   return (
-    colorize("symbols", " / ") +
+    colorize("symbols", "/") +
     colorize("contextWindow", formatTokens(contextWindow))
   );
 }
