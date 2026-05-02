@@ -2,10 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import footerFactory, {
-	buildCostString,
 	computeVisibility,
 	formatContextDenominator,
-	getCostDisplay,
 	getProviderPrefix,
 	getThinkingLabel,
 	joinMetrics,
@@ -45,13 +43,11 @@ function fw(width: number, overrides: Partial<FieldWidths> = {}): FieldWidths {
 		contextPercentWidth: 0,
 		contextDenomWidth: 0,
 		tokensWidth: 0,
-		costWidth: 0,
 		hasBranch: false,
 		hasSessionName: false,
 		hasThinking: false,
 		hasProvider: false,
 		hasTokens: false,
-		hasCost: false,
 	};
 	return { ...base, ...overrides };
 }
@@ -63,12 +59,11 @@ test("wide terminal: all live fields visible", () => {
 		pwdStrWidth: 20, branchWidth: 9, sessionNameWidth: 10,
 		modelNameWidth: 14, thinkingWidth: 12, providerWidth: 12,
 		contextPercentWidth: 6, contextDenomWidth: 8,
-		tokensWidth: 14, costWidth: 8,
+		tokensWidth: 14,
 		hasBranch: true, hasSessionName: true, hasThinking: true,
-		hasProvider: true, hasTokens: true, hasCost: true,
+		hasProvider: true, hasTokens: true,
 	}));
 
-	assert.ok(flags.showCost);
 	assert.ok(flags.showTokens);
 	assert.ok(flags.showProvider);
 	assert.ok(flags.showContextDenom);
@@ -78,32 +73,14 @@ test("wide terminal: all live fields visible", () => {
 	assert.equal("showAutoCompact" in flags, false);
 });
 
-test("priority order: cost drops first", () => {
-	const fields = {
-		pwdStrWidth: 20, branchWidth: 9, sessionNameWidth: 10,
-		modelNameWidth: 14, thinkingWidth: 12, providerWidth: 12,
-		contextPercentWidth: 6, contextDenomWidth: 8,
-		tokensWidth: 14, costWidth: 8,
-		hasBranch: true, hasSessionName: true, hasThinking: true,
-		hasProvider: true, hasTokens: true, hasCost: true,
-	};
-	// Row 2 full need with all flags on:
-	//   14 + 12 + 12 + 2 + (6 + 8) + 14 + 8 + 2 separators = 82
-	const fullRow2 = 82;
-	const flags = computeVisibility(fw(fullRow2 - 1, fields));
-
-	assert.ok(!flags.showCost, "cost should drop first");
-	assert.ok(flags.showTokens, "tokens should still be visible");
-});
-
 test("tokens drop as a single unit (both arrows + values)", () => {
 	const fields = {
 		pwdStrWidth: 10, branchWidth: 0, sessionNameWidth: 0,
 		modelNameWidth: 14, thinkingWidth: 0, providerWidth: 12,
 		contextPercentWidth: 6, contextDenomWidth: 8,
-		tokensWidth: 14, costWidth: 0,
+		tokensWidth: 14,
 		hasBranch: false, hasSessionName: false, hasThinking: false,
-		hasProvider: true, hasTokens: true, hasCost: false,
+		hasProvider: true, hasTokens: true,
 	};
 	// With tokens: 14 + 12 + 2 + (6 + 8) + 14 + 1 separator = 59
 	const withTokens = 59;
@@ -145,9 +122,9 @@ test("model name and context percent are never hidden", () => {
 		pwdStrWidth: 5,
 		modelNameWidth: 10, thinkingWidth: 8, providerWidth: 10,
 		contextPercentWidth: 6, contextDenomWidth: 8,
-		tokensWidth: 14, costWidth: 8,
+		tokensWidth: 14,
 		hasThinking: true, hasProvider: true,
-		hasTokens: true, hasCost: true,
+		hasTokens: true,
 	}));
 	assert.ok(!flags.showThinking, "thinking should be hidden");
 	assert.ok(!flags.showProvider, "provider should be hidden");
@@ -155,18 +132,17 @@ test("model name and context percent are never hidden", () => {
 });
 
 test("long cwd does NOT cause row-2 fields to drop when truncation suffices", () => {
-	// Row 2 full need: 14 + 12 + 2 + (6 + 8) + 14 + 8 + 2*3 sep = 70
+	// Row 2 full need: 14 + 12 + 2 + (6 + 8) + 14 + 1*3 sep = 59
 	const flags = computeVisibility(fw(72, {
 		pwdStrWidth: 100, // very long cwd
 		branchWidth: 9,
 		modelNameWidth: 14, providerWidth: 12,
 		contextPercentWidth: 6, contextDenomWidth: 8,
-		tokensWidth: 14, costWidth: 8,
+		tokensWidth: 14,
 		hasBranch: true, hasProvider: true,
-		hasTokens: true, hasCost: true,
+		hasTokens: true,
 	}));
 
-	assert.ok(flags.showCost, "cost should survive when cwd truncation handles row 1");
 	assert.ok(flags.showTokens, "tokens should survive when cwd truncation handles row 1");
 	assert.ok(flags.showBranch, "branch should survive when cwd truncation handles row 1");
 });
@@ -182,21 +158,17 @@ test("context denominator drops as a unit with / separator", () => {
 	assert.ok(!flags.showContextDenom, "context denom + separator should drop as unit");
 });
 
-test("cross-row priority: row-2 cost drops before row-1 session name", () => {
-	// Row 2 with cost:    14 + 2 + (6 + 8) + 14 + 8 + 2 separators = 58
-	// Row 2 without cost: 14 + 2 + (6 + 8) + 14 + 1 separator     = 47
-	const fields = {
+test("cross-row priority: row-2 tokens drop before row-1 session name", () => {
+	// With the current 3-char ' · ' separator, row 2 with tokens needs:
+	// 14 + 2 + (6 + 8) + 14 + 3 = 47
+	const flags = computeVisibility(fw(46, {
 		pwdStrWidth: 20, branchWidth: 9, sessionNameWidth: 15,
 		modelNameWidth: 14,
 		contextPercentWidth: 6, contextDenomWidth: 8,
-		tokensWidth: 14, costWidth: 8,
-		hasBranch: true, hasSessionName: true,
-		hasTokens: true, hasCost: true,
-	};
-	const width = 57;
-	const flags = computeVisibility(fw(width, fields));
-
-	assert.ok(!flags.showCost, "cost should drop");
+		tokensWidth: 14,
+		hasBranch: true, hasSessionName: true, hasTokens: true,
+	}));
+	assert.ok(!flags.showTokens, "tokens should drop");
 	assert.ok(flags.showSessionName, "session name should survive (higher priority)");
 });
 
@@ -224,21 +196,6 @@ test("provider prefix is omitted unless multiple providers are available", () =>
 	assert.equal(getProviderPrefix("anthropic", 2), "anthropic ");
 });
 
-test("subscription-only sessions omit dead zero-dollar cost", () => {
-	assert.deepEqual(getCostDisplay(0, false), {
-		amountLabel: "",
-		subscriptionLabel: "",
-	});
-	assert.deepEqual(getCostDisplay(0, true), {
-		amountLabel: "",
-		subscriptionLabel: "(sub)",
-	});
-	assert.deepEqual(getCostDisplay(1.234, true), {
-		amountLabel: "$1.234",
-		subscriptionLabel: " (sub)",
-	});
-});
-
 test("blank extension statuses are filtered out", () => {
 	assert.deepEqual(sanitizeStatusTexts(["", "   ", "ok", "line\nwrap"]), [
 		"ok",
@@ -252,22 +209,6 @@ test("context denominator wraps ' / ' in symbols color (spaces around slash)", (
 		formatContextDenominator(200000, mockColorize),
 		"[symbols: / ][contextWindow:200k]",
 	);
-});
-
-test("cost string colors both amount and subscription label with cost color", () => {
-	assert.equal(
-		buildCostString("$1.234", " (sub)", mockColorize),
-		"[cost:$1.234][cost: (sub)]",
-	);
-	assert.equal(
-		buildCostString("", "(sub)", mockColorize),
-		"[cost:(sub)]",
-	);
-	assert.equal(
-		buildCostString("$0.100", "", mockColorize),
-		"[cost:$0.100]",
-	);
-	assert.equal(buildCostString("", "", mockColorize), "");
 });
 
 test("joinMetrics inserts grey-dot separators only between present metrics", () => {
@@ -286,24 +227,23 @@ test("joinMetrics inserts grey-dot separators only between present metrics", () 
 });
 
 test("row 2 width budget accounts for 3-char ' · ' metric separators", () => {
-	// With 3-char separator between 3 metrics (ctx, tokens, cost):
+	// With 3-char separator between 2 metrics (ctx, tokens), no cost:
 	//   left: modelName=14 + provider=12 = 26
 	//   padding: 2
-	//   right: (6 + 8) + 14 + 8 + 2*3 = 42
-	//   total: 70
+	//   right: (6 + 8) + 14 + 1*3 = 31
+	//   total: 59
 	const fields = {
 		pwdStrWidth: 10,
 		modelNameWidth: 14, providerWidth: 12,
 		contextPercentWidth: 6, contextDenomWidth: 8,
-		tokensWidth: 14, costWidth: 8,
-		hasProvider: true, hasTokens: true, hasCost: true,
+		tokensWidth: 14,
+		hasProvider: true, hasTokens: true,
 	};
-	const fits = computeVisibility(fw(70, fields));
-	assert.ok(fits.showCost, "cost should fit exactly at width 70");
-	assert.ok(fits.showTokens);
+	const fits = computeVisibility(fw(59, fields));
+	assert.ok(fits.showTokens, "tokens should fit exactly at width 59");
 
-	const justUnder = computeVisibility(fw(69, fields));
-	assert.ok(!justUnder.showCost, "cost should drop when row 2 needs 70 but width is 69");
+	const justUnder = computeVisibility(fw(58, fields));
+	assert.ok(!justUnder.showTokens, "tokens should drop when row 2 needs 59 but width is 58");
 });
 
 test("session_shutdown restores the built-in footer", async () => {

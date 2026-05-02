@@ -6,7 +6,7 @@
  *
  * Layout:
  *   Line 1: ~/path · branch                               session-name
- *   Line 2: provider model · thinking    context% / window · ↑in ↓out · $cost (sub)
+ *   Line 2: provider model · thinking    context% / window · ↑in ↓out
  *   Line 3: extension statuses (optional)
  *
  * Context usage escalation is preserved:
@@ -31,8 +31,7 @@
  *
  * Example:
  *   const THEME_COLORS: Record<string, Partial<FooterColors>> = {
- *     dracula: { modelName: "magenta", cost: "#ffb86c" },
- *     nord:    { branch: "brightCyan", cost: 208 },
+ *     dracula: { modelName: "magenta", branch: "brightCyan" },
  *   };
  */
 
@@ -48,13 +47,6 @@ import { truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
 export type FooterColors = {
   modelName: string | number;
   tokens: string | number;
-  cost: string | number;
-  /**
-   * Retained for user config compatibility but not used by the built-in rendering
-   * path: `buildCostString` applies the `cost` color to the `(sub)` indicator, so
-   * this field has no effect unless a custom renderer reads it explicitly.
-   */
-  subscriptionIndicator: string | number;
   contextUsage: string | number;
   contextWindow: string | number;
   branch: string | number;
@@ -80,14 +72,12 @@ export interface FieldWidths {
   contextPercentWidth: number;
   contextDenomWidth: number;
   tokensWidth: number;
-  costWidth: number;
   // Flags for which fields are initially present (non-zero width)
   hasBranch: boolean;
   hasSessionName: boolean;
   hasThinking: boolean;
   hasProvider: boolean;
   hasTokens: boolean;
-  hasCost: boolean;
 }
 
 /** Surviving visibility flags after the priority dropper has run. */
@@ -98,7 +88,6 @@ export interface VisibilityFlags {
   showProvider: boolean;
   showContextDenom: boolean;
   showTokens: boolean;
-  showCost: boolean;
 }
 
 const MIN_PADDING = 2;
@@ -110,7 +99,6 @@ const MIN_PWD_CHARS_WITH_BRANCH = 4;
  * have been dropped to fit within `width`.
  */
 export function computeVisibility(f: FieldWidths): VisibilityFlags {
-  let showCost = f.hasCost;
   let showTokens = f.hasTokens;
   let showProvider = f.hasProvider;
   let showContextDenom = true;
@@ -146,7 +134,6 @@ export function computeVisibility(f: FieldWidths): VisibilityFlags {
     if (showContextDenom) ctxW += f.contextDenomWidth;
     rightParts.push(ctxW);
     if (showTokens && f.tokensWidth) rightParts.push(f.tokensWidth);
-    if (showCost && f.costWidth) rightParts.push(f.costWidth);
     const right =
       rightParts.reduce((a, b) => a + b, 0) +
       METRIC_SEP_WIDTH * Math.max(0, rightParts.length - 1);
@@ -157,7 +144,6 @@ export function computeVisibility(f: FieldWidths): VisibilityFlags {
     return row1CanFit() && row2Needed() <= f.width;
   }
 
-  if (!bothFit() && showCost) showCost = false;
   if (!bothFit() && showTokens) showTokens = false;
   if (!bothFit() && showProvider) showProvider = false;
   if (!bothFit() && showContextDenom) showContextDenom = false;
@@ -166,7 +152,6 @@ export function computeVisibility(f: FieldWidths): VisibilityFlags {
   if (!bothFit() && showThinking) showThinking = false;
 
   return {
-    showCost,
     showTokens,
     showProvider,
     showContextDenom,
@@ -182,8 +167,6 @@ const THEME_COLORS: Record<string, Partial<FooterColors>> = {
   carbonfox: {
     modelName: "#33b1ff", // cyan — accent
     tokens: "#8cb6ff", // blueBright — consistent with contextUsage blue
-    cost: "#08bdba", // teal — carbonfox "warning"
-    subscriptionIndicator: "#535353", // dimGray — matches the carbonfox dim var
     contextUsage: "#78a9ff", // blue
     contextWindow: "#7b7c7e", // gray — readable but subtler than contextUsage
     branch: "#25be6a", // green — success
@@ -195,8 +178,6 @@ const THEME_COLORS: Record<string, Partial<FooterColors>> = {
   everblush: {
     modelName: "#67b0e8", // blue — primary accent
     tokens: "#71baf2", // bright blue — a touch brighter than model name
-    cost: "#ccb77a", // muted gold — softer cost emphasis
-    subscriptionIndicator: "#5c6466", // dim gray — matches the everblush dimGray var
     contextUsage: "#6cbfbf", // cyan — readable emphasis distinct from tokens
     contextWindow: "#b3b9b8", // light gray — softer denominator / window size
     branch: "#8ccf7e", // green — git branch / success
@@ -208,8 +189,6 @@ const THEME_COLORS: Record<string, Partial<FooterColors>> = {
   nord: {
     modelName: "#88c0d0", // nord8 — accent blue
     tokens: "#81a1c1", // nord9 — subtle/muted blue
-    cost: "#8fbcbb", // nord7 — frost teal
-    subscriptionIndicator: "#4c566a", // nord3 — matches the Nord dim color token (now unused: (sub) shares cost color)
     contextUsage: "#88c0d0", // nord8 — slightly brighter blue than tokens
     contextWindow: "#d8dee9", // nord4 — silver/bright gray
     branch: "#a3be8c", // nord14 — green
@@ -225,8 +204,6 @@ const THEME_COLORS: Record<string, Partial<FooterColors>> = {
 const DEFAULT_TOKENS: Record<keyof FooterColors, ThemeColor> = {
   modelName: "accent",
   tokens: "border",
-  cost: "warning",
-  subscriptionIndicator: "dim",
   contextUsage: "accent",
   contextWindow: "dim",
   branch: "success",
@@ -387,20 +364,6 @@ export function getProviderPrefix(
   return provider && availableProviderCount > 1 ? `${provider} ` : "";
 }
 
-/** Hide dead $0.000 subscription-only cost output, but keep the sub marker. */
-export function getCostDisplay(
-  totalCost: number,
-  usingSubscription: boolean,
-): { amountLabel: string; subscriptionLabel: string } {
-  const amountLabel = totalCost > 0 ? `$${totalCost.toFixed(3)}` : "";
-  const subscriptionLabel = usingSubscription
-    ? amountLabel
-      ? " (sub)"
-      : "(sub)"
-    : "";
-  return { amountLabel, subscriptionLabel };
-}
-
 /**
  * Context denominator "/window" segment.
  *
@@ -416,26 +379,6 @@ export function formatContextDenominator(
   return (
     colorize("symbols", " / ") +
     colorize("contextWindow", formatTokens(contextWindow))
-  );
-}
-
-/**
- * Cost segment: `$amount` (+ optional subscription marker).
- *
- * Both the dollar amount and the " (sub)" marker share the `cost` color —
- * the marker is no longer rendered in a separate dim/subscription color.
- * Returns "" when there is nothing to show, so the caller can skip emitting
- * a metric separator next to it.
- */
-export function buildCostString(
-  amountLabel: string,
-  subscriptionLabel: string,
-  colorize: Colorize,
-): string {
-  if (!amountLabel && !subscriptionLabel) return "";
-  return (
-    (amountLabel ? colorize("cost", amountLabel) : "") +
-    (subscriptionLabel ? colorize("cost", subscriptionLabel) : "")
   );
 }
 
@@ -608,7 +551,6 @@ export default function (pi: ExtensionAPI) {
           // Token accumulation
           let totalInput = 0;
           let totalOutput = 0;
-          let totalCost = 0;
 
           for (const entry of ctx.sessionManager.getEntries()) {
             if (
@@ -618,14 +560,8 @@ export default function (pi: ExtensionAPI) {
               const m = entry.message as AssistantMessage;
               totalInput += m.usage.input;
               totalOutput += m.usage.output;
-              totalCost += m.usage.cost.total;
             }
           }
-
-          // Cost + subscription
-          const usingSubscription = ctx.model
-            ? ctx.modelRegistry.isUsingOAuth(ctx.model)
-            : false;
 
           // ── Pre-compute per-field widths for the global priority dropper ──
 
@@ -682,15 +618,6 @@ export default function (pi: ExtensionAPI) {
               : "";
           const tokensWidth = tokensStr ? visibleWidth(tokensStr) : 0;
 
-          const { amountLabel: costAmountLabel, subscriptionLabel } =
-            getCostDisplay(totalCost, usingSubscription);
-          const costStr = buildCostString(
-            costAmountLabel,
-            subscriptionLabel,
-            colorize,
-          );
-          const costWidth = costStr ? visibleWidth(costStr) : 0;
-
           // ── Global visibility flags (shared across both rows) ─────────────
           // Delegate to the pure priority dropper so tests can exercise the
           // same logic directly. cwd is always present (may be truncated);
@@ -707,17 +634,14 @@ export default function (pi: ExtensionAPI) {
             contextPercentWidth,
             contextDenomWidth,
             tokensWidth,
-            costWidth,
             hasBranch: !!branch,
             hasSessionName: !!sessionName,
             hasThinking: !!thinkingStr,
             hasProvider: !!providerPrefix,
             hasTokens: !!(totalInput || totalOutput),
-            hasCost: !!(totalCost || usingSubscription),
           });
 
           const {
-            showCost,
             showTokens,
             showProvider,
             showContextDenom,
@@ -786,7 +710,6 @@ export default function (pi: ExtensionAPI) {
           // content and joinMetrics() will not drop it as an empty entry.
           metricsFinal.push(ctxFinal);
           if (showTokens && tokensStr) metricsFinal.push(tokensStr);
-          if (showCost && costStr) metricsFinal.push(costStr);
 
           const row2RightFinal = joinMetrics(metricsFinal, colorize);
           const row2LeftFinalWidth = visibleWidth(row2LeftFinal);
