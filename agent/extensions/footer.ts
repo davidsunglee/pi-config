@@ -5,7 +5,7 @@
  * configurable via THEME_COLORS, with graceful fallback to theme token defaults.
  *
  * Layout:
- *   Line 1: ~/path · branch                               session-name
+ *   Line 1: ~/path branch                                 session-name
  *   Line 2: provider model thinking    context%/window ↑in ↓out
  *   Line 3: extension statuses (optional)
  *
@@ -415,7 +415,7 @@ export function joinMetrics(
  *
  * Constraints:
  * - Do not let this helper silently drop branch.
- * - Do not partially truncate branch or the ` · ` separator.
+ * - Do not partially truncate branch or its single-space separator.
  * - Branch remains all-or-nothing; only cwd is truncated here.
  */
 function truncatePwdTail(
@@ -439,7 +439,7 @@ function truncatePwdTail(
     return truncateToWidth(fullPwd, maxWidth, "");
   }
 
-  const branchSuffix = colorize("symbols", " · ") + colorize("branch", branch);
+  const branchSuffix = " " + colorize("branch", branch);
   const fullLeft = fullPwd + branchSuffix;
   if (visibleWidth(fullLeft) <= maxWidth) return fullLeft;
 
@@ -494,7 +494,7 @@ export default function (pi: ExtensionAPI) {
             return theme.fg(DEFAULT_TOKENS[field], text);
           }
 
-          // ── Row 1: project identity (left) · session identity (right) ──
+          // ── Row 1: project identity (left) and session identity (right) ──
 
           // Build cwd with ~ substitution
           let pwdStr = ctx.cwd;
@@ -506,7 +506,7 @@ export default function (pi: ExtensionAPI) {
           const branch = footerData.getGitBranch();
           const sessionName = pi.getSessionName();
 
-          // ── Row 2 left: execution mode (provider · model · thinking) ──────
+          // ── Row 2 left: execution mode (provider, model, thinking) ──────
 
           const modelName = ctx.model?.id ?? "no-model";
 
@@ -567,9 +567,7 @@ export default function (pi: ExtensionAPI) {
           // Row 1 field measurements
           const pwdStrWidth = visibleWidth(colorize("pwd", pwdStr));
           const branchWidth = branch
-            ? visibleWidth(
-                colorize("symbols", " · ") + colorize("branch", branch),
-              )
+            ? visibleWidth(" " + colorize("branch", branch))
             : 0;
           const sessionNameWidth = sessionName
             ? visibleWidth(colorize("sessionName", sessionName))
@@ -653,9 +651,7 @@ export default function (pi: ExtensionAPI) {
 
           let r1Left =
             showBranch && branch
-              ? colorize("pwd", pwdStr) +
-                colorize("symbols", " · ") +
-                colorize("branch", branch)
+              ? colorize("pwd", pwdStr) + " " + colorize("branch", branch)
               : colorize("pwd", pwdStr);
 
           const r1Right =
