@@ -34,7 +34,7 @@ Unless `--structural-only` is set, the skill requires either an existing task ar
 4. Allocate the next review era under `.pi/plans/reviews/`.
 5. Fill `refine-plan-prompt.md` and dispatch `plan-refiner`.
 6. Parse the coordinator's compact result.
-7. Commit the plan and newly written review artifacts when approved, or report remaining issues/failure.
+7. Commit the plan and newly written review artifacts when the outcome is `approved` or `approved_with_concerns`, or report `not_approved_within_budget`/`failed` to the caller.
 
 ## Era-versioned reviews
 
@@ -49,14 +49,14 @@ The skill scans existing review files before each era so standalone and continue
 
 ## Coordinator behavior
 
-The dispatched `plan-refiner` alternates between `plan-reviewer` and `planner` edit mode until the plan is approved or the iteration budget is exhausted. The coordinator writes review files and edits the plan, but does not commit; this skill owns the commit gate.
+The dispatched `plan-refiner` alternates between `plan-reviewer` and `planner` edit mode until the plan is `Approved`/`Approved with concerns`, or the iteration budget is exhausted with `Not approved` still standing. The coordinator writes review files and edits the plan, but does not commit; this skill owns the commit gate.
 
 ## Final summary format
 
 The skill reports a compact machine-readable summary:
 
 ```text
-STATUS: <approved | issues_remaining | failed>
+STATUS: <approved | approved_with_concerns | not_approved_within_budget | failed>
 COMMIT: <committed [sha] | left_uncommitted | not_attempted [reason]>
 PLAN_PATH: <path>
 REVIEW_PATHS:

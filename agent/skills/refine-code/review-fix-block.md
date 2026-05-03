@@ -24,4 +24,4 @@ git diff {PREV_HEAD}..{NEW_HEAD}
 3. **Flag new issues** — if you see new problems introduced by the remediation, flag them with the same severity format.
 4. **Do NOT re-review** code outside the remediation diff. Code that was already reviewed and not changed is out of scope.
 
-If all previous findings are addressed and no new issues exist, report "Ready to merge: Yes".
+If all previous findings are addressed and no new issues exist, emit `**Verdict:** Approved` in your `### Outcome` section.

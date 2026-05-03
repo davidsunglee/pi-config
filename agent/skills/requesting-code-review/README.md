@@ -13,7 +13,7 @@ Use after major feature work outside `execute-plan`, before merging to main, or 
 3. Fill placeholders describing what was implemented, the plan or requirements, the base SHA, the head SHA, and a brief description.
 4. Read `~/.pi/agent/model-tiers.json` and resolve the capable reviewer model plus CLI from the dispatch map.
 5. Dispatch `code-reviewer` with `subagent_run_serial`.
-6. Parse the result for `[Approved]` or `[Issues Found]`.
+6. Parse the result for the `**Verdict:**` line in the `### Outcome` block (one of `Approved`, `Approved with concerns`, or `Not approved`).
 7. Act on findings by severity.
 
 ## Severity handling
