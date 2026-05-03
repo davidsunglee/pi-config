@@ -47,7 +47,7 @@ The `code-refiner` performs the inner loop:
 - `STATUS: approved` — report the passing review and review artifact path.
 - `STATUS: approved_with_concerns` — report the passing review with a note that the reviewer waived one or more Important findings. The waiver rationale lives in the review file's `### Outcome` section `**Reasoning:**` line; no remediation iteration runs.
 - `STATUS: not_approved_within_budget` — present remaining findings and let the caller choose whether to keep iterating, proceed with known issues, or stop execution.
-- `STATUS: failed` — surface the failure reason from the four-category taxonomy (`coordinator dispatch unavailable`, `worker dispatch failed: <which worker>`, `reviewer artifact handoff failed: <specific check>`).
+- `STATUS: failed` — surface the failure reason from the code-side failure taxonomy (`coordinator dispatch unavailable`, `worker dispatch failed: <which worker>`, `reviewer artifact handoff failed: <specific check>`).
 
 ## Model/CLI constraint
 

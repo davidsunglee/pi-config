@@ -698,6 +698,8 @@ After all waves complete successfully (and if the user chose review in Step 3):
 
    **`not_approved_within_budget`:** Present remaining findings to the user; offer: **(a)** keep iterating (budget resets), **(b)** proceed with issues noted, or **(c)** stop execution. The per-plan .pi/test-runs/<plan-name>/ directory is preserved on this exit path so the user can inspect run artifacts after stop.
 
+   **`failed`:** Surface the `refine-code` failure reason to the user and stop execution. Report partial progress via Step 14. The per-plan .pi/test-runs/<plan-name>/ directory is preserved on this exit path so the user can inspect run artifacts after stop.
+
    **Review disabled** (user chose to disable in Step 3): Skip directly to Step 16.
 
 ## Step 16: Complete

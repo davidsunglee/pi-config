@@ -1,6 +1,6 @@
 ---
 name: refine-code
-description: "Iterative code review and remediation loop. Dispatches a code-refiner that alternates between reviewing and fixing until clean or budget exhausted. Usable standalone or from execute-plan."
+description: "Iterative code review and remediation loop. Dispatches a code-refiner that alternates between reviewing and fixing until approved/approved_with_concerns or budget exhaustion. Usable standalone or from execute-plan."
 ---
 
 # Refine Code

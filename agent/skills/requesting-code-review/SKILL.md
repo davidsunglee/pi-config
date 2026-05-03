@@ -64,11 +64,13 @@ The reviewer's output is in `results[0].finalMessage`. Parse it for the `**Verdi
 
 ### 4. Act on feedback
 
-| Severity | Action |
+| Verdict | Action |
 |----------|--------|
-| **Critical** | Fix immediately — bugs, security issues, data loss |
-| **Important** | Fix before proceeding — architecture, missing features, test gaps |
-| **Minor** | Note for later — style, optimization, docs |
+| `Approved` | Proceed; no Critical or Important findings remain. |
+| `Approved with concerns` | Proceed with the waived Important findings recorded as follow-up/context; the reviewer judged them acceptable to ship without forced remediation. |
+| `Not approved` | Fix all Critical findings and any Important findings the reviewer judged blocking before proceeding. |
+
+Minor findings are never blocking; note or fix them opportunistically.
 
 **If reviewer is wrong:** Push back with technical reasoning. Reference working
 tests or code. Don't implement suggestions that break things.
@@ -94,7 +96,7 @@ HEAD_SHA=$(git rev-parse HEAD)
     Minor: Inconsistent heading levels across pages
   Recommendations: Address the link issue in a follow-up commit.
 
-[Fix Important issues]
+[Record waived Important issue as follow-up]
 [Continue to completion]
 ```
 
@@ -103,7 +105,7 @@ HEAD_SHA=$(git rev-parse HEAD)
 **Never:**
 - Skip review because "it's simple"
 - Ignore Critical issues
-- Proceed with unfixed Important issues
+- Treat `Not approved` as shippable before fixing Critical findings and any Important findings the reviewer judged blocking
 
 **If reviewer wrong:**
 - Push back with technical reasoning

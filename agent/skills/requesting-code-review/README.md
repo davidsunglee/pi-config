@@ -14,15 +14,17 @@ Use after major feature work outside `execute-plan`, before merging to main, or 
 4. Read `~/.pi/agent/model-tiers.json` and resolve the capable reviewer model plus CLI from the dispatch map.
 5. Dispatch `code-reviewer` with `subagent_run_serial`.
 6. Parse the result for the `**Verdict:**` line in the `### Outcome` block (one of `Approved`, `Approved with concerns`, or `Not approved`).
-7. Act on findings by severity.
+7. Act on the verdict and findings.
 
-## Severity handling
+## Verdict and severity handling
 
-| Severity | Expected action |
+| Verdict | Expected action |
 | --- | --- |
-| Critical | Fix immediately; covers bugs, security issues, and data loss. |
-| Important | Fix before proceeding; covers architecture, missing features, and test gaps. |
-| Minor | Note or fix opportunistically; covers style, small optimizations, or documentation. |
+| `Approved` | Proceed; no Critical or Important findings remain. |
+| `Approved with concerns` | Proceed with the waived Important findings noted as follow-up/context; the reviewer judged them acceptable to ship without forced remediation. |
+| `Not approved` | Fix all Critical findings and any Important findings the reviewer judged blocking before proceeding. |
+
+Minor findings are never blocking; note or fix them opportunistically.
 
 ## Review discipline
 
