@@ -60,7 +60,7 @@ subagent_run_serial { tasks: [
 Use the `capable` model from `model-tiers.json` in a fresh context — the reviewer must see
 the code without bias from the generation process.
 
-The reviewer's output is in `results[0].finalMessage`. Parse it for `[Approved]` or `[Issues Found]` to determine next steps.
+The reviewer's output is in `results[0].finalMessage`. Parse it for the `**Verdict:**` line in the `### Outcome` block (one of `Approved`, `Approved with concerns`, or `Not approved`) to determine next steps.
 
 ### 4. Act on feedback
 
@@ -85,11 +85,14 @@ HEAD_SHA=$(git rev-parse HEAD)
 [Dispatch subagent with filled template]
 
 [Reviewer returns]:
+  **Verdict:** Approved with concerns
+  **Reasoning:** Solid implementation; cross-file link issue waived as a follow-up.
   Strengths: Clean architecture, comprehensive tests
   Issues:
+    Critical: (none)
     Important: Cross-file links in wiki point to non-existent filenames
     Minor: Inconsistent heading levels across pages
-  Assessment: Ready with fixes
+  Recommendations: Address the link issue in a follow-up commit.
 
 [Fix Important issues]
 [Continue to completion]

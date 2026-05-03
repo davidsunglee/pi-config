@@ -692,9 +692,11 @@ After all waves complete successfully (and if the user chose review in Step 3):
 
 3. **Handle the result:**
 
-   **`clean`:** Include the review summary (iteration count, review file path) in the Step 16 completion report. Proceed to Step 16.
+   **`approved`:** Include the review summary (iteration count, review file path) in the Step 16 completion report. Proceed to Step 16.
 
-   **`max_iterations_reached`:** Present remaining findings to the user; offer: **(a)** keep iterating (budget resets), **(b)** proceed with issues noted, or **(c)** stop execution. The per-plan .pi/test-runs/<plan-name>/ directory is preserved on this exit path so the user can inspect run artifacts after stop.
+   **`approved_with_concerns`:** Include the review summary (iteration count, review file path, AND a note pointing the user at the review file's `### Outcome` reasoning — which names the waived Important findings and the rationale for waiving each) in the Step 16 completion report. Proceed to Step 16.
+
+   **`not_approved_within_budget`:** Present remaining findings to the user; offer: **(a)** keep iterating (budget resets), **(b)** proceed with issues noted, or **(c)** stop execution. The per-plan .pi/test-runs/<plan-name>/ directory is preserved on this exit path so the user can inspect run artifacts after stop.
 
    **Review disabled** (user chose to disable in Step 3): Skip directly to Step 16.
 

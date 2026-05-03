@@ -272,7 +272,7 @@ Judge-only per-task verifier used by `execute-plan` Step 10. Has no shell access
 
 ### `code-reviewer.md`
 
-Independent code reviewer for production readiness. Two modes: full diff review or hybrid re-review of the remediation diff only. Calibrates severities (Critical through Minor) and returns `[Approved]` or `[Issues Found]`. Thinking: `high`.
+Independent code reviewer for production readiness. Two modes: full diff review or hybrid re-review of the remediation diff only. Calibrates severities (Critical / Important / Minor) and returns one of `Approved`, `Approved with concerns`, or `Not approved` in its `**Verdict:**` line inside the `### Outcome` block. Thinking: `high`.
 
 ### `code-refiner.md`
 
