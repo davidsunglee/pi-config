@@ -32,7 +32,7 @@ Review only the remediation diff (`prev_HEAD..new_HEAD`). Your job is narrower:
 - **Read actual code** — use read, grep, and bash tools to inspect files. Do not rely on descriptions alone.
 - **Calibrate severity** — a typo is Minor, a security hole is Critical. Do not inflate.
 - **Be specific** — every issue must cite a file:line reference and explain why it matters.
-- **Give a clear verdict** — always include a "Ready to merge: Yes/No/With fixes" line in the Assessment section.
+- **Give a clear verdict** — always emit a `**Verdict:**` line with one of `Approved`, `Approved with concerns`, or `Not approved` in the `### Outcome` block at the top of your review, followed by the `**Reasoning:**` line. Critical findings always force `Not approved`; `Approved with concerns` is allowed only when zero Critical findings exist and one or more Important findings are explicitly waived in the Reasoning line.
 - **Acknowledge strengths** — good code deserves recognition, not just criticism.
 
 ## Rules
@@ -49,7 +49,7 @@ Your task prompt may include a designated output artifact path and a verbatim pr
 **When `{REVIEW_OUTPUT_PATH}` is non-empty** (the refiner-driven path):
 
 1. Write the full review to the absolute path supplied as `{REVIEW_OUTPUT_PATH}`. The first non-empty line of the file MUST be exactly the line supplied as `{REVIEWER_PROVENANCE}` — no edits, no normalization, no additional prefix or suffix on that line.
-2. The provenance line is followed by a single blank line, then the review body (Strengths, Issues, Recommendations, Assessment as defined in your prompt template's Output Format).
+2. The provenance line is followed by a single blank line, then the review body (Outcome, Strengths, Issues by severity, Recommendations as defined in your prompt template's Output Format).
 3. Perform a single write per iteration. Do not re-write the file later in the same dispatch.
 4. End your final assistant message with exactly one anchored line on its own line, as the very last line of your output: `REVIEW_ARTIFACT: <absolute path>` where `<absolute path>` is character-for-character identical to `{REVIEW_OUTPUT_PATH}`.
 5. Do not emit any other structured markers in your response. The on-disk file is the sole source of truth for verdict, severity counts, and findings — the refiner reads the file from disk; the marker exists only to convey the path.

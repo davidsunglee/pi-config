@@ -73,23 +73,26 @@ Parse `results[0].finalMessage` from the code-refiner for the STATUS line and st
 
 Determine the stashed outcome:
 
-**`STATUS: clean`**
+**`STATUS: approved`**
 - Stash: review passed, iteration count, and review file path — to be reported to the caller only after Step 6 succeeds.
 
-**`STATUS: max_iterations_reached`**
+**`STATUS: approved_with_concerns`**
+- Stash: review passed with waived Important findings, iteration count, review file path, and a note that the review file contains the waiver rationale in its `### Outcome` reasoning — to be reported to the caller only after Step 6 succeeds. No menu (this is a success-path status).
+
+**`STATUS: not_approved_within_budget`**
 - Stash: remaining findings and the choice menu below — to be presented to the caller only after Step 6 succeeds.
 - Choices to offer (after Step 6 passes):
   - **(a) Keep iterating** — re-invoke this skill from Step 3 with the same inputs but `HEAD_SHA` updated to current HEAD (budget resets, new cycle)
   - **(b) Proceed with issues** — caller continues with known issues noted
   - **(c) Stop execution** — caller halts
 
-For any other outcome (dispatch failure, unexpected status), surface it directly to the caller per the Edge Cases section; Step 6 is skipped.
+For any other outcome (`STATUS: failed`, dispatch failure, unexpected status), surface it directly to the caller per the Edge Cases section; Step 6 is skipped.
 
 The caller (execute-plan or user) makes the decision. This skill does not auto-continue. Proceed to Step 6 before reporting anything to the caller.
 
 ## Step 6: Validate review provenance
 
-Run this validation only on `STATUS: clean` or `STATUS: max_iterations_reached`; skip on any other outcome.
+Run this validation only on `STATUS: approved`, `STATUS: approved_with_concerns`, or `STATUS: not_approved_within_budget`; skip on any other outcome (including `STATUS: failed`).
 
 Build the list of review file paths to validate:
 
@@ -101,8 +104,8 @@ For each path, read the file and validate the first non-empty line:
 2. Extract `<provider>/<model>` and `<cli>` from the matched line.
 3. The extracted value MUST NOT contain the substring `inline` (case-insensitive).
 4. Read `~/.pi/agent/model-tiers.json` (re-read; do not assume Step 2's snapshot is still current). Resolve `crossProvider.capable` and `standard` to their concrete model strings, and resolve `dispatch[<provider>]` for each, using the primitive operations defined in [`agent/skills/_shared/model-tier-resolution.md`](../_shared/model-tier-resolution.md) (tier-path resolution, provider-prefix extraction, dispatch lookup).
-5. On `STATUS: clean`: `<provider>/<model>` MUST equal the model string `crossProvider.capable` resolves to, and `<cli>` MUST equal `dispatch[<provider>]` for that model's provider prefix. The final-verification pass always runs at `crossProvider.capable` and is the last write to the file.
-6. On `STATUS: max_iterations_reached`: `<provider>/<model>` MUST equal either the model string `crossProvider.capable` resolves to OR the model string `standard` resolves to (the two documented reviewer tiers in `refine-code-prompt.md`). `<cli>` MUST equal `dispatch[<provider>]` for that model's provider prefix.
+5. On `STATUS: approved` or `STATUS: approved_with_concerns`: `<provider>/<model>` MUST equal the model string `crossProvider.capable` resolves to, and `<cli>` MUST equal `dispatch[<provider>]` for that model's provider prefix. The final-verification pass always runs at `crossProvider.capable` and is the last write to the file on the success path (whether the outcome is `Approved` or `Approved with concerns`).
+6. On `STATUS: not_approved_within_budget`: `<provider>/<model>` MUST equal either the model string `crossProvider.capable` resolves to OR the model string `standard` resolves to (the two documented reviewer tiers in `refine-code-prompt.md`). `<cli>` MUST equal `dispatch[<provider>]` for that model's provider prefix.
 
 On any validation failure (missing first line, malformed format, `inline` value, or model/cli mismatch), surface to the caller a single error of the form:
 
@@ -110,9 +113,14 @@ On any validation failure (missing first line, malformed format, `inline` value,
 refine-code: review provenance validation failed at <path>: <specific check> — <observed value or "missing">.
 ```
 
-Do NOT silently report `STATUS: clean` or `STATUS: max_iterations_reached` after a validation failure; the caller sees the validation error in place of the success status. Use a precise `<specific check>` label such as `first non-empty line missing`, `format mismatch`, `inline-substring forbidden`, `model/cli mismatch (expected <X> got <Y>)`.
+Do NOT silently report `STATUS: approved`, `STATUS: approved_with_concerns`, or `STATUS: not_approved_within_budget` after a validation failure; the caller sees the validation error in place of the success status. Use a precise `<specific check>` label such as `first non-empty line missing`, `format mismatch`, `inline-substring forbidden`, `model/cli mismatch (expected <X> got <Y>)`.
 
-When all paths pass validation, proceed to report the stashed outcome from Step 5 to the caller — `STATUS: clean` with iteration count and review file path, or `STATUS: max_iterations_reached` with remaining findings and the (a)/(b)/(c) choice menu. This is the only point at which Step 5's success outcome may reach the caller.
+When all paths pass validation, proceed to report the stashed outcome from Step 5 to the caller:
+- `STATUS: approved` — report with iteration count and review file path; no menu.
+- `STATUS: approved_with_concerns` — report with iteration count, review file path, and a note pointing the caller at the review file's `### Outcome` reasoning (which names the waived Important findings); no menu.
+- `STATUS: not_approved_within_budget` — report with remaining findings and the (a)/(b)/(c) choice menu.
+
+This is the only point at which Step 5's success outcome may reach the caller.
 
 ## Edge Cases
 
