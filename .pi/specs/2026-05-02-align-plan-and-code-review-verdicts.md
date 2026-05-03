@@ -59,10 +59,10 @@ Discrepancies as of today:
 
 ### Reviewer output structure
 
-- Top-of-body section: `### Outcome` immediately under the `**Reviewer:**` provenance line. Contents:
-  - `**Outcome: Approved | Approved with concerns | Not approved**`
-  - `**Reasoning:** <1–2 sentences justifying the outcome>`. On `Approved with concerns`, the reasoning explicitly names the Important findings being waived and the rationale for waiving each.
-- Remaining sections in order, both sides: `### Strengths`, `### Issues`, `### Recommendations`. No separate Summary section — the Outcome's reasoning carries that role; the refiner's status block carries the counts.
+- Top-of-body section: `### Outcome` immediately under the `**Reviewer:**` provenance line. Contents are two labeled subsections:
+  - `**Verdict:** Approved | Approved with concerns | Not approved`
+  - `**Reasoning:** <1–2 sentences justifying the verdict>`. On `Approved with concerns`, the reasoning explicitly names the Important findings being waived and the rationale for waiving each.
+- Remaining sections in order, both sides: `### Strengths`, `### Issues`, `### Recommendations`. No separate Summary section — the Outcome section's Reasoning line carries that role; the refiner's status block carries the counts.
 - `### Issues` is grouped under three H4 sub-headings: `#### Critical (Must Fix)`, `#### Important (Should Fix)`, `#### Minor (Nice to Have)`. Each finding inside follows a uniform template:
   - Bold lead line: `**<Task N | file:line>: <short description>**` — `Task N` for plan reviewers, `file:line` for code reviewers.
   - Bullet list: `- **What:** ...`, `- **Why it matters:** ...`, `- **Recommendation:** ...`.
@@ -113,7 +113,7 @@ Discrepancies as of today:
   - **Task N**: <one-sentence summary> — _waived: <one-sentence rationale from reviewer>._
   ~~~
 
-- One bullet per waived Important finding. The waiver rationale is sourced from the reviewer's Outcome reasoning paragraph; the refiner is responsible for transcribing one bullet per waived Important.
+- One bullet per waived Important finding. The waiver rationale is sourced from the reviewer's Outcome section Reasoning line; the refiner is responsible for transcribing one bullet per waived Important.
 - Minor findings are not appended. They live in the review file only.
 - No code-side analog. The diff is the artifact and the review file is its companion. This is the legitimate domain asymmetry from the goal statement.
 
@@ -123,10 +123,10 @@ Discrepancies as of today:
 
 ## Acceptance Criteria
 
-- `agent/skills/generate-plan/review-plan-prompt.md` and `agent/skills/requesting-code-review/review-code-prompt.md` both define output formats matching the structure described in Requirements: `### Outcome` (with `**Outcome:**` and `**Reasoning:**` lines) at top, then `### Strengths`, `### Issues` (with severity-grouped H4 sub-sections and the What / Why / Recommendation per-finding template), `### Recommendations`. No `Summary`, `Status`, or `Assessment` sections remain.
+- `agent/skills/generate-plan/review-plan-prompt.md` and `agent/skills/requesting-code-review/review-code-prompt.md` both define output formats matching the structure described in Requirements: `### Outcome` (with `**Verdict:**` and `**Reasoning:**` lines) at top, then `### Strengths`, `### Issues` (with severity-grouped H4 sub-sections and the What / Why / Recommendation per-finding template), `### Recommendations`. No `Summary`, `Status`, or `Assessment` sections remain.
 - Both reviewer prompts include explicit guidance on when `Approved with concerns` is appropriate and forbid it when any Critical finding is present.
-- `agent/skills/refine-plan/refine-plan-prompt.md` parses reviewer outcome by matching one of the three outcome labels in the `**Outcome:**` line; severity counts are derived from the H4 sub-section findings tagged Critical / Important / Minor; the refiner emits one of `approved` / `approved_with_concerns` / `not_approved_within_budget` / `failed`.
-- `agent/skills/refine-code/refine-code-prompt.md` parses reviewer outcome by matching one of the three outcome labels; remediation triggers only on `Not approved` outcomes; the refiner emits the same four-status enum.
+- `agent/skills/refine-plan/refine-plan-prompt.md` parses reviewer outcome by matching one of the three outcome labels in the `**Verdict:**` line; severity counts are derived from the H4 sub-section findings tagged Critical / Important / Minor; the refiner emits one of `approved` / `approved_with_concerns` / `not_approved_within_budget` / `failed`.
+- `agent/skills/refine-code/refine-code-prompt.md` parses reviewer outcome by matching one of the three outcome labels in the `**Verdict:**` line; remediation triggers only on `Not approved` outcomes; the refiner emits the same four-status enum.
 - `agent/skills/refine-plan/SKILL.md` and `agent/skills/refine-code/SKILL.md` recognize the new four-status enum in their result-parsing logic; provenance-validation steps stay intact and are not regressed.
 - The plan-side `## Review Notes` append is gated on `approved_with_concerns` outcomes only and follows the compact pointer-style format specified in Requirements (Important-only, one line per waived finding plus a pointer to the full review file).
 - The plan reviewer prompt instructs reviewers to disregard any pre-existing `## Review Notes` section when reviewing a plan.
@@ -142,7 +142,7 @@ Discrepancies as of today:
 - The reviewer-authored-artifact contract is preserved unchanged: `**Reviewer:**` provenance line as the first non-empty line of the review file; reviewer-written file at the refiner-supplied `{REVIEW_OUTPUT_PATH}`; `REVIEW_ARTIFACT:` marker in the reviewer's final assistant message. Verdict alignment changes the file body, not the handoff protocol.
 - Refiner provenance-validation rules (first-line regex match; provider/model/CLI cross-check against `~/.pi/agent/model-tiers.json`; `inline`-substring rejection) are preserved unchanged.
 - Per-issue locators stay domain-specific: Task N for plan reviewers, file:line for code reviewers. Aligning these would lose information.
-- The structural-only mode for plan reviews (`--structural-only` flag and `{STRUCTURAL_ONLY_NOTE}` block) continues to function. The "Structural-only review — no spec/todo coverage check performed." label is surfaced inside the Outcome's reasoning paragraph rather than prepended to a Summary paragraph (which no longer exists).
+- The structural-only mode for plan reviews (`--structural-only` flag and `{STRUCTURAL_ONLY_NOTE}` block) continues to function. The "Structural-only review — no spec/todo coverage check performed." label is surfaced inside the Outcome section's Reasoning line rather than prepended to a Summary paragraph (which no longer exists).
 - No new TypeScript tests are required — the verdict contract lives entirely in markdown prompt files. Manual smoke runs of `refine-plan` and `refine-code` are the verification mechanism.
 
 ## Non-Goals
@@ -156,4 +156,4 @@ Discrepancies as of today:
 
 ## Open Questions
 
-- Whether the `### Outcome` reasoning paragraph should remain a single 1–2 sentence paragraph or allow brief bulleted breakdowns when multiple Importants are waived on `Approved with concerns` outcomes. Default in this spec: single 1–2 sentence paragraph; revisitable if reviewers find it too constraining for cases with several waived findings.
+- Whether the `### Outcome` Reasoning line should remain a single 1–2 sentence paragraph or allow brief bulleted breakdowns when multiple Importants are waived on `Approved with concerns` outcomes. Default in this spec: single 1–2 sentence paragraph; revisitable if reviewers find it too constraining for cases with several waived findings.
