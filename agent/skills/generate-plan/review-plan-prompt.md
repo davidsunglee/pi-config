@@ -47,6 +47,9 @@ If the `## Structural-Only Mode` section is non-empty, skip this Spec/Todo Cover
 - Are there tasks that don't map to any requirement (scope creep)?
 - List any gaps: requirement → missing task.
 
+**Re-review compatibility:**
+- If the plan contains a trailing `## Review Notes` section, disregard it during this review. That section is review meta-data appended by the refiner from a prior `Approved with concerns` outcome, not plan content. Do NOT factor it into Spec/Todo Coverage analysis or task-sizing assessments.
+
 **Dependency Accuracy:**
 - For each task, check: does it reference outputs (filenames, paths, interfaces, data) from another task?
 - If yes, is that other task listed as a dependency?
@@ -69,7 +72,7 @@ If the `## Structural-Only Mode` section is non-empty, skip this Spec/Todo Cover
 **Verify-Recipe Enforcement (blocking):**
 - Every acceptance criterion MUST be immediately followed by its own `Verify:` line on the next line. One-to-one pairing is required: no shared `Verify:` lines, no criteria without a `Verify:` line, no `Verify:` line without a preceding criterion.
 - A `Verify:` recipe must name the artifact being checked AND the specific success condition (e.g., exact command + expected exit code, grep pattern + expected match location, file + expected content). Recipes that are placeholders ("check the file", "verify manually", "looks right", "confirm it works") fail this check.
-- Any missing `Verify:` line is an **Error**. Any placeholder `Verify:` recipe is an **Error**. These are blocking — they are not warnings or suggestions. Report one Error per offending criterion with the task number and the exact criterion text.
+- Any missing `Verify:` line is **Critical**. Any placeholder `Verify:` recipe is **Critical**. These are blocking — they are not Important or Minor findings. Report one Critical finding per offending criterion with the task number and the exact criterion text.
 
 **Buildability:**
 - Could an agent follow each task without getting stuck?
@@ -88,33 +91,63 @@ If the `## Structural-Only Mode` section is non-empty, skip this Spec/Todo Cover
 
 **Only flag issues that would cause real problems during execution.** An agent building the wrong thing, referencing a non-existent file, or getting stuck is an issue. Minor wording preferences, stylistic choices, or "nice to have" improvements are not errors.
 
-Approve the plan unless there are serious structural gaps.
+Emit `**Verdict:** Approved` unless there are serious structural gaps. Use `Approved with concerns` when only Important findings remain that you judge acceptable to ship; reserve `Not approved` for Critical findings or Important findings that need real remediation.
 
-- Verify-recipe enforcement is not a stylistic preference. A missing or placeholder `Verify:` line is always an Error, even in an otherwise well-written plan.
+- Verify-recipe enforcement is not a stylistic preference. A missing or placeholder `Verify:` line is always Critical, even in an otherwise well-written plan.
 
 ## Output Format
 
-### Status
+### Outcome
 
-**[Approved]** or **[Issues Found]**
+**Verdict:** Approved | Approved with concerns | Not approved
+
+**Reasoning:** <1–2 sentence justification of the verdict.>
+
+The verdict line MUST be written exactly in the form `**Verdict:** <label>` (bold label, unbolded value, single space between) so downstream refiners can parse a line that begins with the literal token `**Verdict:**`.
+
+Use exactly one of the three verdict labels above. Critical findings always force `Not approved`; you may not downgrade them. `Approved with concerns` is appropriate ONLY when there are zero Critical findings AND there are one or more Important findings that you judge acceptable to ship without forced remediation (for example: the concern is out of scope for the current change, is a follow-up task, or is a low-impact deviation). When you choose `Approved with concerns`, the `**Reasoning:**` line MUST explicitly name each Important finding being waived and the rationale for waiving it. `Approved` requires zero Critical AND zero Important findings.
+
+If this is a structural-only review (per `## Structural-Only Mode`), include the literal phrase "Structural-only review — no spec/todo coverage check performed." inside this `**Reasoning:**` line.
+
+### Strengths
+
+Bulleted list of what the plan does well. Be specific (cite task numbers when relevant). If there are no notable strengths to call out, write `_None._`.
 
 ### Issues
 
-For each issue found:
+Group findings under three H4 sub-headings, in this order:
 
-**[Error | Warning | Suggestion] — Task N: Short description**
-- **What:** Describe the issue
-- **Why it matters:** What goes wrong during execution if this isn't fixed
-- **Recommendation:** How to fix it
+#### Critical (Must Fix)
+
+- **Task N: <short description>**
+  - **What:** <Describe the issue>
+  - **Why it matters:** <What goes wrong during execution if this isn't fixed>
+  - **Recommendation:** <How to fix it>
+
+#### Important (Should Fix)
+
+- **Task N: <short description>**
+  - **What:** ...
+  - **Why it matters:** ...
+  - **Recommendation:** ...
+
+#### Minor (Nice to Have)
+
+- **Task N: <short description>**
+  - **What:** ...
+  - **Why it matters:** ...
+  - **Recommendation:** ...
+
+Render any empty severity sub-section as `_None._` rather than omitting the heading. Every sub-section appears in every review.
 
 **Severity guide:**
-- **Error** — Missing tasks, wrong dependencies, tasks that reference non-existent outputs, tasks that can't be executed as written, **missing `Verify:` lines on acceptance criteria, or placeholder `Verify:` recipes**. Blocks execution.
-- **Warning** — Vague acceptance criteria, sizing concerns, consistency risks that might cause problems. Informational.
-- **Suggestion** — Improvements that would make the plan better but aren't problems. Won't cause execution failures.
+- **Critical** — Missing tasks, wrong dependencies, references to non-existent outputs, missing or placeholder `Verify:` lines, tasks that cannot be executed as written. Critical findings always force `Not approved`.
+- **Important** — Vague acceptance criteria, sizing concerns, cross-task consistency risks, constraint-documentation gaps. The reviewer judges whether each Important finding needs real remediation (force `Not approved`) or is acceptable to waive (allow `Approved with concerns`).
+- **Minor** — Nit-level suggestions, low-value polish. Never block; never force a planner edit pass.
 
-### Summary
+### Recommendations
 
-One paragraph: overall assessment, number of errors/warnings/suggestions, and whether the plan is ready for execution. If this is a structural-only review (per `## Structural-Only Mode`), prepend the literal phrase "Structural-only review — no spec/todo coverage check performed." to the Summary paragraph.
+Bulleted list of process or content improvements that aren't tied to a specific finding above. If there are none, write `_None._`.
 
 ## Output Artifact Contract
 
@@ -125,7 +158,7 @@ This section operationalizes your standing `## Output Artifact Contract` rule wi
 
 When `{REVIEW_OUTPUT_PATH}` is non-empty:
 
-1. Write the full review (Status verdict, Issues with severity tags, Summary) to `{REVIEW_OUTPUT_PATH}` (absolute path).
+1. Write the full review (Outcome, Strengths, Issues by severity, Recommendations as defined in `## Output Format`) to `{REVIEW_OUTPUT_PATH}` (absolute path).
 2. The first non-empty line of the file MUST be exactly `{REVIEWER_PROVENANCE}` — copy it verbatim. Do not normalize whitespace, do not add backticks, do not insert any other content above it.
 3. Follow the provenance line with a single blank line, then the review body in the format defined by `## Output Format` above.
 4. Perform exactly one write per dispatch.
@@ -143,7 +176,7 @@ Output your review as your final assistant message in the format defined by `## 
 - Trace cross-task references to verify consistency
 - Be specific: cite task numbers and exact text
 - Distinguish real problems from preferences
-- Give a clear verdict (Approved or Issues Found)
+- Give a clear verdict in the `**Verdict:**` line inside `### Outcome` (`Approved`, `Approved with concerns`, or `Not approved`)
 
 **DON'T:**
 - Flag stylistic preferences as errors
