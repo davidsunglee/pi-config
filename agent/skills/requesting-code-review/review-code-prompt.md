@@ -65,34 +65,55 @@ git diff {BASE_SHA}..{HEAD_SHA}
 
 ## Output Format
 
+### Outcome
+
+**Verdict:** Approved | Approved with concerns | Not approved
+
+**Reasoning:** <1–2 sentence technical assessment justifying the verdict.>
+
+The verdict line MUST be written exactly in the form `**Verdict:** <label>` (bold label, unbolded value, single space between) so downstream refiners can parse a line that begins with the literal token `**Verdict:**`.
+
+Use exactly one of the three verdict labels above. Critical findings always force `Not approved`; you may not downgrade them. `Approved with concerns` is appropriate ONLY when there are zero Critical findings AND there are one or more Important findings that you judge acceptable to ship without forced remediation (for example: the concern is out of scope for the current diff, is a follow-up task, or is a low-impact deviation). When you choose `Approved with concerns`, the `**Reasoning:**` line MUST explicitly name each Important finding being waived and the rationale for waiving it. `Approved` requires zero Critical AND zero Important findings.
+
 ### Strengths
-[What's well done? Be specific.]
+
+Bulleted list of what's well done. Be specific (cite file:line ranges when relevant). If there are no notable strengths to call out, write `_None._`.
 
 ### Issues
 
+Group findings under three H4 sub-headings, in this order:
+
 #### Critical (Must Fix)
-[Bugs, security issues, data loss risks, broken functionality]
+
+- **path/to/file.ts:LINE: <short description>**
+  - **What:** <Describe the issue>
+  - **Why it matters:** <Why it matters>
+  - **Recommendation:** <How to fix it (if not obvious)>
 
 #### Important (Should Fix)
-[Architecture problems, missing features, poor error handling, test gaps]
+
+- **path/to/file.ts:LINE: <short description>**
+  - **What:** ...
+  - **Why it matters:** ...
+  - **Recommendation:** ...
 
 #### Minor (Nice to Have)
-[Code style, optimization opportunities, documentation improvements]
 
-**For each issue:**
-- File:line reference
-- What's wrong
-- Why it matters
-- How to fix (if not obvious)
+- **path/to/file.ts:LINE: <short description>**
+  - **What:** ...
+  - **Why it matters:** ...
+  - **Recommendation:** ...
+
+Render any empty severity sub-section as `_None._` rather than omitting the heading. Every sub-section appears in every review.
+
+**Severity guide:**
+- **Critical** — Bugs, security issues, data loss risks, broken functionality. Critical findings always force `Not approved`.
+- **Important** — Architecture problems, missing features, poor error handling, test gaps. The reviewer judges whether each Important finding needs real remediation (force `Not approved`) or is acceptable to waive (allow `Approved with concerns`).
+- **Minor** — Code style, optimization opportunities, documentation improvements. Never block.
 
 ### Recommendations
-[Improvements for code quality, architecture, or process]
 
-### Assessment
-
-**Ready to merge: [Yes/No/With fixes]**
-
-**Reasoning:** [Technical assessment in 1-2 sentences]
+Bulleted list of broader improvements (architecture, process, follow-up work) that don't map to a specific finding above. If there are none, write `_None._`.
 
 ## Critical Rules
 
@@ -101,7 +122,7 @@ git diff {BASE_SHA}..{HEAD_SHA}
 - Be specific (file:line, not vague)
 - Explain WHY issues matter
 - Acknowledge strengths
-- Give clear verdict
+- Give a clear verdict in the `**Verdict:**` line inside `### Outcome` (`Approved`, `Approved with concerns`, or `Not approved`)
 
 **DON'T:**
 - Say "looks good" without checking
@@ -119,7 +140,7 @@ This section operationalizes your standing `## Output Artifact Contract` rule wi
 
 When `{REVIEW_OUTPUT_PATH}` is non-empty:
 
-1. Write the full review (Strengths, Issues by severity, Recommendations, Assessment with the "Ready to merge" verdict) to `{REVIEW_OUTPUT_PATH}` (absolute path).
+1. Write the full review (Outcome, Strengths, Issues by severity, Recommendations as defined in `## Output Format`) to `{REVIEW_OUTPUT_PATH}` (absolute path).
 2. The first non-empty line of the file MUST be exactly `{REVIEWER_PROVENANCE}` — copy it verbatim. Do not normalize whitespace, do not add backticks, do not insert any other content above it.
 3. Follow the provenance line with a single blank line, then the review body in the format defined by `## Output Format` above.
 4. Perform exactly one write per dispatch.
@@ -133,37 +154,44 @@ Output your review as your final assistant message in the format defined by `## 
 ## Example Output
 
 ```
+### Outcome
+
+**Verdict:** Approved with concerns
+
+**Reasoning:** Core implementation is solid with good architecture and tests. Two Important findings are waived: missing `--help` text in the CLI wrapper (follow-up task; users can read the source) and missing date validation in `search.ts` (low-impact — invalid dates silently return no results, which is recoverable).
+
 ### Strengths
-- Clean database schema with proper migrations (db.ts:15-42)
+
+- Clean database schema with proper migrations (`db.ts:15-42`)
 - Comprehensive test coverage (18 tests, all edge cases)
-- Good error handling with fallbacks (summarizer.ts:85-92)
+- Good error handling with fallbacks (`summarizer.ts:85-92`)
 
 ### Issues
 
-#### Important
-1. **Missing help text in CLI wrapper**
-   - File: index-conversations:1-31
-   - Issue: No --help flag, users won't discover --concurrency
-   - Fix: Add --help case with usage examples
+#### Critical (Must Fix)
 
-2. **Date validation missing**
-   - File: search.ts:25-27
-   - Issue: Invalid dates silently return no results
-   - Fix: Validate ISO format, throw error with example
+_None._
 
-#### Minor
-1. **Progress indicators**
-   - File: indexer.ts:130
-   - Issue: No "X of Y" counter for long operations
-   - Impact: Users don't know how long to wait
+#### Important (Should Fix)
+
+- **`index-conversations:1-31`: Missing help text in CLI wrapper**
+  - **What:** No `--help` flag, users won't discover `--concurrency`.
+  - **Why it matters:** Discoverability of optional flags depends on `--help`.
+  - **Recommendation:** Add a `--help` case with usage examples.
+- **`search.ts:25-27`: Date validation missing**
+  - **What:** Invalid dates silently return no results.
+  - **Why it matters:** Hard to distinguish "no matches" from "bad input".
+  - **Recommendation:** Validate ISO format and throw an error with an example.
+
+#### Minor (Nice to Have)
+
+- **`indexer.ts:130`: No progress indicators on long operations**
+  - **What:** No "X of Y" counter for indexing runs that take minutes.
+  - **Why it matters:** Users don't know how long to wait.
+  - **Recommendation:** Add a periodic progress line.
 
 ### Recommendations
-- Add progress reporting for user experience
-- Consider config file for excluded projects (portability)
 
-### Assessment
-
-**Ready to merge: With fixes**
-
-**Reasoning:** Core implementation is solid with good architecture and tests. Important issues (help text, date validation) are easily fixed and don't affect core functionality.
+- Add progress reporting for user experience.
+- Consider a config file for excluded projects (portability).
 ```
