@@ -24,23 +24,23 @@ Tasks are sequenced so the reviewer prompt edits land before the refiner prompts
 
 ## File Structure
 
-- `agent/skills/generate-plan/review-plan-prompt.md` (Modify) — Rewrite the `## Output Format` section to emit `### Outcome` / `### Strengths` / `### Issues` (with H4 severity sub-headings) / `### Recommendations`. Add re-review-compatibility instruction (disregard pre-existing `## Review Notes`). Move the structural-only label from a Summary paragraph (which no longer exists) to inside the Outcome reasoning paragraph. Update severity guide to Critical / Important / Minor. Update Critical Rules to say "Outcome" not "Approved or Issues Found".
-- `agent/skills/requesting-code-review/review-code-prompt.md` (Modify) — Rewrite the `## Output Format` section: replace the `### Assessment` block with a top-of-body `### Outcome` block; restructure `### Issues` into uniform per-finding template (bold lead `**file:line: <short description>**` + bulleted What / Why it matters / Recommendation); render empty severity sub-sections as `_None._`. Update the example to match. Update Critical Rules' verdict line. Update the Output Artifact Contract's Step 1 wording to "Strengths, Issues by severity, Recommendations" (drop "Assessment with the Ready to merge verdict").
-- `agent/skills/refine-plan/refine-plan-prompt.md` (Modify) — Replace `**[Approved]** | **[Issues Found]**` parsing with `**Outcome:**` line parsing for the three new labels. Replace Error / Warning / Suggestion counting with Critical / Important / Minor counting. Update the iteration-step branching to act on outcome label, not Errors-count. Replace the `Review Notes Append Format` block with the new Important-only pointer-style format gated on `approved_with_concerns`. Update the planner edit-pass `{REVIEW_FINDINGS}` source to use Critical + Important findings (not "Error-severity" findings). Update the Output Format status enum to the four-value enum. Rewrite the `## Failure Modes` section to use the four-category taxonomy (consolidate dispatch-failure rows under `worker dispatch failed: <which worker>`; relabel reviewer-handoff rows under `reviewer artifact handoff failed: <specific check>`; relabel plan-file rows under `input artifact missing or empty: <which>`). Update every inline failure-emit site to match.
-- `agent/skills/refine-code/refine-code-prompt.md` (Modify) — Replace `"Ready to merge: Yes" with no Critical/Important issues` verdict assessment with parsing of the `**Outcome:**` line. Update Final Verification "If clean" branching to act on outcome label. Update the Output Format status enum to the four-value enum. Add an `approved_with_concerns` exit path (treats it the same as `approved` — no further hybrid re-review iteration; the refiner exits on the success path). Rewrite the `## Failure Modes` section to use the four-category taxonomy with the same canonical reason templates as the plan side. Update every inline failure-emit site to match.
-- `agent/skills/refine-plan/SKILL.md` (Modify) — Update Step 7.5 structural-only note text from "label its verdict … in its Summary section" to "label its verdict … inside its Outcome reasoning paragraph". Update Step 9 status enum from `approved | issues_remaining | failed` to `approved | approved_with_concerns | not_approved_within_budget | failed`. Update Step 9.5 to skip on `failed` only and validate on the three success-path statuses. Update Step 10 handlers: keep `STATUS: approved` (no behavior change to commit gate), add `STATUS: approved_with_concerns` (commit gate runs as on `approved`, summary surfaces the waived Important count), rename `STATUS: issues_remaining` heading and body to `STATUS: not_approved_within_budget` (budget-exhaustion menu unchanged). Update Step 11 output format to use the four-value enum.
+- `agent/skills/generate-plan/review-plan-prompt.md` (Modify) — Rewrite the `## Output Format` section to emit `### Outcome` (with `**Verdict:**` and `**Reasoning:**` lines) / `### Strengths` / `### Issues` (with H4 severity sub-headings) / `### Recommendations`. Add re-review-compatibility instruction (disregard pre-existing `## Review Notes`). Move the structural-only label from a Summary paragraph (which no longer exists) to inside the `### Outcome` section's `**Reasoning:**` line. Update severity guide to Critical / Important / Minor. Update Critical Rules to say "Outcome" not "Approved or Issues Found".
+- `agent/skills/requesting-code-review/review-code-prompt.md` (Modify) — Rewrite the `## Output Format` section: replace the `### Assessment` block with a top-of-body `### Outcome` block whose first labeled line is `**Verdict:**`; restructure `### Issues` into uniform per-finding template (bold lead `**file:line: <short description>**` + bulleted What / Why it matters / Recommendation); render empty severity sub-sections as `_None._`. Update the example to match. Update Critical Rules' verdict line. Update the Output Artifact Contract's Step 1 wording to "Outcome, Strengths, Issues by severity, Recommendations" (drop "Assessment with the Ready to merge verdict").
+- `agent/skills/refine-plan/refine-plan-prompt.md` (Modify) — Replace `**[Approved]** | **[Issues Found]**` parsing with `**Verdict:**` line parsing for the three new labels. Replace Error / Warning / Suggestion counting with Critical / Important / Minor counting. Update the iteration-step branching to act on the parsed verdict label, not Errors-count. Replace the `Review Notes Append Format` block with the new Important-only pointer-style format gated on `approved_with_concerns`. Update the planner edit-pass `{REVIEW_FINDINGS}` source to use Critical + Important findings (not "Error-severity" findings). Update the Output Format status enum to the four-value enum. Rewrite the `## Failure Modes` section to use the four-category taxonomy (consolidate dispatch-failure rows under `worker dispatch failed: <which worker>`; relabel reviewer-handoff rows under `reviewer artifact handoff failed: <specific check>`; relabel plan-file rows under `input artifact missing or empty: <which>`). Update every inline failure-emit site to match.
+- `agent/skills/refine-code/refine-code-prompt.md` (Modify) — Replace `"Ready to merge: Yes" with no Critical/Important issues` verdict assessment with parsing of the `**Verdict:**` line. Update Final Verification "If clean" branching to act on the parsed verdict label. Update the Output Format status enum to the four-value enum. Add an `approved_with_concerns` exit path (treats it the same as `approved` — no further hybrid re-review iteration; the refiner exits on the success path). Rewrite the `## Failure Modes` section to use the four-category taxonomy with the same canonical reason templates as the plan side. Update every inline failure-emit site to match.
+- `agent/skills/refine-plan/SKILL.md` (Modify) — Update Step 7.5 structural-only note text from "label its verdict … in its Summary section" to "include the structural-only phrase inside the `### Outcome` section's `**Reasoning:**` line". Update Step 9 status enum from `approved | issues_remaining | failed` to `approved | approved_with_concerns | not_approved_within_budget | failed`. Update Step 9.5 to skip on `failed` only and validate on the three success-path statuses. Update Step 10 handlers: keep `STATUS: approved` (no behavior change to commit gate), add `STATUS: approved_with_concerns` (commit gate runs as on `approved`, summary surfaces the waived Important count), rename `STATUS: issues_remaining` heading and body to `STATUS: not_approved_within_budget` (budget-exhaustion menu unchanged). Update Step 11 output format to use the four-value enum.
 - `agent/skills/refine-code/SKILL.md` (Modify) — Update Step 5 to recognize `approved | approved_with_concerns | not_approved_within_budget | failed`; rename "STATUS: clean" handler to "STATUS: approved", add an `approved_with_concerns` handler (same caller-facing report as `approved`, with a note about waived Importants), rename the `max_iterations_reached` handler to `not_approved_within_budget` (menu unchanged). Update Step 6 model-tier validation rules: `approved` and `approved_with_concerns` validate against `crossProvider.capable` only (final-verification pass); `not_approved_within_budget` validates against `crossProvider.capable` OR `standard` (existing two-tier acceptance). Update Step 6's "Do NOT silently report" sentence to list the three success-path statuses. Update the "When all paths pass validation" closing paragraph to describe the three success-path outcomes.
-- `agent/agents/plan-reviewer.md` (Modify) — Update the Principles bullet "Give a clear verdict — always conclude with `[Approved]` or `[Issues Found]`" to reference the three new outcome labels and the `### Outcome` section. Update the Output Artifact Contract Step 2's body description from "Status verdict, Issues, Summary" to "Outcome, Strengths, Issues, Recommendations".
-- `agent/agents/code-reviewer.md` (Modify) — Update the Principles bullet "Give a clear verdict — always include a 'Ready to merge: Yes/No/With fixes' line in the Assessment section" to reference the three new outcome labels and the `### Outcome` section. Update the Output Artifact Contract Step 2's body description from "Strengths, Issues, Recommendations, Assessment" to "Outcome, Strengths, Issues, Recommendations".
-- `agent/agents/plan-refiner.md` (Modify) — No verdict-vocabulary references in current text, but the role bullet 5 says "Append warnings/suggestions to the plan as `## Review Notes` only on the approved path". Update to "Append the waived-Important pointer block to the plan as `## Review Notes` only on the `approved_with_concerns` path". Update bullet 3 reference to "Status line" to "Outcome line".
+- `agent/agents/plan-reviewer.md` (Modify) — Update the Principles bullet "Give a clear verdict — always conclude with `[Approved]` or `[Issues Found]`" to reference the three new verdict labels, the `**Verdict:**` line, and the `### Outcome` section. Update the Output Artifact Contract Step 2's body description from "Status verdict, Issues, Summary" to "Outcome, Strengths, Issues, Recommendations".
+- `agent/agents/code-reviewer.md` (Modify) — Update the Principles bullet "Give a clear verdict — always include a 'Ready to merge: Yes/No/With fixes' line in the Assessment section" to reference the three new verdict labels, the `**Verdict:**` line, and the `### Outcome` section. Update the Output Artifact Contract Step 2's body description from "Strengths, Issues, Recommendations, Assessment" to "Outcome, Strengths, Issues, Recommendations".
+- `agent/agents/plan-refiner.md` (Modify) — No verdict-vocabulary references in current text, but the role bullet 5 says "Append warnings/suggestions to the plan as `## Review Notes` only on the approved path". Update to "Append the waived-Important pointer block to the plan as `## Review Notes` only on the `approved_with_concerns` path". Update bullet 3 reference to "Status line" to "Verdict line".
 - `agent/agents/code-refiner.md` (Modify) — No standing verdict-vocabulary references requiring change beyond consistency. Audit the body to confirm no stale language; if any "Critical/Important issues" wording references the verdict (e.g. via "Do NOT ignore Critical or Important findings"), keep as-is — these are severity references, not outcome references.
 - `agent/skills/refine-plan/README.md` (Modify) — Update the Final summary format block status enum from `approved | issues_remaining | failed` to `approved | approved_with_concerns | not_approved_within_budget | failed`. Update the Workflow step 7 phrasing to reflect the new outcomes ("when approved or approved with concerns").
 - `agent/skills/refine-code/README.md` (Modify) — Update Status handling section to enumerate the new four statuses (`approved`, `approved_with_concerns`, `not_approved_within_budget`, `failed`) with their actions. Update the Coordinator responsibilities bullet "stop when clean or the budget is exhausted" to "stop when the reviewer outcome is `Approved`/`Approved with concerns` or the budget is exhausted with `Not approved` still standing".
-- `agent/skills/requesting-code-review/README.md` (Modify) — Update the Workflow step 6 from "Parse the result for `[Approved]` or `[Issues Found]`" to "Parse the result for the `**Outcome:**` line (`Approved` / `Approved with concerns` / `Not approved`)".
-- `agent/skills/requesting-code-review/SKILL.md` (Modify) — Update the dispatch documentation paragraph from "Parse it for `[Approved]` or `[Issues Found]`" to "Parse it for the `**Outcome:**` line in the `### Outcome` block (one of `Approved`, `Approved with concerns`, `Not approved`)". Update the Example block's reviewer-output sketch to match (replace `Assessment: Ready with fixes` with `Outcome: Approved with concerns`).
+- `agent/skills/requesting-code-review/README.md` (Modify) — Update the Workflow step 6 from "Parse the result for `[Approved]` or `[Issues Found]`" to "Parse the result for the `**Verdict:**` line in the `### Outcome` block (`Approved` / `Approved with concerns` / `Not approved`)".
+- `agent/skills/requesting-code-review/SKILL.md` (Modify) — Update the dispatch documentation paragraph from "Parse it for `[Approved]` or `[Issues Found]`" to "Parse it for the `**Verdict:**` line in the `### Outcome` block (one of `Approved`, `Approved with concerns`, `Not approved`)". Update the Example block's reviewer-output sketch to match (replace `Assessment: Ready with fixes` with `**Verdict:** Approved with concerns`).
 - `agent/skills/execute-plan/SKILL.md` (Modify) — Step 15 result handler: rename `clean` to `approved`, add `approved_with_concerns` (same as `approved` flow but report mentions waived Importants), rename `max_iterations_reached` to `not_approved_within_budget` (menu text unchanged).
-- `agent/skills/refine-code/review-fix-block.md` (Modify) — Update the trailing instruction "report 'Ready to merge: Yes'" to "report `**Outcome:** Approved` in the `### Outcome` section".
-- `README.md` (top-level) (Modify) — Update the `code-reviewer.md` description line "returns `[Approved]` or `[Issues Found]`" to "returns one of `Approved` / `Approved with concerns` / `Not approved` in its `### Outcome` block".
+- `agent/skills/refine-code/review-fix-block.md` (Modify) — Update the trailing instruction "report 'Ready to merge: Yes'" to "report `**Verdict:** Approved` in the `### Outcome` section".
+- `README.md` (top-level) (Modify) — Update the `code-reviewer.md` description line "returns `[Approved]` or `[Issues Found]`" to "returns one of `Approved` / `Approved with concerns` / `Not approved` in its `**Verdict:**` line inside the `### Outcome` block".
 
 ## Tasks
 
@@ -57,15 +57,15 @@ Tasks are sequenced so the reviewer prompt edits land before the refiner prompts
 
   ### Outcome
 
-  **Outcome:** Approved | Approved with concerns | Not approved
+  **Verdict:** Approved | Approved with concerns | Not approved
 
-  **Reasoning:** <1–2 sentence justification of the outcome.>
+  **Reasoning:** <1–2 sentence justification of the verdict.>
 
-  The outcome line MUST be written exactly in the form `**Outcome:** <label>` (bold label, unbolded value, single space between) so downstream refiners can parse a line that begins with the literal token `**Outcome:**`.
+  The verdict line MUST be written exactly in the form `**Verdict:** <label>` (bold label, unbolded value, single space between) so downstream refiners can parse a line that begins with the literal token `**Verdict:**`.
 
-  Use exactly one of the three outcome labels above. Critical findings always force `Not approved`; you may not downgrade them. `Approved with concerns` is appropriate ONLY when there are zero Critical findings AND there are one or more Important findings that you judge acceptable to ship without forced remediation (for example: the concern is out of scope for the current change, is a follow-up task, or is a low-impact deviation). When you choose `Approved with concerns`, the Reasoning paragraph MUST explicitly name each Important finding being waived and the rationale for waiving it. `Approved` requires zero Critical AND zero Important findings.
+  Use exactly one of the three verdict labels above. Critical findings always force `Not approved`; you may not downgrade them. `Approved with concerns` is appropriate ONLY when there are zero Critical findings AND there are one or more Important findings that you judge acceptable to ship without forced remediation (for example: the concern is out of scope for the current change, is a follow-up task, or is a low-impact deviation). When you choose `Approved with concerns`, the `**Reasoning:**` line MUST explicitly name each Important finding being waived and the rationale for waiving it. `Approved` requires zero Critical AND zero Important findings.
 
-  If this is a structural-only review (per `## Structural-Only Mode`), include the literal phrase "Structural-only review — no spec/todo coverage check performed." inside this Reasoning paragraph.
+  If this is a structural-only review (per `## Structural-Only Mode`), include the literal phrase "Structural-only review — no spec/todo coverage check performed." inside this `**Reasoning:**` line.
 
   ### Strengths
 
@@ -110,11 +110,11 @@ Tasks are sequenced so the reviewer prompt edits land before the refiner prompts
 
   Note: the `### Status`, `### Issues` (with old severity tag scheme), and `### Summary` headings from the prior structure are GONE — do not preserve them in any form.
 
-- [ ] **Step 2: Update the `## Calibration` section.** Locate the `## Calibration` section (currently containing "Verify-recipe enforcement is not a stylistic preference. A missing or placeholder `Verify:` line is always an Error, even in an otherwise well-written plan."). Replace "is always an Error" with "is always Critical". Replace "Approve the plan unless there are serious structural gaps." with "Emit `Outcome: Approved` unless there are serious structural gaps. Use `Approved with concerns` when only Important findings remain that you judge acceptable to ship; reserve `Not approved` for Critical findings or Important findings that need real remediation."
+- [ ] **Step 2: Update the `## Calibration` section.** Locate the `## Calibration` section (currently containing "Verify-recipe enforcement is not a stylistic preference. A missing or placeholder `Verify:` line is always an Error, even in an otherwise well-written plan."). Replace "is always an Error" with "is always Critical". Replace "Approve the plan unless there are serious structural gaps." with "Emit `**Verdict:** Approved` unless there are serious structural gaps. Use `Approved with concerns` when only Important findings remain that you judge acceptable to ship; reserve `Not approved` for Critical findings or Important findings that need real remediation."
 
 - [ ] **Step 3: Update the `**Verify-Recipe Enforcement (blocking):**` block.** Locate the bullet "Any missing `Verify:` line is an **Error**. Any placeholder `Verify:` recipe is an **Error**. These are blocking — they are not warnings or suggestions. Report one Error per offending criterion with the task number and the exact criterion text." Replace "**Error**" (both occurrences) with "**Critical**" and update the parenthetical "they are not warnings or suggestions" to "they are not Important or Minor findings". Update "Report one Error" to "Report one Critical finding".
 
-- [ ] **Step 4: Update Critical Rules verdict bullet.** Locate the `## Critical Rules` `DO:` bullet "Give a clear verdict (Approved or Issues Found)" and replace it with "Give a clear verdict in `### Outcome` (`Approved`, `Approved with concerns`, or `Not approved`)".
+- [ ] **Step 4: Update Critical Rules verdict bullet.** Locate the `## Critical Rules` `DO:` bullet "Give a clear verdict (Approved or Issues Found)" and replace it with "Give a clear verdict in the `**Verdict:**` line inside `### Outcome` (`Approved`, `Approved with concerns`, or `Not approved`)".
 
 - [ ] **Step 5: Add re-review compatibility instruction.** Add a new bullet to the `## Review Checklist` section, between the `**Spec/Todo Coverage:**` block and the `**Dependency Accuracy:**` block:
 
@@ -127,20 +127,20 @@ Tasks are sequenced so the reviewer prompt edits land before the refiner prompts
 
 **Acceptance criteria:**
 
-- The `## Output Format` section emits the new five-block structure: `### Outcome` (with `**Outcome:**` and `**Reasoning:**` lines), `### Strengths`, `### Issues` (with H4 sub-headings `#### Critical (Must Fix)`, `#### Important (Should Fix)`, `#### Minor (Nice to Have)` and the per-finding `**Task N: ...**` + What/Why it matters/Recommendation template), `### Recommendations`.
-  Verify: open `agent/skills/generate-plan/review-plan-prompt.md` and confirm the `## Output Format` section contains the literal heading lines `### Outcome`, `### Strengths`, `### Issues`, `#### Critical (Must Fix)`, `#### Important (Should Fix)`, `#### Minor (Nice to Have)`, `### Recommendations` exactly once each, in that order, with no `### Status` or `### Summary` heading anywhere in the file.
+- The `## Output Format` section emits the new five-block structure: `### Outcome` (with `**Verdict:**` and `**Reasoning:**` lines), `### Strengths`, `### Issues` (with H4 sub-headings `#### Critical (Must Fix)`, `#### Important (Should Fix)`, `#### Minor (Nice to Have)` and the per-finding `**Task N: ...**` + What/Why it matters/Recommendation template), `### Recommendations`.
+  Verify: open `agent/skills/generate-plan/review-plan-prompt.md` and confirm the `## Output Format` section contains the literal heading lines `### Outcome`, `### Strengths`, `### Issues`, `#### Critical (Must Fix)`, `#### Important (Should Fix)`, `#### Minor (Nice to Have)`, `### Recommendations` exactly once each, in that order; the `### Outcome` block contains `**Verdict:** Approved | Approved with concerns | Not approved` and `**Reasoning:**`; and there is no `### Status`, `### Summary`, or `**Outcome:**` line anywhere in the file.
 - The new `### Outcome` block documents when `Approved with concerns` is appropriate and forbids it when any Critical finding is present.
   Verify: `grep -n "Approved with concerns" agent/skills/generate-plan/review-plan-prompt.md` returns at least one match inside the `### Outcome` description paragraph; the same paragraph contains the substring "Critical findings always force `Not approved`".
 - Empty severity sub-sections render as `_None._` rather than being omitted.
   Verify: `grep -n "_None._" agent/skills/generate-plan/review-plan-prompt.md` returns at least one match inside the `## Output Format` section's severity-rendering instructions.
 - The Severity guide uses Critical / Important / Minor working definitions matching the spec.
   Verify: open `agent/skills/generate-plan/review-plan-prompt.md`, locate the `**Severity guide:**` block in the `### Issues` section, and confirm three bullets headed `**Critical**`, `**Important**`, `**Minor**` exist with no `**Error**`, `**Warning**`, or `**Suggestion**` headings remaining anywhere in the file.
-- The structural-only label is surfaced inside the Outcome's reasoning paragraph.
-  Verify: open `agent/skills/generate-plan/review-plan-prompt.md`, locate the `### Outcome` description, and confirm the literal phrase `Structural-only review — no spec/todo coverage check performed.` appears in the same paragraph that names the Reasoning line — and does NOT appear inside any `### Summary` heading (which should not exist).
+- The structural-only label is surfaced inside the `### Outcome` section's `**Reasoning:**` line instructions.
+  Verify: open `agent/skills/generate-plan/review-plan-prompt.md`, locate the `### Outcome` description, and confirm the literal phrase `Structural-only review — no spec/todo coverage check performed.` appears in the same instruction that names the `**Reasoning:**` line — and does NOT appear inside any `### Summary` heading (which should not exist).
 - The plan reviewer is instructed to disregard any pre-existing `## Review Notes` section.
   Verify: `grep -n "Re-review compatibility" agent/skills/generate-plan/review-plan-prompt.md` returns a match in the `## Review Checklist` section; the matched block contains the substring `disregard it during this review`.
-- Critical Rules' verdict bullet references the new `### Outcome` block with the three labels.
-  Verify: `grep -n "### Outcome" agent/skills/generate-plan/review-plan-prompt.md` returns at least one match in the `## Critical Rules` `DO:` list, and `grep -n "Approved or Issues Found" agent/skills/generate-plan/review-plan-prompt.md` returns zero matches.
+- Critical Rules' verdict bullet references the new `**Verdict:**` line inside the `### Outcome` block with the three labels.
+  Verify: open the `## Critical Rules` `DO:` list in `agent/skills/generate-plan/review-plan-prompt.md` and confirm it contains `**Verdict:**`, `### Outcome`, `Approved with concerns`, and `Not approved` in the clear-verdict bullet; `grep -n "Approved or Issues Found" agent/skills/generate-plan/review-plan-prompt.md` returns zero matches.
 - Output Artifact Contract Step 1 references the new body shape.
   Verify: `grep -n "Outcome, Strengths, Issues by severity, Recommendations" agent/skills/generate-plan/review-plan-prompt.md` returns a match in the `## Output Artifact Contract` section, and `grep -n "Status verdict, Issues with severity tags, Summary" agent/skills/generate-plan/review-plan-prompt.md` returns zero matches.
 
@@ -161,13 +161,13 @@ Tasks are sequenced so the reviewer prompt edits land before the refiner prompts
 
   ### Outcome
 
-  **Outcome:** Approved | Approved with concerns | Not approved
+  **Verdict:** Approved | Approved with concerns | Not approved
 
-  **Reasoning:** <1–2 sentence technical assessment justifying the outcome.>
+  **Reasoning:** <1–2 sentence technical assessment justifying the verdict.>
 
-  The outcome line MUST be written exactly in the form `**Outcome:** <label>` (bold label, unbolded value, single space between) so downstream refiners can parse a line that begins with the literal token `**Outcome:**`.
+  The verdict line MUST be written exactly in the form `**Verdict:** <label>` (bold label, unbolded value, single space between) so downstream refiners can parse a line that begins with the literal token `**Verdict:**`.
 
-  Use exactly one of the three outcome labels above. Critical findings always force `Not approved`; you may not downgrade them. `Approved with concerns` is appropriate ONLY when there are zero Critical findings AND there are one or more Important findings that you judge acceptable to ship without forced remediation (for example: the concern is out of scope for the current diff, is a follow-up task, or is a low-impact deviation). When you choose `Approved with concerns`, the Reasoning paragraph MUST explicitly name each Important finding being waived and the rationale for waiving it. `Approved` requires zero Critical AND zero Important findings.
+  Use exactly one of the three verdict labels above. Critical findings always force `Not approved`; you may not downgrade them. `Approved with concerns` is appropriate ONLY when there are zero Critical findings AND there are one or more Important findings that you judge acceptable to ship without forced remediation (for example: the concern is out of scope for the current diff, is a follow-up task, or is a low-impact deviation). When you choose `Approved with concerns`, the `**Reasoning:**` line MUST explicitly name each Important finding being waived and the rationale for waiving it. `Approved` requires zero Critical AND zero Important findings.
 
   ### Strengths
 
@@ -220,7 +220,7 @@ Tasks are sequenced so the reviewer prompt edits land before the refiner prompts
   ```
   ### Outcome
 
-  **Outcome:** Approved with concerns
+  **Verdict:** Approved with concerns
 
   **Reasoning:** Core implementation is solid with good architecture and tests. Two Important findings are waived: missing `--help` text in the CLI wrapper (follow-up task; users can read the source) and missing date validation in `search.ts` (low-impact — invalid dates silently return no results, which is recoverable).
 
@@ -261,14 +261,14 @@ Tasks are sequenced so the reviewer prompt edits land before the refiner prompts
   ```
   ~~~
 
-- [ ] **Step 3: Update Critical Rules verdict bullets.** In the `## Critical Rules` section, locate the `DO:` bullet "Give clear verdict" (it's adjacent to "Acknowledge strengths") and replace its surrounding context as needed so it reads "Give a clear verdict in `### Outcome` (`Approved`, `Approved with concerns`, or `Not approved`)". Locate the `DON'T:` bullet "Avoid giving a clear verdict" — leave it as-is (still applies). No other changes in this block.
+- [ ] **Step 3: Update Critical Rules verdict bullets.** In the `## Critical Rules` section, locate the `DO:` bullet "Give clear verdict" (it's adjacent to "Acknowledge strengths") and replace its surrounding context as needed so it reads "Give a clear verdict in the `**Verdict:**` line inside `### Outcome` (`Approved`, `Approved with concerns`, or `Not approved`)". Locate the `DON'T:` bullet "Avoid giving a clear verdict" — leave it as-is (still applies). No other changes in this block.
 
 - [ ] **Step 4: Update the Output Artifact Contract Step 1 wording.** In the `## Output Artifact Contract` section, locate Step 1 ("Write the full review (Strengths, Issues by severity, Recommendations, Assessment with the 'Ready to merge' verdict) to `{REVIEW_OUTPUT_PATH}` (absolute path).") and replace "(Strengths, Issues by severity, Recommendations, Assessment with the 'Ready to merge' verdict)" with "(Outcome, Strengths, Issues by severity, Recommendations as defined in `## Output Format`)".
 
 **Acceptance criteria:**
 
-- The `## Output Format` section emits the new five-block structure: `### Outcome` (with `**Outcome:**` and `**Reasoning:**` lines), `### Strengths`, `### Issues` (with H4 sub-headings `#### Critical (Must Fix)`, `#### Important (Should Fix)`, `#### Minor (Nice to Have)` and the per-finding `**file:line: ...**` + What/Why it matters/Recommendation template), `### Recommendations`.
-  Verify: open `agent/skills/requesting-code-review/review-code-prompt.md` and confirm the `## Output Format` section contains the literal heading lines `### Outcome`, `### Strengths`, `### Issues`, `#### Critical (Must Fix)`, `#### Important (Should Fix)`, `#### Minor (Nice to Have)`, `### Recommendations` exactly once each, in that order, with no `### Assessment` heading anywhere in the file.
+- The `## Output Format` section emits the new five-block structure: `### Outcome` (with `**Verdict:**` and `**Reasoning:**` lines), `### Strengths`, `### Issues` (with H4 sub-headings `#### Critical (Must Fix)`, `#### Important (Should Fix)`, `#### Minor (Nice to Have)` and the per-finding `**file:line: ...**` + What/Why it matters/Recommendation template), `### Recommendations`.
+  Verify: open `agent/skills/requesting-code-review/review-code-prompt.md` and confirm the `## Output Format` section contains the literal heading lines `### Outcome`, `### Strengths`, `### Issues`, `#### Critical (Must Fix)`, `#### Important (Should Fix)`, `#### Minor (Nice to Have)`, `### Recommendations` exactly once each, in that order; the `### Outcome` block contains `**Verdict:** Approved | Approved with concerns | Not approved` and `**Reasoning:**`; and there is no `### Assessment` heading or `**Outcome:**` line anywhere in the file.
 - The `### Outcome` block documents when `Approved with concerns` is appropriate and forbids it when any Critical finding is present.
   Verify: `grep -n "Approved with concerns" agent/skills/requesting-code-review/review-code-prompt.md` returns a match inside the `### Outcome` description paragraph; the same paragraph contains the substring "Critical findings always force `Not approved`".
 - Empty severity sub-sections render as `_None._` rather than being omitted.
@@ -276,7 +276,7 @@ Tasks are sequenced so the reviewer prompt edits land before the refiner prompts
 - All `Ready to merge` references are gone.
   Verify: `grep -n "Ready to merge" agent/skills/requesting-code-review/review-code-prompt.md` returns zero matches.
 - The example output matches the new structure (Outcome at top, severity sub-headings present, no Assessment).
-  Verify: open the `## Example Output` block in `agent/skills/requesting-code-review/review-code-prompt.md` and confirm it begins with `### Outcome` followed by `**Outcome:** Approved with concerns`, contains the three H4 severity sub-headings, ends with `### Recommendations`, and contains no `### Assessment` heading.
+  Verify: open the `## Example Output` block in `agent/skills/requesting-code-review/review-code-prompt.md` and confirm it begins with `### Outcome` followed by `**Verdict:** Approved with concerns`, contains the three H4 severity sub-headings, ends with `### Recommendations`, and contains no `### Assessment` heading or `**Outcome:**` line.
 - Output Artifact Contract Step 1 references the new body shape.
   Verify: `grep -n "Outcome, Strengths, Issues by severity, Recommendations" agent/skills/requesting-code-review/review-code-prompt.md` returns a match in the `## Output Artifact Contract` section, and `grep -n "Assessment with the" agent/skills/requesting-code-review/review-code-prompt.md` returns zero matches.
 
@@ -284,16 +284,16 @@ Tasks are sequenced so the reviewer prompt edits land before the refiner prompts
 
 ---
 
-### Task 3: Update plan-refiner prompt to parse new outcomes and emit four-status enum
+### Task 3: Update plan-refiner prompt to parse the new verdict line and emit four-status enum
 
 **Files:**
 - Modify: `agent/skills/refine-plan/refine-plan-prompt.md`
 
 **Steps:**
-- [ ] **Step 1: Replace the outcome-parsing step.** In `agent/skills/refine-plan/refine-plan-prompt.md`, locate Per-Iteration Full Review Step 6 ("**Parse the review file** for a line containing `**[Approved]**` or `**[Issues Found]**`."). Replace it with:
+- [ ] **Step 1: Replace the verdict-parsing step.** In `agent/skills/refine-plan/refine-plan-prompt.md`, locate Per-Iteration Full Review Step 6 ("**Parse the review file** for a line containing `**[Approved]**` or `**[Issues Found]**`."). Replace it with:
 
   ~~~markdown
-  6. **Parse the review file for the reviewer outcome.** Find the line in the on-disk review file that begins with `**Outcome:**` (inside the `### Outcome` section). Extract the outcome label — it MUST be exactly one of `Approved`, `Approved with concerns`, or `Not approved`. If no `**Outcome:**` line is found, or the label does not match one of the three expected values, emit `STATUS: failed` with reason `reviewer artifact handoff failed: provenance malformed at <reviewer_path>: missing or unrecognized Outcome label` and exit.
+  6. **Parse the review file for the reviewer verdict.** Find the line in the on-disk review file that begins with `**Verdict:**` (inside the `### Outcome` section). Extract the verdict label — it MUST be exactly one of `Approved`, `Approved with concerns`, or `Not approved`. If no `**Verdict:**` line is found, or the label does not match one of the three expected values, emit `STATUS: failed` with reason `reviewer artifact handoff failed: provenance malformed at <reviewer_path>: missing or unrecognized Verdict label` and exit.
   ~~~
 
 - [ ] **Step 2: Replace the severity-counting step.** Locate Step 7 ("**Count findings by severity** — count Error, Warning, and Suggestion findings from the review (severity tags appear per the `review-plan-prompt.md` Output Format)."). Replace it with:
@@ -310,7 +310,7 @@ Tasks are sequenced so the reviewer prompt edits land before the refiner prompts
      - Emit `STATUS: approved` with the summary block and exit.
 
   9. **If outcome is `Approved with concerns`** (zero Critical AND one or more Important findings the reviewer waived):
-     - Append a `## Review Notes` section to the plan using the format documented in [Review Notes Append Format](#review-notes-append-format) below. Source the per-bullet waiver rationale from the reviewer's Outcome `**Reasoning:**` paragraph — one bullet per waived Important finding, with the reviewer's rationale transcribed alongside.
+     - Append a `## Review Notes` section to the plan using the format documented in [Review Notes Append Format](#review-notes-append-format) below. Source the per-bullet waiver rationale from the reviewer's `### Outcome` section `**Reasoning:**` line — one bullet per waived Important finding, with the reviewer's rationale transcribed alongside.
      - Emit `STATUS: approved_with_concerns` with the summary block and exit.
 
   10. **If outcome is `Not approved`** (one or more Critical findings, OR one or more Important findings the reviewer judged as needing real remediation) AND the current iteration count is less than `{MAX_ITERATIONS}`: continue to the [Planner Edit Pass](#planner-edit-pass).
@@ -329,7 +329,7 @@ Tasks are sequenced so the reviewer prompt edits land before the refiner prompts
 
   Do NOT append a `## Review Notes` section on the `approved`, `not_approved_within_budget`, or `failed` paths. Do NOT include Minor findings in the append (they live in the review file only).
 
-  Substitute `<path-to-review-file>` with the absolute review file path you supplied as `{REVIEW_OUTPUT_PATH}` for this iteration. One bullet per waived Important finding; the waiver rationale is sourced from the reviewer's Outcome `**Reasoning:**` paragraph.
+  Substitute `<path-to-review-file>` with the absolute review file path you supplied as `{REVIEW_OUTPUT_PATH}` for this iteration. One bullet per waived Important finding; the waiver rationale is sourced from the reviewer's `### Outcome` section `**Reasoning:**` line.
 
   ```markdown
 
@@ -366,7 +366,7 @@ Tasks are sequenced so the reviewer prompt edits land before the refiner prompts
   |---|---|---|
   | Coordinator infra | `coordinator dispatch unavailable` | Emitted when `subagent_run_serial` is unavailable in this session. |
   | Worker dispatch | `worker dispatch failed: <which worker>` | `<which worker>` ∈ `plan-reviewer`, `planner-edit-pass`. Plan-reviewer primary→fallback retry logic is preserved internally; only retry exhaustion surfaces this string. |
-  | Reviewer artifact handoff | `reviewer artifact handoff failed: <specific check>` | `<specific check>` ∈ `missing REVIEW_ARTIFACT marker`, `missing or empty at <path>`, `path mismatch: expected <X> got <Y>`, `provenance malformed at <path>: <sub-check>` (where `<sub-check>` ∈ `does not match supplied REVIEWER_PROVENANCE`, `format mismatch`, `inline-substring forbidden`, `missing or unrecognized Outcome label`). |
+  | Reviewer artifact handoff | `reviewer artifact handoff failed: <specific check>` | `<specific check>` ∈ `missing REVIEW_ARTIFACT marker`, `missing or empty at <path>`, `path mismatch: expected <X> got <Y>`, `provenance malformed at <path>: <sub-check>` (where `<sub-check>` ∈ `does not match supplied REVIEWER_PROVENANCE`, `format mismatch`, `inline-substring forbidden`, `missing or unrecognized Verdict label`). |
   | Input artifact | `input artifact missing or empty: <which>` | `<which>` ∈ `plan file at iteration start`, `plan file after planner edit pass`. |
   ~~~
 
@@ -396,8 +396,8 @@ Tasks are sequenced so the reviewer prompt edits land before the refiner prompts
 
 **Acceptance criteria:**
 
-- The refiner parses outcome by matching one of the three outcome labels (`Approved` / `Approved with concerns` / `Not approved`) on the `**Outcome:**` line.
-  Verify: open `agent/skills/refine-plan/refine-plan-prompt.md` Step 6 of `### Per-Iteration Full Review` and confirm it instructs the refiner to find a line beginning with `**Outcome:**` and to match one of the three labels exactly; `grep -n "\\*\\*\\[Approved\\]\\*\\*" agent/skills/refine-plan/refine-plan-prompt.md` returns zero matches.
+- The refiner parses the reviewer verdict by matching one of the three labels (`Approved` / `Approved with concerns` / `Not approved`) on the `**Verdict:**` line.
+  Verify: open `agent/skills/refine-plan/refine-plan-prompt.md` Step 6 of `### Per-Iteration Full Review` and confirm it instructs the refiner to find a line beginning with `**Verdict:**` and to match one of the three labels exactly; `grep -n "\\*\\*Outcome:\\*\\*" agent/skills/refine-plan/refine-plan-prompt.md` returns zero matches; `grep -n "\\*\\*\\[Approved\\]\\*\\*" agent/skills/refine-plan/refine-plan-prompt.md` returns zero matches.
 - Severity counts are derived from the H4 sub-section findings tagged Critical / Important / Minor.
   Verify: open Step 7 of `### Per-Iteration Full Review` in `agent/skills/refine-plan/refine-plan-prompt.md` and confirm it names `Critical`, `Important`, and `Minor` severity counts derived from `#### Critical (Must Fix)`, `#### Important (Should Fix)`, `#### Minor (Nice to Have)` sub-headings; `grep -n "Error, Warning, and Suggestion" agent/skills/refine-plan/refine-plan-prompt.md` returns zero matches.
 - The refiner emits one of `approved` / `approved_with_concerns` / `not_approved_within_budget` / `failed`.
@@ -415,7 +415,7 @@ Tasks are sequenced so the reviewer prompt edits land before the refiner prompts
 
 ---
 
-### Task 4: Update code-refiner prompt to parse new outcomes and emit four-status enum
+### Task 4: Update code-refiner prompt to parse the new verdict line and emit four-status enum
 
 **Files:**
 - Modify: `agent/skills/refine-code/refine-code-prompt.md`
@@ -424,7 +424,7 @@ Tasks are sequenced so the reviewer prompt edits land before the refiner prompts
 - [ ] **Step 1: Replace the verdict-assessment step in Iteration 1.** In `agent/skills/refine-code/refine-code-prompt.md`, locate Iteration 1 Step 4 ("**Assess verdict** (from the on-disk review file): - 'Ready to merge: Yes' with no Critical/Important issues → skip to **Final Verification** - Critical/Important issues exist → continue to step 5"). Replace it with:
 
   ~~~markdown
-  4. **Assess outcome** (from the on-disk review file). Find the line in the on-disk review beginning with `**Outcome:**` (inside the `### Outcome` section) and extract the outcome label. The label MUST be exactly one of `Approved`, `Approved with concerns`, or `Not approved`. If no `**Outcome:**` line is found, or the label does not match one of the three expected values, emit `STATUS: failed` with reason `reviewer artifact handoff failed: provenance malformed at <reviewer_path>: missing or unrecognized Outcome label` and exit. Then branch:
+  4. **Assess verdict** (from the on-disk review file). Find the line in the on-disk review beginning with `**Verdict:**` (inside the `### Outcome` section) and extract the verdict label. The label MUST be exactly one of `Approved`, `Approved with concerns`, or `Not approved`. If no `**Verdict:**` line is found, or the label does not match one of the three expected values, emit `STATUS: failed` with reason `reviewer artifact handoff failed: provenance malformed at <reviewer_path>: missing or unrecognized Verdict label` and exit. Then branch:
      - `Approved` or `Approved with concerns` → skip to **Final Verification**.
      - `Not approved` → continue to step 5.
 
@@ -434,7 +434,7 @@ Tasks are sequenced so the reviewer prompt edits land before the refiner prompts
 - [ ] **Step 2: Update the Final Verification "If clean" branching.** In the `### Final Verification` section, locate the existing Step 2 ("**If clean** (no Critical/Important issues in the on-disk review): - Record `Result: Clean after N iterations.` … - Report `STATUS: clean`. …") and the existing Step 3 ("**If issues found:** …"). Replace with:
 
   ~~~markdown
-  2. **Parse the final-verification outcome** from the on-disk review file (the same `**Outcome:**` line check as Iteration 1 Step 4). Branch:
+  2. **Parse the final-verification verdict** from the on-disk review file (the same `**Verdict:**` line check as Iteration 1 Step 4). Branch:
 
      - **`Approved`:** Record `Result: Approved after N iterations.` in your coordinator state. Do NOT write to the reviewer artifact (the iteration count surfaces via the Output Format's `Iterations: <N>` line). Report `STATUS: approved`. Return the era-versioned path as the `## Review File` in your output. Do NOT produce an unversioned copy at `<REVIEW_OUTPUT_PATH>.md` — that legacy copy is dropped under this contract.
 
@@ -500,7 +500,7 @@ Tasks are sequenced so the reviewer prompt edits land before the refiner prompts
   |---|---|---|
   | Coordinator infra | `coordinator dispatch unavailable` | Emitted when `subagent_run_serial` is unavailable in this session. |
   | Worker dispatch | `worker dispatch failed: <which worker>` | `<which worker>` ∈ `code-reviewer`, `coder`. Covers first-pass, hybrid re-review, final-verification reviewer dispatches and remediator (coder) dispatches. |
-  | Reviewer artifact handoff | `reviewer artifact handoff failed: <specific check>` | `<specific check>` ∈ `missing REVIEW_ARTIFACT marker`, `missing or empty at <path>`, `path mismatch: expected <X> got <Y>`, `provenance malformed at <path>: <sub-check>` (where `<sub-check>` ∈ `does not match supplied REVIEWER_PROVENANCE`, `format mismatch`, `inline-substring forbidden`, `missing or unrecognized Outcome label`). |
+  | Reviewer artifact handoff | `reviewer artifact handoff failed: <specific check>` | `<specific check>` ∈ `missing REVIEW_ARTIFACT marker`, `missing or empty at <path>`, `path mismatch: expected <X> got <Y>`, `provenance malformed at <path>: <sub-check>` (where `<sub-check>` ∈ `does not match supplied REVIEWER_PROVENANCE`, `format mismatch`, `inline-substring forbidden`, `missing or unrecognized Verdict label`). |
 
   The Input artifact category from the plan side has no code-side analog — git tracks code state.
   ~~~
@@ -523,8 +523,8 @@ Tasks are sequenced so the reviewer prompt edits land before the refiner prompts
 
 **Acceptance criteria:**
 
-- The refiner parses outcome by matching one of the three outcome labels.
-  Verify: open Iteration 1 Step 4 in `agent/skills/refine-code/refine-code-prompt.md` and confirm it instructs the refiner to find a `**Outcome:**` line and match one of `Approved` / `Approved with concerns` / `Not approved`; `grep -n "Ready to merge: Yes" agent/skills/refine-code/refine-code-prompt.md` returns zero matches.
+- The refiner parses the reviewer verdict by matching one of the three labels.
+  Verify: open Iteration 1 Step 4 in `agent/skills/refine-code/refine-code-prompt.md` and confirm it instructs the refiner to find a `**Verdict:**` line and match one of `Approved` / `Approved with concerns` / `Not approved`; `grep -n "\\*\\*Outcome:\\*\\*" agent/skills/refine-code/refine-code-prompt.md` returns zero matches; `grep -n "Ready to merge: Yes" agent/skills/refine-code/refine-code-prompt.md` returns zero matches.
 - Remediation triggers only on `Not approved` outcomes.
   Verify: open Iteration 1 Step 4 in `agent/skills/refine-code/refine-code-prompt.md` and confirm the branching explicitly routes `Approved` and `Approved with concerns` to Final Verification (skipping remediation) and `Not approved` to step 5 (remediation). `grep -n "Approved with concerns" agent/skills/refine-code/refine-code-prompt.md` returns at least one match inside the Iteration 1 Step 4 branching block.
 - The refiner emits the four-status enum.
@@ -547,7 +547,7 @@ Tasks are sequenced so the reviewer prompt edits land before the refiner prompts
 - [ ] **Step 1: Update Step 7.5 structural-only note.** In `agent/skills/refine-plan/SKILL.md`, locate Step 7.5's literal `{STRUCTURAL_ONLY_NOTE}` text and update the trailing phrase:
 
   - Old: `… and label its verdict as "Structural-only review — no spec/todo coverage check performed." in its Summary section.`
-  - New: `… and include the literal phrase "Structural-only review — no spec/todo coverage check performed." inside its Outcome reasoning paragraph (the Summary section no longer exists in the new output format).`
+  - New: “... and include the literal phrase "Structural-only review — no spec/todo coverage check performed." inside the `### Outcome` section's `**Reasoning:**` line (the Summary section no longer exists in the new output format).”
 
 - [ ] **Step 2: Update Step 9 STATUS parsing.** In Step 9's bullet list, locate "The `STATUS:` line (`approved`, `issues_remaining`, or `failed`)." and replace with "The `STATUS:` line (`approved`, `approved_with_concerns`, `not_approved_within_budget`, or `failed`).".
 
@@ -606,8 +606,8 @@ Tasks are sequenced so the reviewer prompt edits land before the refiner prompts
 
 **Acceptance criteria:**
 
-- Step 7.5's structural-only note text references the Outcome reasoning paragraph, not the Summary section.
-  Verify: open Step 7.5 in `agent/skills/refine-plan/SKILL.md` and confirm the `{STRUCTURAL_ONLY_NOTE}` body contains the substring "inside its Outcome reasoning paragraph"; `grep -n "in its Summary section" agent/skills/refine-plan/SKILL.md` returns zero matches.
+- Step 7.5's structural-only note text references the `### Outcome` section's `**Reasoning:**` line, not the Summary section.
+  Verify: open Step 7.5 in `agent/skills/refine-plan/SKILL.md` and confirm the `{STRUCTURAL_ONLY_NOTE}` body contains the substring "inside the `### Outcome` section's `**Reasoning:**` line"; `grep -n "in its Summary section" agent/skills/refine-plan/SKILL.md` returns zero matches.
 - Step 9's STATUS parsing line names all four enum values.
   Verify: `grep -n "STATUS:.*approved.*approved_with_concerns.*not_approved_within_budget.*failed" agent/skills/refine-plan/SKILL.md` returns at least one match in Step 9.
 - Step 9.5's trigger condition runs on the three success-path statuses and skips on `failed`.
@@ -704,15 +704,15 @@ Tasks are sequenced so the reviewer prompt edits land before the refiner prompts
 - Modify: `agent/agents/code-refiner.md`
 
 **Steps:**
-- [ ] **Step 1: Update plan-reviewer Principles bullet.** In `agent/agents/plan-reviewer.md`, locate the Principles bullet "**Give a clear verdict** — always conclude with `[Approved]` or `[Issues Found]`". Replace with "**Give a clear verdict** — always emit one of `Approved`, `Approved with concerns`, or `Not approved` in the `### Outcome` block at the top of your review. Critical findings always force `Not approved`; `Approved with concerns` is allowed only when zero Critical findings exist and one or more Important findings are explicitly waived in the Reasoning paragraph."
+- [ ] **Step 1: Update plan-reviewer Principles bullet.** In `agent/agents/plan-reviewer.md`, locate the Principles bullet "**Give a clear verdict** — always conclude with `[Approved]` or `[Issues Found]`". Replace with "**Give a clear verdict** — always emit a `**Verdict:**` line with one of `Approved`, `Approved with concerns`, or `Not approved` in the `### Outcome` block at the top of your review, followed by the `**Reasoning:**` line. Critical findings always force `Not approved`; `Approved with concerns` is allowed only when zero Critical findings exist and one or more Important findings are explicitly waived in the Reasoning line."
 
 - [ ] **Step 2: Update plan-reviewer Output Artifact Contract Step 2 wording.** Locate Step 2 of the Output Artifact Contract: "The provenance line is followed by a single blank line, then the review body (Status verdict, Issues, Summary as defined in your prompt template's Output Format)." Replace "(Status verdict, Issues, Summary as defined in your prompt template's Output Format)" with "(Outcome, Strengths, Issues by severity, Recommendations as defined in your prompt template's Output Format)".
 
-- [ ] **Step 3: Update code-reviewer Principles bullet.** In `agent/agents/code-reviewer.md`, locate the Principles bullet "**Give a clear verdict** — always include a 'Ready to merge: Yes/No/With fixes' line in the Assessment section." Replace with "**Give a clear verdict** — always emit one of `Approved`, `Approved with concerns`, or `Not approved` in the `### Outcome` block at the top of your review. Critical findings always force `Not approved`; `Approved with concerns` is allowed only when zero Critical findings exist and one or more Important findings are explicitly waived in the Reasoning paragraph."
+- [ ] **Step 3: Update code-reviewer Principles bullet.** In `agent/agents/code-reviewer.md`, locate the Principles bullet "**Give a clear verdict** — always include a 'Ready to merge: Yes/No/With fixes' line in the Assessment section." Replace with "**Give a clear verdict** — always emit a `**Verdict:**` line with one of `Approved`, `Approved with concerns`, or `Not approved` in the `### Outcome` block at the top of your review, followed by the `**Reasoning:**` line. Critical findings always force `Not approved`; `Approved with concerns` is allowed only when zero Critical findings exist and one or more Important findings are explicitly waived in the Reasoning line."
 
 - [ ] **Step 4: Update code-reviewer Output Artifact Contract Step 2 wording.** Locate Step 2 of the Output Artifact Contract: "The provenance line is followed by a single blank line, then the review body (Strengths, Issues, Recommendations, Assessment as defined in your prompt template's Output Format)." Replace "(Strengths, Issues, Recommendations, Assessment as defined in your prompt template's Output Format)" with "(Outcome, Strengths, Issues by severity, Recommendations as defined in your prompt template's Output Format)".
 
-- [ ] **Step 5: Update plan-refiner role bullets.** In `agent/agents/plan-refiner.md`, locate the `## Your Role` numbered list. Update bullet 3 from "**Parse** the Status line and findings from the on-disk review" to "**Parse** the Outcome line and findings from the on-disk review". Update bullet 5 from "**Append** warnings/suggestions to the plan as `## Review Notes` only on the approved path (this is an edit to the PLAN file, not to the reviewer artifact)" to "**Append** the waived-Important pointer block to the plan as `## Review Notes` only on the `approved_with_concerns` path (this is an edit to the PLAN file, not to the reviewer artifact)".
+- [ ] **Step 5: Update plan-refiner role bullets.** In `agent/agents/plan-refiner.md`, locate the `## Your Role` numbered list. Update bullet 3 from "**Parse** the Status line and findings from the on-disk review" to "**Parse** the Verdict line and findings from the on-disk review". Update bullet 5 from "**Append** warnings/suggestions to the plan as `## Review Notes` only on the approved path (this is an edit to the PLAN file, not to the reviewer artifact)" to "**Append** the waived-Important pointer block to the plan as `## Review Notes` only on the `approved_with_concerns` path (this is an edit to the PLAN file, not to the reviewer artifact)".
 
 - [ ] **Step 6: Audit plan-refiner Rules and Boundary sections.** In `agent/agents/plan-refiner.md`, scan the `## Rules` and `## Boundary with refine-plan` sections for any lingering references to `Errors`, `Warnings`, `Suggestions`, `[Approved]`, `[Issues Found]`, `issues_remaining`, or `STATUS: approved` / `STATUS: issues_remaining` / `STATUS: failed` outcomes. The rules use phrases like "every error finding feeds the single planner edit pass for that iteration" — update to "every Critical and Important finding feeds the single planner edit pass for that iteration". Update "return `issues_remaining` when the budget for this era is exhausted" to "return `not_approved_within_budget` when the budget for this era is exhausted".
 
@@ -720,16 +720,16 @@ Tasks are sequenced so the reviewer prompt edits land before the refiner prompts
 
 **Acceptance criteria:**
 
-- plan-reviewer Principles bullet references the three new outcome labels and the `### Outcome` block.
-  Verify: `grep -n "Approved with concerns" agent/agents/plan-reviewer.md` returns at least one match inside the `## Principles` section, and `grep -n "\\[Approved\\] or \\[Issues Found\\]" agent/agents/plan-reviewer.md` returns zero matches.
+- plan-reviewer Principles bullet references the three new verdict labels and the `### Outcome` block.
+  Verify: `grep -n "\\*\\*Verdict:\\*\\*" agent/agents/plan-reviewer.md` returns at least one match inside the `## Principles` section, `grep -n "Approved with concerns" agent/agents/plan-reviewer.md` returns at least one match inside the `## Principles` section, and `grep -n "\\[Approved\\] or \\[Issues Found\\]" agent/agents/plan-reviewer.md` returns zero matches.
 - plan-reviewer Output Artifact Contract Step 2 references the new body shape.
   Verify: `grep -n "Outcome, Strengths, Issues by severity, Recommendations" agent/agents/plan-reviewer.md` returns a match inside the `## Output Artifact Contract` section, and `grep -n "Status verdict, Issues, Summary" agent/agents/plan-reviewer.md` returns zero matches.
-- code-reviewer Principles bullet references the three new outcome labels and the `### Outcome` block.
-  Verify: `grep -n "Approved with concerns" agent/agents/code-reviewer.md` returns at least one match inside the `## Principles` section, and `grep -n "Ready to merge: Yes/No/With fixes" agent/agents/code-reviewer.md` returns zero matches.
+- code-reviewer Principles bullet references the three new verdict labels and the `### Outcome` block.
+  Verify: `grep -n "\\*\\*Verdict:\\*\\*" agent/agents/code-reviewer.md` returns at least one match inside the `## Principles` section, `grep -n "Approved with concerns" agent/agents/code-reviewer.md` returns at least one match inside the `## Principles` section, and `grep -n "Ready to merge: Yes/No/With fixes" agent/agents/code-reviewer.md` returns zero matches.
 - code-reviewer Output Artifact Contract Step 2 references the new body shape.
   Verify: `grep -n "Outcome, Strengths, Issues by severity, Recommendations" agent/agents/code-reviewer.md` returns a match inside the `## Output Artifact Contract` section, and `grep -n "Strengths, Issues, Recommendations, Assessment" agent/agents/code-reviewer.md` returns zero matches.
 - plan-refiner role bullets reference the new vocabulary.
-  Verify: open `agent/agents/plan-refiner.md` `## Your Role` and confirm bullet 3 references "Outcome line" and bullet 5 references the `approved_with_concerns` path; `grep -n "issues_remaining" agent/agents/plan-refiner.md` returns zero matches.
+  Verify: open `agent/agents/plan-refiner.md` `## Your Role` and confirm bullet 3 references "Verdict line" and bullet 5 references the `approved_with_concerns` path; `grep -n "Outcome line" agent/agents/plan-refiner.md` returns zero matches; `grep -n "issues_remaining" agent/agents/plan-refiner.md` returns zero matches.
 - plan-refiner Rules use the new severity vocabulary.
   Verify: `grep -nE "Critical and Important finding" agent/agents/plan-refiner.md` returns at least one match inside the `## Rules` section, and `grep -nE "every error finding feeds" agent/agents/plan-refiner.md` returns zero matches.
 - code-refiner Rules contain no stale verdict-vocabulary references.
@@ -761,16 +761,16 @@ Tasks are sequenced so the reviewer prompt edits land before the refiner prompts
 
     ~~~markdown
     - `STATUS: approved` — report the passing review and review artifact path.
-    - `STATUS: approved_with_concerns` — report the passing review with a note that the reviewer waived one or more Important findings. The waiver rationale lives in the review file's `### Outcome` reasoning paragraph; no remediation iteration runs.
+    - `STATUS: approved_with_concerns` — report the passing review with a note that the reviewer waived one or more Important findings. The waiver rationale lives in the review file's `### Outcome` section `**Reasoning:**` line; no remediation iteration runs.
     - `STATUS: not_approved_within_budget` — present remaining findings and let the caller choose whether to keep iterating, proceed with known issues, or stop execution.
     - `STATUS: failed` — surface the failure reason from the four-category taxonomy (`coordinator dispatch unavailable`, `worker dispatch failed: <which worker>`, `reviewer artifact handoff failed: <specific check>`).
     ~~~
 
-- [ ] **Step 3: Update requesting-code-review/README.md outcome parsing.** In `agent/skills/requesting-code-review/README.md`:
-  - Workflow step 6: "Parse the result for `[Approved]` or `[Issues Found]`." → "Parse the result for the `**Outcome:**` line in the `### Outcome` block (one of `Approved`, `Approved with concerns`, or `Not approved`)."
+- [ ] **Step 3: Update requesting-code-review/README.md verdict parsing.** In `agent/skills/requesting-code-review/README.md`:
+  - Workflow step 6: "Parse the result for `[Approved]` or `[Issues Found]`." → "Parse the result for the `**Verdict:**` line in the `### Outcome` block (one of `Approved`, `Approved with concerns`, or `Not approved`)."
 
-- [ ] **Step 4: Update requesting-code-review/SKILL.md outcome parsing and example.** In `agent/skills/requesting-code-review/SKILL.md`:
-  - Step 3 paragraph "The reviewer's output is in `results[0].finalMessage`. Parse it for `[Approved]` or `[Issues Found]` to determine next steps." → "The reviewer's output is in `results[0].finalMessage`. Parse it for the `**Outcome:**` line in the `### Outcome` block (one of `Approved`, `Approved with concerns`, or `Not approved`) to determine next steps."
+- [ ] **Step 4: Update requesting-code-review/SKILL.md verdict parsing and example.** In `agent/skills/requesting-code-review/SKILL.md`:
+  - Step 3 paragraph "The reviewer's output is in `results[0].finalMessage`. Parse it for `[Approved]` or `[Issues Found]` to determine next steps." → "The reviewer's output is in `results[0].finalMessage`. Parse it for the `**Verdict:**` line in the `### Outcome` block (one of `Approved`, `Approved with concerns`, or `Not approved`) to determine next steps."
   - Example block (the fenced reviewer-output sketch): replace the lines:
 
     ~~~
@@ -784,7 +784,7 @@ Tasks are sequenced so the reviewer prompt edits land before the refiner prompts
     with:
 
     ~~~
-      **Outcome:** Approved with concerns
+      **Verdict:** Approved with concerns
       **Reasoning:** Solid implementation; cross-file link issue waived as a follow-up.
       Strengths: Clean architecture, comprehensive tests
       Issues:
@@ -795,10 +795,10 @@ Tasks are sequenced so the reviewer prompt edits land before the refiner prompts
     ~~~
 
 - [ ] **Step 5: Update review-fix-block.md trailing instruction.** In `agent/skills/refine-code/review-fix-block.md`:
-  - Closing line "If all previous findings are addressed and no new issues exist, report 'Ready to merge: Yes'." → "If all previous findings are addressed and no new issues exist, emit `**Outcome:** Approved` in your `### Outcome` section."
+  - Closing line "If all previous findings are addressed and no new issues exist, report 'Ready to merge: Yes'." → "If all previous findings are addressed and no new issues exist, emit `**Verdict:** Approved` in your `### Outcome` section."
 
 - [ ] **Step 6: Update top-level README.md code-reviewer description.** In `README.md` (the top-level file at the repo root):
-  - The `### code-reviewer.md` paragraph: "Independent code reviewer for production readiness. Two modes: full diff review or hybrid re-review of the remediation diff only. Calibrates severities (Critical through Minor) and returns `[Approved]` or `[Issues Found]`. Thinking: `high`." → "Independent code reviewer for production readiness. Two modes: full diff review or hybrid re-review of the remediation diff only. Calibrates severities (Critical / Important / Minor) and returns one of `Approved`, `Approved with concerns`, or `Not approved` in its `### Outcome` block. Thinking: `high`."
+  - The `### code-reviewer.md` paragraph: "Independent code reviewer for production readiness. Two modes: full diff review or hybrid re-review of the remediation diff only. Calibrates severities (Critical through Minor) and returns `[Approved]` or `[Issues Found]`. Thinking: `high`." → "Independent code reviewer for production readiness. Two modes: full diff review or hybrid re-review of the remediation diff only. Calibrates severities (Critical / Important / Minor) and returns one of `Approved`, `Approved with concerns`, or `Not approved` in its `**Verdict:**` line inside the `### Outcome` block. Thinking: `high`."
 
 **Acceptance criteria:**
 
@@ -806,14 +806,14 @@ Tasks are sequenced so the reviewer prompt edits land before the refiner prompts
   Verify: `grep -n "STATUS: <approved | approved_with_concerns | not_approved_within_budget | failed>" agent/skills/refine-plan/README.md` returns at least one match, and `grep -n "STATUS: <approved | issues_remaining | failed>" agent/skills/refine-plan/README.md` returns zero matches.
 - refine-code/README.md status handling section enumerates four statuses.
   Verify: open the Status handling section in `agent/skills/refine-code/README.md` and confirm bullets exist for `STATUS: approved`, `STATUS: approved_with_concerns`, `STATUS: not_approved_within_budget`, and `STATUS: failed`; `grep -nE "STATUS: (clean|max_iterations_reached)" agent/skills/refine-code/README.md` returns zero matches.
-- requesting-code-review/README.md outcome parsing line uses the new vocabulary.
-  Verify: `grep -n "Approved with concerns" agent/skills/requesting-code-review/README.md` returns at least one match in the Workflow section, and `grep -n "\\[Approved\\] or \\[Issues Found\\]" agent/skills/requesting-code-review/README.md` returns zero matches.
-- requesting-code-review/SKILL.md uses the new outcome vocabulary in both the dispatch paragraph and the example block.
-  Verify: `grep -n "\\*\\*Outcome:\\*\\*" agent/skills/requesting-code-review/SKILL.md` returns at least two matches (one in the dispatch paragraph, one in the example block), and `grep -n "\\[Approved\\] or \\[Issues Found\\]" agent/skills/requesting-code-review/SKILL.md` returns zero matches; the example block contains the literal `Outcome: Approved with concerns` line.
-- review-fix-block.md trailing instruction references the new outcome vocabulary.
-  Verify: `grep -n "Outcome: Approved" agent/skills/refine-code/review-fix-block.md` returns at least one match, and `grep -n "Ready to merge: Yes" agent/skills/refine-code/review-fix-block.md` returns zero matches.
+- requesting-code-review/README.md verdict parsing line uses the new vocabulary.
+  Verify: `grep -n "\\*\\*Verdict:\\*\\*" agent/skills/requesting-code-review/README.md` returns at least one match in the Workflow section, `grep -n "\\*\\*Outcome:\\*\\*" agent/skills/requesting-code-review/README.md` returns zero matches, and `grep -n "\\[Approved\\] or \\[Issues Found\\]" agent/skills/requesting-code-review/README.md` returns zero matches.
+- requesting-code-review/SKILL.md uses the new verdict vocabulary in both the dispatch paragraph and the example block.
+  Verify: `grep -n "\\*\\*Verdict:\\*\\*" agent/skills/requesting-code-review/SKILL.md` returns at least two matches (one in the dispatch paragraph, one in the example block), `grep -n "\\*\\*Outcome:\\*\\*" agent/skills/requesting-code-review/SKILL.md` returns zero matches, and `grep -n "\\[Approved\\] or \\[Issues Found\\]" agent/skills/requesting-code-review/SKILL.md` returns zero matches; the example block contains the literal `**Verdict:** Approved with concerns` line.
+- review-fix-block.md trailing instruction references the new verdict vocabulary.
+  Verify: `grep -n "\\*\\*Verdict:\\*\\* Approved" agent/skills/refine-code/review-fix-block.md` returns at least one match, `grep -n "Outcome: Approved" agent/skills/refine-code/review-fix-block.md` returns zero matches, and `grep -n "Ready to merge: Yes" agent/skills/refine-code/review-fix-block.md` returns zero matches.
 - Top-level README.md code-reviewer description references the new vocabulary.
-  Verify: `grep -n "Approved with concerns" README.md` returns at least one match in the `### code-reviewer.md` paragraph, and `grep -n "\\[Approved\\] or \\[Issues Found\\]" README.md` returns zero matches.
+  Verify: `grep -n "Approved with concerns" README.md` returns at least one match in the `### code-reviewer.md` paragraph, `grep -n "\\*\\*Verdict:\\*\\*" README.md` returns at least one match in the same paragraph, and `grep -n "\\[Approved\\] or \\[Issues Found\\]" README.md` returns zero matches.
 
 **Model recommendation:** cheap
 
@@ -862,22 +862,22 @@ Tasks are sequenced so the reviewer prompt edits land before the refiner prompts
 **Steps:**
 - [ ] **Step 1: Smoke-run `refine-plan` against an existing plan.** Pick an existing plan file under `.pi/plans/` (e.g. `.pi/plans/done/2026-04-29-2026-04-29-refiner-coordinator-hardening.md` if available, or any other recent plan) — or generate a small plan via `generate-plan` for this purpose. Invoke `refine-plan <PLAN_PATH>` with `--max-iterations 1` to keep the run cheap. Expect the run to dispatch `plan-refiner`, which dispatches `plan-reviewer`, and the reviewer to write a review file under `.pi/plans/reviews/`.
 
-- [ ] **Step 2: Inspect the produced plan review file.** Open the review file written by Step 1 (path will be in `refine-plan`'s final report). Confirm it has, in order: a `**Reviewer:** <provider>/<model> via <cli>` first line, a blank line, then `### Outcome` (with `**Outcome:**` and `**Reasoning:**` lines), `### Strengths`, `### Issues` (with `#### Critical (Must Fix)`, `#### Important (Should Fix)`, `#### Minor (Nice to Have)` sub-headings — empty ones rendered as `_None._`), `### Recommendations`. There should be no `### Status` or `### Summary` heading.
+- [ ] **Step 2: Inspect the produced plan review file.** Open the review file written by Step 1 (path will be in `refine-plan`'s final report). Confirm it has, in order: a `**Reviewer:** <provider>/<model> via <cli>` first line, a blank line, then `### Outcome` (with `**Verdict:**` and `**Reasoning:**` lines), `### Strengths`, `### Issues` (with `#### Critical (Must Fix)`, `#### Important (Should Fix)`, `#### Minor (Nice to Have)` sub-headings — empty ones rendered as `_None._`), `### Recommendations`. There should be no `### Status`, `### Summary`, or `**Outcome:**` verdict line.
 
 - [ ] **Step 3: Inspect the `refine-plan` final-report STATUS.** Confirm `refine-plan` reported one of `STATUS: approved | approved_with_concerns | not_approved_within_budget | failed`. If `approved_with_concerns`, confirm the plan file now ends with the new `## Review Notes` block containing `_Approved with concerns by plan reviewer. Full review: …_` and `### Important (waived)` bullets sourced from the reviewer's reasoning.
 
 - [ ] **Step 4: Smoke-run `refine-code` against a real diff.** Pick a small recent diff range — e.g. a single recent commit on `main` (`BASE_SHA=$(git rev-parse HEAD~1)`, `HEAD_SHA=$(git rev-parse HEAD)`). Invoke `refine-code` with that range, a small description, and `--max-iterations 1` to keep the run cheap. Expect the run to dispatch `code-refiner`, which dispatches `code-reviewer` (and possibly `coder` if findings emerge), and the reviewer to write a review file under `.pi/reviews/`.
 
-- [ ] **Step 5: Inspect the produced code review file.** Open the review file written by Step 4. Confirm it has, in order: the `**Reviewer:**` first line, a blank line, then `### Outcome`, `### Strengths`, `### Issues` (with the three H4 severity sub-headings, empty ones rendered as `_None._`), `### Recommendations`. There should be no `### Assessment` heading or `Ready to merge` line.
+- [ ] **Step 5: Inspect the produced code review file.** Open the review file written by Step 4. Confirm it has, in order: the `**Reviewer:**` first line, a blank line, then `### Outcome` (with `**Verdict:**` and `**Reasoning:**` lines), `### Strengths`, `### Issues` (with the three H4 severity sub-headings, empty ones rendered as `_None._`), `### Recommendations`. There should be no `### Assessment` heading, `Ready to merge` line, or `**Outcome:**` verdict line.
 
 - [ ] **Step 6: Inspect the `refine-code` final-report STATUS.** Confirm `refine-code` reported one of `STATUS: approved | approved_with_concerns | not_approved_within_budget | failed`. If the smoke run produces a `STATUS: failed` due to model/availability issues, that is acceptable for this task as long as the failure reason follows the four-category taxonomy (`coordinator dispatch unavailable`, `worker dispatch failed: <which worker>`, or `reviewer artifact handoff failed: <specific check>`).
 
 **Acceptance criteria:**
 
 - A live `refine-plan` smoke run produces a review whose body matches the new structure and an outer status drawn from the new four-value enum.
-  Verify: read the review file path produced by Step 1 (recorded in the `refine-plan` final report under `REVIEW_PATHS:`), open it, and confirm the on-disk file's body has, in order, `### Outcome`, `### Strengths`, `### Issues`, `#### Critical (Must Fix)`, `#### Important (Should Fix)`, `#### Minor (Nice to Have)`, `### Recommendations` headings — and that the `refine-plan` final report's `STATUS:` line names one of `approved`, `approved_with_concerns`, `not_approved_within_budget`, or `failed`.
+  Verify: read the review file path produced by Step 1 (recorded in the `refine-plan` final report under `REVIEW_PATHS:`), open it, and confirm the on-disk file's body has, in order, `### Outcome`, `**Verdict:**`, `**Reasoning:**`, `### Strengths`, `### Issues`, `#### Critical (Must Fix)`, `#### Important (Should Fix)`, `#### Minor (Nice to Have)`, `### Recommendations` headings/lines; confirm the file contains no `**Outcome:**` line; and confirm the `refine-plan` final report's `STATUS:` line names one of `approved`, `approved_with_concerns`, `not_approved_within_budget`, or `failed`.
 - A live `refine-code` smoke run produces a review whose body matches the new structure and an outer status drawn from the new four-value enum.
-  Verify: read the review file path produced by Step 4 (recorded in the `refine-code` coordinator's `## Review File` block, or surfaced by the SKILL's final report), open it, and confirm the on-disk file's body has, in order, `### Outcome`, `### Strengths`, `### Issues`, `#### Critical (Must Fix)`, `#### Important (Should Fix)`, `#### Minor (Nice to Have)`, `### Recommendations` headings — and that the `refine-code` SKILL's caller-facing report names one of `approved`, `approved_with_concerns`, `not_approved_within_budget`, or `failed`.
+  Verify: read the review file path produced by Step 4 (recorded in the `refine-code` coordinator's `## Review File` block, or surfaced by the SKILL's final report), open it, and confirm the on-disk file's body has, in order, `### Outcome`, `**Verdict:**`, `**Reasoning:**`, `### Strengths`, `### Issues`, `#### Critical (Must Fix)`, `#### Important (Should Fix)`, `#### Minor (Nice to Have)`, `### Recommendations` headings/lines; confirm the file contains no `**Outcome:**` line; and confirm the `refine-code` SKILL's caller-facing report names one of `approved`, `approved_with_concerns`, `not_approved_within_budget`, or `failed`.
 
 **Model recommendation:** standard
 
@@ -902,10 +902,10 @@ Tasks are sequenced so the reviewer prompt edits land before the refiner prompts
 
 - **Risk: per-finding template drift between plan and code reviewers.** The spec requires a uniform per-finding template — bold lead line + What/Why it matters/Recommendation bullets — across both reviewer prompts. Mitigation: Tasks 1 and 2 use identical template wording in their respective Output Format rewrites (only the locator differs: `Task N` vs `file:line`). The acceptance criteria for both tasks confirm the H4 sub-heading set and the `_None._` empty-rendering rule.
 
-- **Risk: Outcome parser brittleness if a reviewer writes a slightly different label.** The refiners require an exact-match on one of three labels. A reviewer that writes `Approve` or `Approved (with concerns)` would fail. Mitigation: Task 3 Step 1 and Task 4 Step 1 specify "MUST be exactly one of" the three labels and require an explicit `STATUS: failed` with reason `reviewer artifact handoff failed: provenance malformed at <path>: missing or unrecognized Outcome label` if no match. This surfaces the bug fast rather than masking it.
+- **Risk: Verdict-line parser brittleness if a reviewer writes a slightly different label.** The refiners require an exact-match on one of three labels in the `**Verdict:**` line. A reviewer that writes `Approve` or `Approved (with concerns)` would fail. Mitigation: Task 3 Step 1 and Task 4 Step 1 specify "MUST be exactly one of" the three labels and require an explicit `STATUS: failed` with reason `reviewer artifact handoff failed: provenance malformed at <path>: missing or unrecognized Verdict label` if no match. This surfaces the bug fast rather than masking it.
 
 - **Risk: TypeScript test infrastructure (`agent/extensions/`) breaks.** The codebase scan confirmed no TypeScript test parses verdict text or refiner status strings. Mitigation: no test changes required; the spec explicitly calls this out as out-of-scope. The smoke runs in Task 10 are the verification mechanism.
 
-- **Risk: `### Outcome` Reasoning paragraph is too tight for multiple waived Importants.** Spec Open Question notes this. Mitigation: leave the constraint as a single 1–2 sentence paragraph per the spec's default; revisit only if smoke runs surface friction. The plan does not pre-empt the open question.
+- **Risk: `### Outcome` `**Reasoning:**` line is too tight for multiple waived Importants.** Spec Open Question notes this. Mitigation: leave the constraint as a single 1–2 sentence line per the spec's default; revisit only if smoke runs surface friction. The plan does not pre-empt the open question.
 
 - **Risk: `approved_with_concerns` on the code side has no diff/file artifact analog.** Spec is explicit: no code-side `## Review Notes` append; the diff plus the review file are the artifacts. Mitigation: Task 4's `Approved with concerns` branch in Final Verification simply records the result and exits with the new status — no append logic. Task 6's SKILL.md handler stashes a "note about waived Importants pointing at the review file" but does not modify any artifact. The asymmetry is documented in Task 4 Step 1's note and Task 6 Step 5's closing paragraph.
