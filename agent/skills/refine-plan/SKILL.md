@@ -126,7 +126,7 @@ Fill placeholders:
 When `STRUCTURAL_ONLY` is `true`, replace `{STRUCTURAL_ONLY_NOTE}` with exactly:
 
 ```
-This is a structural-only review run. No original spec or todo is available. The plan-reviewer must skip the Spec/Todo Coverage check and label its verdict as "Structural-only review — no spec/todo coverage check performed." in its Summary section.
+This is a structural-only review run. No original spec or todo is available. The plan-reviewer must skip the Spec/Todo Coverage check and include the literal phrase "Structural-only review — no spec/todo coverage check performed." inside the `### Outcome` section's `**Reasoning:**` line (the Summary section no longer exists in the new output format).
 ```
 
 When `STRUCTURAL_ONLY` is `false`, replace `{STRUCTURAL_ONLY_NOTE}` with the empty string.
@@ -145,7 +145,7 @@ subagent_run_serial { tasks: [
 
 Read `results[0].finalMessage`. Parse:
 
-- The `STATUS:` line (`approved`, `issues_remaining`, or `failed`).
+- The `STATUS:` line (`approved`, `approved_with_concerns`, `not_approved_within_budget`, or `failed`).
 - The `## Plan File` block — exactly one path.
 - The `## Review Files` block — a list of one path per `plan-refiner` invocation (one invocation = one era).
 - The optional `## Structural-Only Label` block — used to record whether the run was structural-only.
@@ -154,7 +154,7 @@ Validate every parsed path with `test -s <path>` (non-empty regular file). On an
 
 ## Step 9.5: Validate review provenance
 
-Run this validation only on `STATUS: approved` or `STATUS: issues_remaining`; skip on `STATUS: failed` (no review file is guaranteed to exist on failure).
+Run this validation only on `STATUS: approved`, `STATUS: approved_with_concerns`, or `STATUS: not_approved_within_budget`; skip on `STATUS: failed` (no review file is guaranteed to exist on failure).
 
 For each review file path in the `## Review Files` list parsed in Step 9, read the file and validate the first non-empty line:
 
@@ -180,16 +180,26 @@ refine-plan: plan approved. Commit plan + review artifacts? (y/n)
 
 On `Y` or empty, run Step 10a. On `n`, set `COMMIT = left_uncommitted` and skip to Step 11.
 
-### `STATUS: issues_remaining`
+### `STATUS: approved_with_concerns`
+
+Same handling as `STATUS: approved`, with the prompt updated to surface the waiver:
+
+```
+refine-plan: plan approved with concerns (Important findings waived — see Review Notes appended to the plan). Commit plan + review artifacts? (y/n)
+```
+
+Behavior is identical to `STATUS: approved` from here: on `Y` or empty (or with `AUTO_COMMIT_ON_APPROVAL` true), run Step 10a; on `n`, set `COMMIT = left_uncommitted` and skip to Step 11. The plan file already has the `## Review Notes` section appended by the `plan-refiner` per `refine-plan-prompt.md` Step 9 — Step 10a's commit will include that edit.
+
+### `STATUS: not_approved_within_budget`
 
 Present the budget-exhaustion menu exactly as:
 
 - **(a)** Commit current era's plan + review artifacts, then keep iterating into era v`<STARTING_ERA + 1>` with a fresh budget.
 - **(b)** Stop here and proceed with issues; commit gate runs based on `AUTO_COMMIT_ON_APPROVAL`.
 
-**On `(a)`:** Run Step 10a (commit current era). Step 10a MUST succeed (`COMMIT = committed`) before the next era is dispatched. If Step 10a sets `COMMIT = not_attempted` (commit failed for any reason — pre-commit hook failure, dirty index, underlying error), STOP refinement immediately: preserve `STATUS = issues_remaining` and the `COMMIT = not_attempted [reason]` value from Step 10a, do **NOT** dispatch the next era, and skip directly to Step 11. Continuing into a fresh era after a failed commit would leave the prior era's edits uncommitted while a new era runs — the abandoned-state recovery hazard the spec's two-option menu was designed to prevent.
+**On `(a)`:** Run Step 10a (commit current era). Step 10a MUST succeed (`COMMIT = committed`) before the next era is dispatched. If Step 10a sets `COMMIT = not_attempted` (commit failed for any reason — pre-commit hook failure, dirty index, underlying error), STOP refinement immediately: preserve `STATUS = not_approved_within_budget` and the `COMMIT = not_attempted [reason]` value from Step 10a, do **NOT** dispatch the next era, and skip directly to Step 11. Continuing into a fresh era after a failed commit would leave the prior era's edits uncommitted while a new era runs — the abandoned-state recovery hazard the spec's two-option menu was designed to prevent.
 
-Only when Step 10a sets `COMMIT = committed` may the skill re-run from Step 6 onward, with `STARTING_ERA` recomputed by re-scanning `.pi/plans/reviews/` (it will now reflect the just-committed file plus any uncommitted files; the rule remains `max(existing_N) + 1`). Loop until either `STATUS: approved` (proceed normally) or the user picks `(b)`.
+Only when Step 10a sets `COMMIT = committed` may the skill re-run from Step 6 onward, with `STARTING_ERA` recomputed by re-scanning `.pi/plans/reviews/` (it will now reflect the just-committed file plus any uncommitted files; the rule remains `max(existing_N) + 1`). Loop until either `STATUS: approved` / `STATUS: approved_with_concerns` (proceed normally) or the user picks `(b)`.
 
 **On `(b)`:** In `AUTO_COMMIT_ON_APPROVAL = true` mode, run Step 10a (auto-commit). In standalone mode, prompt:
 
@@ -218,7 +228,7 @@ On success, set `COMMIT = committed`. The actual SHA is reported by the `commit`
 Output exactly:
 
 ```
-STATUS: <approved | issues_remaining | failed>
+STATUS: <approved | approved_with_concerns | not_approved_within_budget | failed>
 COMMIT: <committed [sha] | left_uncommitted | not_attempted [reason]>
 PLAN_PATH: <path>
 REVIEW_PATHS:
