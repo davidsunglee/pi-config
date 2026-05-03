@@ -51,8 +51,8 @@ Resolve `(model, cli)` for each subagent dispatch per the canonical procedure in
 These rules govern the entire protocol below. They are NOT edge cases; they are unconditional.
 
 1. **No inline review on coordinator-tool unavailability.** If `subagent_run_serial` is unavailable in your session — for any reason, at any iteration — you MUST emit `STATUS: failed` with reason `coordinator dispatch unavailable`, MUST NOT write any review file, and MUST NOT perform an inline review as a substitute. The calling skill (`refine-plan`) is responsible for fallback decisions; you do not improvise.
-2. **No inline review on worker-dispatch exhaustion.** If every dispatch attempt for `plan-reviewer` (primary `crossProvider.capable` AND fallback `capable`) fails, OR if the `planner` edit-pass dispatch fails on the documented retry path, you MUST emit `STATUS: failed` with the appropriate reason from the `## Failure Modes` list (e.g., `plan-reviewer dispatch failed on primary and fallback`, `planner edit-pass dispatch failed`, or `coordinator orchestration tool unavailable`) and MUST NOT write any review file written after the failure. Inline-review fallback is forbidden in all cases.
-3. **No improvised review file or inline review on artifact-handoff failure.** If the `plan-reviewer`'s response is missing the `REVIEW_ARTIFACT:` marker, OR the artifact file is missing/empty/path-mismatched, OR the on-disk first-line provenance is malformed, you MUST emit `STATUS: failed` with the specific reason from the `## Failure Modes` list (`reviewer response missing REVIEW_ARTIFACT marker`, `reviewer artifact missing or empty at <path>`, `reviewer artifact path mismatch: expected <X>, got <Y>`, or `reviewer artifact provenance malformed at <path>: <specific check>`) and exit. You MUST NOT improvise the review file or fall back to inline review. This mirrors the existing "no inline review on dispatch failure" rules above.
+2. **No inline review on worker-dispatch exhaustion.** If every dispatch attempt for `plan-reviewer` (primary `crossProvider.capable` AND fallback `capable`) fails, OR if the `planner` edit-pass dispatch fails on the documented retry path, you MUST emit `STATUS: failed` with the appropriate reason from the `## Failure Modes` list (e.g., `worker dispatch failed: plan-reviewer`, `worker dispatch failed: planner-edit-pass`, or `coordinator dispatch unavailable`) and MUST NOT write any review file written after the failure. Inline-review fallback is forbidden in all cases.
+3. **No improvised review file or inline review on artifact-handoff failure.** If the `plan-reviewer`'s response is missing the `REVIEW_ARTIFACT:` marker, OR the artifact file is missing/empty/path-mismatched, OR the on-disk first-line provenance is malformed, you MUST emit `STATUS: failed` with the specific reason from the `## Failure Modes` list (`reviewer artifact handoff failed: missing REVIEW_ARTIFACT marker`, `reviewer artifact handoff failed: missing or empty at <path>`, `reviewer artifact handoff failed: path mismatch: expected <X> got <Y>`, or `reviewer artifact handoff failed: provenance malformed at <path>: <specific check>`) and exit. You MUST NOT improvise the review file or fall back to inline review. This mirrors the existing "no inline review on dispatch failure" rules above.
 
 All three rules are duplicated as standing identity rules in `agent/agents/plan-refiner.md` `## Rules`. The duplication is intentional — these rules apply unconditionally regardless of the per-invocation prompt.
 
@@ -79,7 +79,7 @@ When the file is overwritten in place across iterations within one era, the revi
 
 ### Per-Iteration Full Review
 
-1. **Verify the plan file** at `{PLAN_PATH}` exists and is non-empty. If the file is missing or empty, emit `STATUS: failed` with reason `plan file missing or empty at iteration start` and exit immediately.
+1. **Verify the plan file** at `{PLAN_PATH}` exists and is non-empty. If the file is missing or empty, emit `STATUS: failed` with reason `input artifact missing or empty: plan file at iteration start` and exit immediately.
 
 2. **Read the review template** at `~/.pi/agent/skills/generate-plan/review-plan-prompt.md`.
 
@@ -105,51 +105,53 @@ When the file is overwritten in place across iterations within one era, the revi
    - **4b. Re-fill the review template.** Re-run Step 3's placeholder fill against `~/.pi/agent/skills/generate-plan/review-plan-prompt.md`, substituting the freshly reconstructed fallback `{REVIEWER_PROVENANCE}` for the placeholder. Every other placeholder retains the same value as the primary attempt (including the same `{REVIEW_OUTPUT_PATH}` — the era file path does not change on fallback). The result is a NEW filled review prompt; do NOT pass the primary's filled prompt to the fallback dispatch.
    - **4c. Dispatch the fallback** with `model: <capable>`, `cli: <dispatch lookup for capable>`, and `task: <newly filled review prompt from 4b>`.
 
-   If both the primary dispatch and the fallback dispatch fail, emit `STATUS: failed` with reason `plan-reviewer dispatch failed on primary and fallback` and exit.
+   If both the primary dispatch and the fallback dispatch fail, emit `STATUS: failed` with reason `worker dispatch failed: plan-reviewer` and exit.
 
 5. **Extract and validate the reviewer's artifact handoff.** Read `results[0].finalMessage`. Perform these steps in order, each producing its own `STATUS: failed` reason on failure:
 
-   - **5a. Marker extraction.** Find the LAST line in `finalMessage` matching the anchored regex `^REVIEW_ARTIFACT: (.+)$`. If no such line exists, emit `STATUS: failed` with reason `reviewer response missing REVIEW_ARTIFACT marker` and exit. Capture the captured group as `<reviewer_path>`.
-   - **5b. Path-equality check.** Compare `<reviewer_path>` (string-equal) to the absolute path you supplied as `{REVIEW_OUTPUT_PATH}` in Step 3. If they differ, emit `STATUS: failed` with reason `reviewer artifact path mismatch: expected <expected>, got <reviewer_path>` (substituting the supplied path for `<expected>`) and exit.
-   - **5c. File-existence check.** Read `<reviewer_path>` from disk. If the file does not exist, OR the file is empty (zero bytes, or only whitespace), emit `STATUS: failed` with reason `reviewer artifact missing or empty at <reviewer_path>` and exit.
-   - **5d. On-disk first-line provenance check.** Find the first non-empty line of `<reviewer_path>`. Validate three things, in order: (i) the line is BYTE-EQUAL to the EXACT `{REVIEWER_PROVENANCE}` string you supplied to the reviewer in Step 3 for THIS iteration's dispatch (this is the primary check — a generic regex match is insufficient, and on a fallback retry this string MUST be the freshly reconstructed fallback line, never the primary's line); (ii) as defense-in-depth, the line matches the regex `^\*\*Reviewer:\*\* [^/]+/[^ ]+ via [a-zA-Z0-9_-]+$`; (iii) the line does NOT contain the substring `inline` (case-insensitive). On any of the three failing, emit `STATUS: failed` with reason `reviewer artifact provenance malformed at <reviewer_path>: <specific check>` (substituting `does not match supplied REVIEWER_PROVENANCE`, `format mismatch`, or `inline-substring forbidden` for `<specific check>`) and exit.
+   - **5a. Marker extraction.** Find the LAST line in `finalMessage` matching the anchored regex `^REVIEW_ARTIFACT: (.+)$`. If no such line exists, emit `STATUS: failed` with reason `reviewer artifact handoff failed: missing REVIEW_ARTIFACT marker` and exit. Capture the captured group as `<reviewer_path>`.
+   - **5b. Path-equality check.** Compare `<reviewer_path>` (string-equal) to the absolute path you supplied as `{REVIEW_OUTPUT_PATH}` in Step 3. If they differ, emit `STATUS: failed` with reason `reviewer artifact handoff failed: path mismatch: expected <expected> got <reviewer_path>` (substituting the supplied path for `<expected>`) and exit.
+   - **5c. File-existence check.** Read `<reviewer_path>` from disk. If the file does not exist, OR the file is empty (zero bytes, or only whitespace), emit `STATUS: failed` with reason `reviewer artifact handoff failed: missing or empty at <reviewer_path>` and exit.
+   - **5d. On-disk first-line provenance check.** Find the first non-empty line of `<reviewer_path>`. Validate three things, in order: (i) the line is BYTE-EQUAL to the EXACT `{REVIEWER_PROVENANCE}` string you supplied to the reviewer in Step 3 for THIS iteration's dispatch (this is the primary check — a generic regex match is insufficient, and on a fallback retry this string MUST be the freshly reconstructed fallback line, never the primary's line); (ii) as defense-in-depth, the line matches the regex `^\*\*Reviewer:\*\* [^/]+/[^ ]+ via [a-zA-Z0-9_-]+$`; (iii) the line does NOT contain the substring `inline` (case-insensitive). On any of the three failing, emit `STATUS: failed` with reason `reviewer artifact handoff failed: provenance malformed at <reviewer_path>: <specific check>` (substituting `does not match supplied REVIEWER_PROVENANCE`, `format mismatch`, or `inline-substring forbidden` for `<specific check>`) and exit.
    - **5e. Read the file as the authoritative review.** On all checks passing, treat the on-disk file content as the authoritative review for verdict parsing, severity counting, planner-edit-pass `{REVIEW_FINDINGS}` construction, and the `## Review Notes` append. Do NOT use `finalMessage` content beyond the marker line.
 
    Do NOT improvise the review file or perform an inline review on any failure above (Hard rule 3).
 
-6. **Parse the review file** for a line containing `**[Approved]**` or `**[Issues Found]**`.
+6. **Parse the review file for the reviewer verdict.** Find the line in the on-disk review file that begins with `**Verdict:**` (inside the `### Outcome` section). Extract the verdict label — it MUST be exactly one of `Approved`, `Approved with concerns`, or `Not approved`. If no `**Verdict:**` line is found, or the label does not match one of the three expected values, emit `STATUS: failed` with reason `reviewer artifact handoff failed: provenance malformed at <reviewer_path>: missing or unrecognized Verdict label` and exit.
 
-7. **Count findings by severity** — count Error, Warning, and Suggestion findings from the review (severity tags appear per the `review-plan-prompt.md` Output Format).
+7. **Count findings by severity** — count Critical, Important, and Minor findings from the on-disk review. Findings appear under the H4 sub-headings `#### Critical (Must Fix)`, `#### Important (Should Fix)`, and `#### Minor (Nice to Have)` per `review-plan-prompt.md`'s Output Format. An empty sub-section renders as `_None._` and contributes zero to its count.
 
-8. **If `Errors == 0`** (regardless of whether the verdict label is `[Approved]` or `[Issues Found]`):
-   - Append warnings and suggestions to the plan as a `## Review Notes` section using the exact format documented in [Review Notes Append Format](#review-notes-append-format) below.
+8. **If outcome is `Approved`** (zero Critical AND zero Important findings):
+   - Do NOT append a `## Review Notes` section to the plan.
    - Emit `STATUS: approved` with the summary block and exit.
 
-   Warnings and suggestions are informational only and never force a planner edit pass. A `[Issues Found]` review with zero Errors is treated as approved — approval means "no errors remain."
+9. **If outcome is `Approved with concerns`** (zero Critical AND one or more Important findings the reviewer waived):
+   - Append a `## Review Notes` section to the plan using the format documented in [Review Notes Append Format](#review-notes-append-format) below. Source the per-bullet waiver rationale from the reviewer's `### Outcome` section `**Reasoning:**` line — one bullet per waived Important finding, with the reviewer's rationale transcribed alongside.
+   - Emit `STATUS: approved_with_concerns` with the summary block and exit.
 
-9. **If `Errors > 0` and the current iteration count is less than `{MAX_ITERATIONS}`**: continue to the [Planner Edit Pass](#planner-edit-pass).
+10. **If outcome is `Not approved`** (one or more Critical findings, OR one or more Important findings the reviewer judged as needing real remediation) AND the current iteration count is less than `{MAX_ITERATIONS}`: continue to the [Planner Edit Pass](#planner-edit-pass).
 
-10. **Otherwise** (`Errors > 0` and budget exhausted): emit `STATUS: issues_remaining` with the summary block and exit.
+11. **Otherwise** (outcome is `Not approved` AND budget exhausted): emit `STATUS: not_approved_within_budget` with the summary block and exit.
+
+Minor findings are never blocking. The reviewer's `Approved with concerns` decision is final for that review pass — the refiner does NOT iterate to remediate Important findings the reviewer has waived.
 
 ### Review Notes Append Format
 
-When the approved path is taken (step 8), append the following markdown to the end of the plan file. The leading blank line is required to separate from any prior content. The section must be appended at the end of the file, not inserted elsewhere.
+When the `approved_with_concerns` path is taken (step 9), append the following markdown to the END of the plan file. The leading blank line is required to separate from any prior content. Append once — never insert elsewhere.
 
-If zero warnings and zero suggestions exist on the approved path, do **not** append a `## Review Notes` section at all.
+Do NOT append a `## Review Notes` section on the `approved`, `not_approved_within_budget`, or `failed` paths. Do NOT include Minor findings in the append (they live in the review file only).
+
+Substitute `<path-to-review-file>` with the absolute review file path you supplied as `{REVIEW_OUTPUT_PATH}` for this iteration. One bullet per waived Important finding; the waiver rationale is sourced from the reviewer's `### Outcome` section `**Reasoning:**` line.
 
 ```markdown
 
 ## Review Notes
 
-_Added by plan reviewer — informational, not blocking._
+_Approved with concerns by plan reviewer. Full review: `<path-to-review-file>`._
 
-### Warnings
+### Important (waived)
 
-- **Task N**: <full warning text including What, Why it matters, Recommendation>
-
-### Suggestions
-
-- **Task N**: <full suggestion text including What, Why it matters, Recommendation>
+- **Task N**: <one-sentence summary> — _waived: <one-sentence rationale from reviewer>._
 ```
 
 ### Planner Edit Pass
@@ -159,7 +161,7 @@ When errors remain and the budget is not exhausted:
 1. **Read the edit template** at `~/.pi/agent/skills/generate-plan/edit-plan-prompt.md`.
 
 2. **Fill placeholders** in the edit template:
-   - `{REVIEW_FINDINGS}` — the full text of all Error-severity findings concatenated from the on-disk review artifact (read in Per-Iteration Full Review Step 5e)
+   - `{REVIEW_FINDINGS}` — the full text of all Critical findings AND all Important findings concatenated from the on-disk review artifact (read in Per-Iteration Full Review Step 5e). The planner edit pass addresses the findings the reviewer judged blocking under `Not approved`. Do NOT include Minor findings — they are non-blocking and do not feed the edit pass.
    - `{PLAN_ARTIFACT}` — `Plan artifact: {PLAN_PATH}`
    - `{TASK_ARTIFACT}` — from the Provenance block above
    - `{SOURCE_TODO}` — from the Provenance block above
@@ -173,9 +175,9 @@ When errors remain and the budget is not exhausted:
    - `cli: <dispatch lookup for capable>`
    - `task: <filled edit prompt>`
 
-   On dispatch failure, emit `STATUS: failed` with reason `planner edit-pass dispatch failed` and exit.
+   On dispatch failure, emit `STATUS: failed` with reason `worker dispatch failed: planner-edit-pass` and exit.
 
-4. **Verify the plan file** at `{PLAN_PATH}` still exists and is non-empty after the planner returns. If not, emit `STATUS: failed` with reason `plan file missing or empty after planner edit pass returned` and exit.
+4. **Verify the plan file** at `{PLAN_PATH}` still exists and is non-empty after the planner returns. If not, emit `STATUS: failed` with reason `input artifact missing or empty: plan file after planner edit pass` and exit.
 
 5. **Increment the iteration counter** and loop back to Per-Iteration Full Review step 1.
 
@@ -184,13 +186,15 @@ When errors remain and the budget is not exhausted:
 Report your final status using this exact format:
 
 ```
-STATUS: approved | issues_remaining | failed
+STATUS: approved | approved_with_concerns | not_approved_within_budget | failed
 
 ## Summary
 Iterations: <N>
-Errors found: <total across all iterations>
-Errors fixed: <total across all iterations>
-Warnings/suggestions appended: <count appended to plan on approved path; 0 otherwise>
+Critical found: <total across all iterations>
+Important found: <total across all iterations>
+Minor found: <total across all iterations>
+Critical+Important fixed: <total across all iterations>
+Important waived (appended to plan): <count appended on approved_with_concerns path; 0 otherwise>
 
 ## Plan File
 <PLAN_PATH>
@@ -209,25 +213,22 @@ This run was structural-only — no original spec/todo coverage was checked.
 
 **`## Structural-Only Label`** appears only when `{STRUCTURAL_ONLY_NOTE}` was non-empty in the inputs.
 
-On `STATUS: approved` or `STATUS: issues_remaining`, the `## Review Files` list contains exactly one entry — the era review file successfully written during this invocation.
+On `STATUS: approved`, `STATUS: approved_with_concerns`, or `STATUS: not_approved_within_budget`, the `## Review Files` list contains exactly one entry — the era review file successfully written during this invocation.
 
 On `STATUS: failed`, the `## Review Files` list contains only review files that the reviewer successfully wrote and you successfully validated before the failure occurred:
 
 - Include the era file path if the reviewer's artifact was successfully written and passed all of Step 5's validations (5a–5d) for the most recent iteration before the failure.
-- Leave the `## Review Files` list empty when the failure occurred before any reviewer artifact passed validation (e.g. plan file missing or empty at iteration start, plan-reviewer dispatch failed on both primary and fallback, the reviewer's response was missing the `REVIEW_ARTIFACT` marker, the artifact was missing/empty/path-mismatched, or its on-disk provenance was malformed).
+- Leave the `## Review Files` list empty when the failure occurred before any reviewer artifact passed validation (e.g. `input artifact missing or empty: plan file at iteration start`, `worker dispatch failed: plan-reviewer`, `reviewer artifact handoff failed: missing REVIEW_ARTIFACT marker`, `reviewer artifact handoff failed: missing or empty at <path>`, `reviewer artifact handoff failed: path mismatch: expected <X> got <Y>`, or `reviewer artifact handoff failed: provenance malformed at <path>: <sub-check>`).
 
 A `plan-refiner` invocation runs one era and therefore writes at most one review file.
 
 ## Failure Modes
 
-The following conditions produce `STATUS: failed`. Each condition maps to a one-line reason string used in the `## Failure Reason` block:
+All failure conditions produce `STATUS: failed` with a one-line reason string drawn from the four-category taxonomy below. The reason string appears in the `## Failure Reason` block of the Output Format.
 
-- **Plan file missing or empty at iteration start** — reason: `plan file missing or empty at iteration start`
-- **Plan-reviewer dispatch failed on both primary and fallback** — reason: `plan-reviewer dispatch failed on primary and fallback`
-- **Reviewer response missing the REVIEW_ARTIFACT marker** — reason: `reviewer response missing REVIEW_ARTIFACT marker`
-- **Reviewer artifact missing or empty on disk** — reason: `reviewer artifact missing or empty at <path>`
-- **Reviewer artifact path mismatch (the marker path does not equal the path supplied to the reviewer)** — reason: `reviewer artifact path mismatch: expected <X>, got <Y>`
-- **Reviewer artifact provenance malformed (first-line regex fails or contains `inline`)** — reason: `reviewer artifact provenance malformed at <path>: <specific check>`
-- **Planner edit-pass dispatch failed** — reason: `planner edit-pass dispatch failed`
-- **Plan file missing or empty after the planner edit pass returned** — reason: `plan file missing or empty after planner edit pass returned`
-- **Coordinator orchestration tool unavailable** — reason: `coordinator dispatch unavailable`
+| Category | Reason string template | Notes |
+|---|---|---|
+| Coordinator infra | `coordinator dispatch unavailable` | Emitted when `subagent_run_serial` is unavailable in this session. |
+| Worker dispatch | `worker dispatch failed: <which worker>` | `<which worker>` ∈ `plan-reviewer`, `planner-edit-pass`. Plan-reviewer primary→fallback retry logic is preserved internally; only retry exhaustion surfaces this string. |
+| Reviewer artifact handoff | `reviewer artifact handoff failed: <specific check>` | `<specific check>` ∈ `missing REVIEW_ARTIFACT marker`, `missing or empty at <path>`, `path mismatch: expected <X> got <Y>`, `provenance malformed at <path>: <sub-check>` (where `<sub-check>` ∈ `does not match supplied REVIEWER_PROVENANCE`, `format mismatch`, `inline-substring forbidden`, `missing or unrecognized Verdict label`). |
+| Input artifact | `input artifact missing or empty: <which>` | `<which>` ∈ `plan file at iteration start`, `plan file after planner edit pass`. |
