@@ -175,7 +175,7 @@ When all paths pass validation, proceed to Step 10.
 If `AUTO_COMMIT_ON_APPROVAL` is true, jump directly to the commit invocation in Step 10a. Otherwise, prompt the user:
 
 ```
-refine-plan: plan approved. Commit plan + review artifacts? [Y/n]
+refine-plan: plan approved. Commit plan + review artifacts? (y/n)
 ```
 
 On `Y` or empty, run Step 10a. On `n`, set `COMMIT = left_uncommitted` and skip to Step 11.
@@ -194,7 +194,7 @@ Only when Step 10a sets `COMMIT = committed` may the skill re-run from Step 6 on
 **On `(b)`:** In `AUTO_COMMIT_ON_APPROVAL = true` mode, run Step 10a (auto-commit). In standalone mode, prompt:
 
 ```
-Commit current plan + review artifacts? [Y/n]
+Commit current plan + review artifacts? (y/n)
 ```
 
 Run Step 10a on `Y`/empty; set `COMMIT = left_uncommitted` on `n`.
