@@ -104,7 +104,7 @@ Skip Step 4 of this orchestrator (it parses the subagent's `finalMessage`) and j
 
 ## Step 4: Validate `SPEC_WRITTEN:` (mux branch only)
 
-Evaluate the subagent's `finalMessage`, `exitCode`, `state`, `error`, and `transcriptPath` from `results[0]` in the order below. The first matching case wins, except case (2) may perform conservative transcript-backed recovery and proceed to Step 5. Do not retry. Do not surface a recovery menu — the recovery menu is only for user-review rejection (Step 7).
+Evaluate the subagent's `finalMessage`, `exitCode`, `state`, `error`, and `transcriptPath` from `results[0]` in the order below. The first matching case wins, except case (2) may perform conservative transcript-backed recovery and proceed to Step 5. Do not retry. Do not surface the Step 5 review choices during validation — they are only for the user review gate.
 
 A `SPEC_WRITTEN: <absolute path>` line in `finalMessage` is the primary completion signal. Parse it as a single line on its own, no surrounding backticks or commentary on the same line.
 
@@ -154,14 +154,19 @@ Cases (evaluated in this order):
 
 Surface to the user:
 
-> Spec written to `<path>`. Review it and let me know when you'd like me to commit it (or that you don't want to).
+> Spec written to `<path>`. Review it, then choose:
+>
+> **(c) Commit** — commit the spec to git.
+> **(r) Refine** — re-run `define-spec` with this draft as input. The procedure overwrites the same path.
+> **(x) Stop** — leave `<path>` uncommitted on disk for manual editing and committing later.
 
 Wait for the user's reply. The orchestrator does **not** read the spec file into its own context — the user reads it directly.
 
 Possible user responses:
 
-- **OK / commit it / yes** → Step 6 (commit).
-- **Reject** (any form: "redo", "leave it", "delete it") → Step 7 (recovery menu).
+- **(c) Commit / commit it / yes** → Step 6 (commit).
+- **(r) Refine / refine** → Step 7 (refine).
+- **(x) Stop / stop / no** → Step 7 (stop).
 
 ## Step 6: Commit (on user OK)
 
@@ -169,27 +174,18 @@ Invoke the `commit` skill with the exact spec path captured in Step 4 (or Step 3
 
 If the `commit` skill fails, report the error verbatim and stop. Leave the file on disk uncommitted. Do **not** auto-retry. The user resolves the underlying issue (e.g. pre-commit hook failure) and re-runs `/define-spec` or commits manually.
 
-## Step 7: Recovery menu (on user reject)
-
-Present these three options:
-
-> Got it. What would you like to do with `<path>`?
->
-> **(i) Redo** — re-dispatch `define-spec` with the existing draft as input. The procedure overwrites the same path.
-> **(ii) Leave it** — leave `<path>` uncommitted on disk for manual editing and committing later.
-> **(iii) Delete it** — remove the file.
+## Step 7: Handle review choices (on Refine or Stop)
 
 Behavior per choice:
 
-- **(i) Redo:** invoke `/define-spec <path>` recursively, passing the captured spec path as-is (typically the absolute path from the original `SPEC_WRITTEN: <absolute path>` line). The procedure's input-shape detector accepts both relative `.pi/specs/<name>.md` and absolute paths containing `/.pi/specs/`, so the existing-spec branch fires on the recursive run and overwrites the rejected draft with preamble preservation. On the recursive run, the same orchestrator probe + dispatch + validate + commit-gate flow applies.
-- **(ii) Leave it:** emit `Leaving <path> uncommitted. Edit and commit yourself.` and stop.
-- **(iii) Delete it:** remove the file. Then stop.
+- **(r) Refine:** invoke `/define-spec <path>` recursively, passing the captured spec path as-is (typically the absolute path from the original `SPEC_WRITTEN: <absolute path>` line). The procedure's input-shape detector accepts both relative `.pi/specs/<name>.md` and absolute paths containing `/.pi/specs/`, so the existing-spec branch fires on the recursive run and overwrites the draft with preamble preservation. On the recursive run, the same orchestrator probe + dispatch + validate + commit-gate flow applies.
+- **(x) Stop:** emit `Leaving <path> uncommitted. Edit and commit yourself.` and stop.
 
 ## Step 8: Offer `generate-plan`
 
 After a successful commit (Step 6), offer continuation:
 
-> Spec committed. Want me to run `generate-plan` with `<path>`?
+> Spec committed at <path>. Run generate-plan next? (y/n)
 
 If yes, invoke `generate-plan` with `<path>`. If no, stop.
 

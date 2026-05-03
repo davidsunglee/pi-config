@@ -4,6 +4,13 @@ This is the canonical spec-design procedure. It is delivered to the `spec-design
 
 This file is **not** a discoverable skill. It has no `name:`/`description:` frontmatter and is not loaded by any `Skill` tool surface. It is consumed only by being read from disk.
 
+## Interaction conventions
+
+These conventions govern the interactive spec-content steps in this procedure (Steps 3, 4, 5, and 6):
+
+- **Recommend with every spec-content question.** Before asking about scope decomposition, intent, architecture need, or architecture approach, name the specific answer or direction you recommend and give a one-sentence rationale grounded in the codebase survey and user input. Procedural orchestrator choices such as committing the spec or running `generate-plan` are outside this procedure and do not require recommendations.
+- **One question per turn.** Never bundle multiple questions into a single turn. A multi-option prompt such as a `(y/n)` question or `(a)/(b)/(c)` menu counts as one question.
+
 ## Step 1: Resolve input shape
 
 The orchestrator passes the user's raw input as your task body. Detect the shape by pattern; do not ask the user which kind it is.
@@ -11,7 +18,7 @@ The orchestrator passes the user's raw input as your task body. Detect the shape
 | Shape | Pattern | Behavior |
 | --- | --- | --- |
 | **Todo ID** | matches `^TODO-([0-9a-f]{8})$` exactly | Extract the captured 8-char hex as the **raw todo id** (`<raw-id>`) — the part *without* the `TODO-` prefix. Todo files are stored on disk by raw hex filename: read `.pi/todos/<raw-id>.md` to get the title and full body (e.g. input `TODO-075cf515` → read `.pi/todos/075cf515.md`). Do **not** read `.pi/todos/TODO-<raw-id>.md` — that path does not exist. (When dispatched as the `spec-designer` subagent, the agent's tool surface intentionally omits `todo` — direct file read is the expected path. On the orchestrator's inline branch the `todo` tool may be available; either way, reading the file directly is correct.) Set provenance to `Source: TODO-<raw-id>` (the prefix is re-added in the provenance line). Check whether `.pi/briefs/TODO-<raw-id>-brief.md` exists; if it does, read it as scout context and set the `Scout brief:` provenance line. If it does not exist, proceed without — do not fail. |
-| **Existing-spec path** | string ends in `.md` and is **either** (a) a relative path that begins with `.pi/specs/`, **or** (b) an absolute path that contains the segment `/.pi/specs/` (e.g. `/Users/.../<repo>/.pi/specs/foo.md` — this is the form the orchestrator's `SPEC_WRITTEN: <absolute path>` emits and the recovery-menu Redo replays back in), **and** the file exists on disk | Read the existing draft. Treat it as starting context. Preserve its preamble lines (`Source:`, `Scout brief:`) verbatim on rewrite. Q&A focuses on filling gaps and refining unclear sections. **Overwrite the same path** at the end (use the input path as-is — do not normalize between relative and absolute). The spec self-review pass (Step 7) is mandatory. |
+| **Existing-spec path** | string ends in `.md` and is **either** (a) a relative path that begins with `.pi/specs/`, **or** (b) an absolute path that contains the segment `/.pi/specs/` (e.g. `/Users/.../<repo>/.pi/specs/foo.md` — this is the form the orchestrator's `SPEC_WRITTEN: <absolute path>` emits and the review prompt's Refine option replays back in), **and** the file exists on disk | Read the existing draft. Treat it as starting context. Preserve its preamble lines (`Source:`, `Scout brief:`) verbatim on rewrite. Q&A focuses on filling gaps and refining unclear sections. **Overwrite the same path** at the end (use the input path as-is — do not normalize between relative and absolute). The spec self-review pass (Step 7) is mandatory. |
 | **Freeform text** | anything else | Use the text as a seed. Do not look up a scout brief. Do not emit a `Source:` or `Scout brief:` preamble. Run the full Q&A. |
 
 ## Step 2: Codebase survey
@@ -27,13 +34,19 @@ Goal: ask codebase-informed questions, not naive intent-only questions.
 
 ## Step 3: Scope-decomposition check
 
-Before Q&A starts, assess whether the input describes multiple independent subsystems. If it does, surface this and offer to split into separate specs (one per subsystem). If the user insists on a single spec for multi-subsystem work, comply but record an Open Question in the final spec noting the breadth — downstream `generate-plan` may produce a coarse plan as a result.
+Before Q&A starts, assess whether the input describes multiple independent subsystems. Follow the Interaction conventions above. If multiple independent subsystems are detected, surface a recommendation in this form:
+
+> I detected these likely subsystems: <subsystem 1>, <subsystem 2>[, <subsystem 3>]. I recommend splitting because <one-sentence reason tying the subsystem boundaries to the codebase survey and input>.
+>
+> Split into separate specs? (y/n)
+
+If the user answers no and insists on a single spec for multi-subsystem work, comply but record an Open Question in the final spec noting the breadth — downstream `generate-plan` may produce a coarse plan as a result. If no multi-subsystem split is recommended, do not ask this question.
 
 This check is non-blocking and runs once at the top.
 
 ## Step 4: Intent Q&A
 
-Ask one question at a time. Multi-choice preferred where possible. Ground each question in what you learned from the codebase and (if loaded) the scout brief. Read additional code during the conversation as new areas surface.
+Follow the Interaction conventions above. Ground each question and recommendation in what you learned from the codebase and (if loaded) the scout brief. Read additional code during the conversation as new areas surface.
 
 No fixed question count — use judgment. Stop when you can write a useful spec covering Goal / Context / Requirements / Constraints / Acceptance / Non-Goals.
 
@@ -41,15 +54,27 @@ Do **not** prescribe file paths, function signatures, or types — those belong 
 
 ## Step 5: Architecture-need assessment
 
-After intent Q&A is sufficient, present a recommendation to the user:
+After intent Q&A is sufficient, follow the Interaction conventions above and present a recommendation to the user:
 
-> My read: this work [does / does not] involve load-bearing architectural choices. [Reasoning — one or two sentences citing specific aspects of the input.] I recommend [running / skipping] an architecture round. You can confirm, force on, or force off.
+> My read: this work [does / does not] involve load-bearing architectural choices. [Reasoning — one or two sentences citing specific aspects of the input.] I recommend [running / skipping] an architecture round because <one-sentence rationale>.
+>
+> Run architecture round? (y/n)
 
-Wait for the user to confirm, force on, or force off. The recommendation and reasoning are surfaced to the user but are **not** recorded in the final spec — only the user's effective choice (run or skip) matters, and that is reflected by the presence or absence of the `## Approach` section in the spec.
+If the user answers yes, run Step 6. If the user answers no, skip Step 6. The recommendation and reasoning are surfaced to the user but are **not** recorded in the final spec — only the user's effective choice (run or skip) matters, and that is reflected by the presence or absence of the `## Approach` section in the spec.
 
 ## Step 6: Architecture Q&A (conditional, only when the round runs)
 
-Propose 2–3 distinct approaches with trade-offs. State your recommendation. Let the user pick one or propose their own. Do not fabricate alternatives that are not meaningfully different — if you genuinely cannot identify 2–3 distinct approaches, surface that to the user, recommend skipping the round, and do not invent fake alternatives.
+Propose 2–3 distinct approaches with trade-offs, following the Interaction conventions above. Use this format:
+
+> **(a) <approach A>** — <one-line trade-off>.
+> **(b) <approach B>** — <one-line trade-off>.
+> **(c) <approach C>** — <one-line trade-off>.  <- optional; omit when only two approaches are presented
+>
+> I recommend (<letter>) because <reason>.
+>
+> Pick one (a/b/c), or describe your own.
+
+When only two approaches are presented, omit `(c)` and use `Pick one (a/b), or describe your own.` Do not fabricate alternatives that are not meaningfully different — if you genuinely cannot identify 2–3 distinct approaches, surface that to the user, recommend skipping the round, and do not invent fake alternatives.
 
 Capture, for the spec:
 - The chosen approach in concrete terms (paradigm-level: subagent vs inline, monolith vs split, sync vs async, single-skill vs multi-skill).
