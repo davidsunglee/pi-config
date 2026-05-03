@@ -195,9 +195,9 @@ When iterations reach MAX_ITERATIONS without convergence (i.e. the most-recent r
 1. Track the cumulative remediation log in your coordinator state. Do NOT write to the reviewer artifact (the remaining issues are already in the file from the most recent reviewer write; the coordinator surfaces unfixed findings via the Output Format's `## Remaining Issues` section and surfaces fix counts via `Issues fixed`/`Issues remaining`).
 2. Report `STATUS: not_approved_within_budget`.
 
-### On Clean First Review
+### On Approved First Review
 
-If the very first review's outcome is `Approved` or `Approved with concerns` (i.e. zero Critical findings), still run Final Verification (full-diff review) before reporting the success-path status. This ensures a cross-provider check even when the first pass looks clean.
+If the very first review's outcome is `Approved` or `Approved with concerns` (i.e. zero Critical findings), still run Final Verification (full-diff review) before reporting the success-path status. This ensures a cross-provider check even when the first pass is already approved.
 
 ## Failure Modes
 
