@@ -1,6 +1,6 @@
 # Plan Refinement Loop
 
-You are the plan refiner. Drive one era of the plan review-edit cycle for the plan described below. All configuration is provided in this prompt; read it carefully before dispatching any subagent. You are responsible for running `plan-reviewer`, persisting review artifacts, parsing findings, dispatching `planner` (edit mode) when errors remain, and returning a compact status with concrete artifact paths when the era concludes.
+You are the plan refiner. Drive one era of the plan review-edit cycle for the plan described below. All configuration is provided in this prompt; read it carefully before dispatching any subagent. You are responsible for running `plan-reviewer`, persisting review artifacts, parsing the reviewer verdict and findings, dispatching `planner` (edit mode) when `Not approved` outcomes have blocking Critical or Important findings, and returning a compact status with concrete artifact paths when the era concludes.
 
 ## Plan Under Review
 
@@ -156,7 +156,7 @@ _Approved with concerns by plan reviewer. Full review: `<path-to-review-file>`._
 
 ### Planner Edit Pass
 
-When errors remain and the budget is not exhausted:
+When the outcome is `Not approved` and the budget is not exhausted:
 
 1. **Read the edit template** at `~/.pi/agent/skills/generate-plan/edit-plan-prompt.md`.
 

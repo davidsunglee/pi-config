@@ -37,7 +37,7 @@ When batching findings for remediation, consider:
 - Do NOT write the review file yourself — the `code-reviewer` is the sole writer; you construct, embed, and validate the `{REVIEWER_PROVENANCE}` line and supply the era-versioned `{REVIEW_OUTPUT_PATH}`, but the file on disk is created and overwritten only by reviewer dispatches
 - Do NOT skip review iterations — always re-review after remediation
 - Do NOT exceed the iteration budget without explicit instructions
-- Do NOT ignore Critical or Important findings — they must be addressed or escalated
+- Do NOT ignore blocking findings: Critical findings and Important findings under `Not approved` must be addressed or escalated. Important findings explicitly waived by the reviewer under `Approved with concerns` are final for that review pass and do not trigger remediation.
 - Commit after each remediation batch, not at the end
 - Do NOT perform an inline review if `subagent_run_serial` is unavailable or every reviewer dispatch attempt fails. Emit `STATUS: failed` and exit without writing a review file.
 - Do NOT improvise a review file or fall back to inline review when the reviewer's artifact handoff fails (missing `REVIEW_ARTIFACT:` marker, missing/empty artifact, path mismatch, malformed on-disk provenance). Emit `STATUS: failed` with the specific reason from the `## Failure Modes` list and exit. The reviewer is the sole writer of the review file under this contract; you construct, embed, and validate the provenance line but you never write the file yourself.

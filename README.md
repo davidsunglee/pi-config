@@ -116,7 +116,7 @@ Skills, extensions, subagents, and artifacts in this repo combine into a repeata
 
 3. **Generate a plan.** The `generate-plan` skill dispatches the `planner` subagent with a fully assembled prompt (from `generate-plan-prompt.md`). The planner deeply reads the codebase and writes a structured plan to `.pi/plans/` containing numbered tasks, file lists, acceptance criteria, dependencies, and per-task model tier recommendations. When a spec exists, it is used as the primary input via path-based handoff (the orchestrator does not embed the full spec into its own context).
 
-4. **Refine the plan.** After generation, `generate-plan` invokes the `refine-plan` skill (also usable standalone), which dispatches a `plan-refiner` subagent. The refiner runs an iterative review-edit loop: dispatch `plan-reviewer`, persist the era-versioned review file under `.pi/plans/reviews/`, and dispatch `planner` in surgical-edit mode while errors remain. The skill itself owns the commit gate and writes versioned review artifacts each era.
+4. **Refine the plan.** After generation, `generate-plan` invokes the `refine-plan` skill (also usable standalone), which dispatches a `plan-refiner` subagent. The refiner runs an iterative review-edit loop: dispatch `plan-reviewer`, persist the era-versioned review file under `.pi/plans/reviews/`, and dispatch `planner` in surgical-edit mode while the reviewer outcome is `Not approved` due to blocking Critical or Important findings. The skill itself owns the commit gate and writes versioned review artifacts each era.
 
 5. **Execute in waves.** The `execute-plan` skill decomposes tasks into dependency-ordered waves and dispatches `coder` subagents **in parallel**. Each worker receives a self-contained prompt (from `execute-task-prompt.md`) with task spec, plan context, and TDD instructions, and reports a typed status (`DONE`, `DONE_WITH_CONCERNS`, `NEEDS_CONTEXT`, `BLOCKED`). After each wave the orchestrator presents a combined wave-level concerns checkpoint so the user can continue, remediate selected tasks, or stop.
 
@@ -252,11 +252,11 @@ Read-only planning and surgical-edit agent. Deeply analyzes the codebase and wri
 
 ### `plan-reviewer.md`
 
-Reviews generated implementation plans for structural correctness, spec coverage, and buildability. Severities: Error (blocks execution), Warning, Suggestion. Tools: `read, grep, find, ls, bash`. Thinking: `high`.
+Reviews generated implementation plans for structural correctness, spec coverage, and buildability. Emits `Approved`, `Approved with concerns`, or `Not approved` in the `**Verdict:**` line and calibrates severities as Critical / Important / Minor. Tools: `read, grep, find, ls, bash`. Thinking: `high`.
 
 ### `plan-refiner.md`
 
-Coordinator for one era of the plan review-edit loop. Dispatches `plan-reviewer`, persists the era-versioned review file, parses findings, dispatches `planner` (edit mode) when errors remain, returns a compact STATUS / paths summary. Never commits — `refine-plan` owns the commit gate. Thinking: `medium`.
+Coordinator for one era of the plan review-edit loop. Dispatches `plan-reviewer`, persists the era-versioned review file, parses findings, dispatches `planner` (edit mode) when `Not approved` outcomes have blocking Critical or Important findings, returns a compact STATUS / paths summary. Never commits — `refine-plan` owns the commit gate. Thinking: `medium`.
 
 ### `spec-designer.md`
 
