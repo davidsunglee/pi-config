@@ -42,7 +42,7 @@ These rules govern the entire protocol below. They are NOT edge cases; they are 
 
 1. **No inline review on coordinator-tool unavailability.** If `subagent_run_serial` is unavailable in your session — for any reason, at any iteration — you MUST emit `STATUS: failed` with reason `coordinator dispatch unavailable`, MUST NOT write any review file, and MUST NOT perform an inline review as a substitute. The calling skill (`refine-code`) is responsible for fallback decisions; you do not improvise.
 2. **No inline review on worker-dispatch exhaustion.** If every dispatch attempt for a `code-reviewer` (first-pass, hybrid re-review, or final-verification) or for a `coder` (remediator) fails — model unavailable, transport error, repeated empty results — you MUST emit `STATUS: failed` with reason `worker dispatch failed: <which worker>` and MUST NOT write any review file written after the failure. Inline-review fallback is forbidden in all cases. There is no exception for "I could just write the review myself"; that path produces silently degraded artifacts and is the failure mode this protocol exists to prevent.
-3. **No improvised review file or inline review on artifact-handoff failure.** If a `code-reviewer`'s response (full review, hybrid re-review, or final verification) is missing the `REVIEW_ARTIFACT:` marker, OR the artifact file is missing/empty/path-mismatched, OR the on-disk first-line provenance is malformed, you MUST emit `STATUS: failed` with the specific reason from the `## Failure Modes` list (`reviewer response missing REVIEW_ARTIFACT marker`, `reviewer artifact missing or empty at <path>`, `reviewer artifact path mismatch: expected <X>, got <Y>`, or `reviewer artifact provenance malformed at <path>: <specific check>`) and exit. You MUST NOT improvise the review file or fall back to inline review. This mirrors the existing "no inline review on dispatch failure" rules above.
+3. **No improvised review file or inline review on artifact-handoff failure.** If a `code-reviewer`'s response (full review, hybrid re-review, or final verification) is missing the `REVIEW_ARTIFACT:` marker, OR the artifact file is missing/empty/path-mismatched, OR the on-disk first-line provenance is malformed, you MUST emit `STATUS: failed` with the specific reason from the `## Failure Modes` list (`reviewer artifact handoff failed: missing REVIEW_ARTIFACT marker`, `reviewer artifact handoff failed: missing or empty at <path>`, `reviewer artifact handoff failed: path mismatch: expected <X> got <Y>`, or `reviewer artifact handoff failed: provenance malformed at <path>: <specific check>`) and exit. You MUST NOT improvise the review file or fall back to inline review. This mirrors the existing "no inline review on dispatch failure" rules above.
 
 All three rules are duplicated as standing identity rules in `agent/agents/code-refiner.md` `## Rules`. The duplication is intentional — these rules apply unconditionally regardless of the per-invocation prompt.
 
@@ -97,17 +97,19 @@ An "era" is one full pass of the loop (Iteration 1 → hybrid re-reviews → Fin
    ```
    Then extract and validate the reviewer's artifact handoff. Read `results[0].finalMessage` and perform these substeps in order, each producing its own `STATUS: failed` reason on failure:
 
-   - **3a. Marker extraction.** Find the LAST line in `finalMessage` matching the anchored regex `^REVIEW_ARTIFACT: (.+)$`. If no such line exists, emit `STATUS: failed` with reason `reviewer response missing REVIEW_ARTIFACT marker` and exit. Capture the captured group as `<reviewer_path>`.
-   - **3b. Path-equality check.** Compare `<reviewer_path>` (string-equal) to the absolute path you supplied as `{REVIEW_OUTPUT_PATH}` in Step 2. If they differ, emit `STATUS: failed` with reason `reviewer artifact path mismatch: expected <expected>, got <reviewer_path>` and exit.
-   - **3c. File-existence check.** Read `<reviewer_path>` from disk. If the file does not exist, OR the file is empty (zero bytes, or only whitespace), emit `STATUS: failed` with reason `reviewer artifact missing or empty at <reviewer_path>` and exit.
-   - **3d. On-disk first-line provenance check.** Find the first non-empty line of `<reviewer_path>`. Validate three things, in order: (i) the line is BYTE-EQUAL to the EXACT `{REVIEWER_PROVENANCE}` string you supplied to the reviewer in Step 2 for THIS dispatch (this is the primary check — a generic regex match is insufficient); (ii) as defense-in-depth, the line matches the regex `^\*\*Reviewer:\*\* [^/]+/[^ ]+ via [a-zA-Z0-9_-]+$`; (iii) the line does NOT contain the substring `inline` (case-insensitive). On any of the three failing, emit `STATUS: failed` with reason `reviewer artifact provenance malformed at <reviewer_path>: <specific check>` (where `<specific check>` is one of `does not match supplied REVIEWER_PROVENANCE`, `format mismatch`, or `inline-substring forbidden`) and exit.
+   - **3a. Marker extraction.** Find the LAST line in `finalMessage` matching the anchored regex `^REVIEW_ARTIFACT: (.+)$`. If no such line exists, emit `STATUS: failed` with reason `reviewer artifact handoff failed: missing REVIEW_ARTIFACT marker` and exit. Capture the captured group as `<reviewer_path>`.
+   - **3b. Path-equality check.** Compare `<reviewer_path>` (string-equal) to the absolute path you supplied as `{REVIEW_OUTPUT_PATH}` in Step 2. If they differ, emit `STATUS: failed` with reason `reviewer artifact handoff failed: path mismatch: expected <expected> got <reviewer_path>` and exit.
+   - **3c. File-existence check.** Read `<reviewer_path>` from disk. If the file does not exist, OR the file is empty (zero bytes, or only whitespace), emit `STATUS: failed` with reason `reviewer artifact handoff failed: missing or empty at <reviewer_path>` and exit.
+   - **3d. On-disk first-line provenance check.** Find the first non-empty line of `<reviewer_path>`. Validate three things, in order: (i) the line is BYTE-EQUAL to the EXACT `{REVIEWER_PROVENANCE}` string you supplied to the reviewer in Step 2 for THIS dispatch (this is the primary check — a generic regex match is insufficient); (ii) as defense-in-depth, the line matches the regex `^\*\*Reviewer:\*\* [^/]+/[^ ]+ via [a-zA-Z0-9_-]+$`; (iii) the line does NOT contain the substring `inline` (case-insensitive). On any of the three failing, emit `STATUS: failed` with reason `reviewer artifact handoff failed: provenance malformed at <reviewer_path>: <specific check>` (where `<specific check>` is one of `does not match supplied REVIEWER_PROVENANCE`, `format mismatch`, or `inline-substring forbidden`) and exit.
    - **3e. Read the file as the authoritative review.** On all checks passing, treat the on-disk file content as the authoritative review for verdict assessment, batching, remediator dispatch, and (downstream) hybrid re-review `{PREVIOUS_FINDINGS}` construction. Do NOT use `finalMessage` content beyond the marker line.
 
    Do NOT improvise the review file or perform an inline review on any failure above (Hard rule 3).
 
-4. **Assess verdict** (from the on-disk review file):
-   - "Ready to merge: Yes" with no Critical/Important issues → skip to **Final Verification**
-   - Critical/Important issues exist → continue to step 5
+4. **Assess verdict** (from the on-disk review file). Find the line in the on-disk review beginning with `**Verdict:**` (inside the `### Outcome` section) and extract the verdict label. The label MUST be exactly one of `Approved`, `Approved with concerns`, or `Not approved`. If no `**Verdict:**` line is found, or the label does not match one of the three expected values, emit `STATUS: failed` with reason `reviewer artifact handoff failed: provenance malformed at <reviewer_path>: missing or unrecognized Verdict label` and exit. Then branch:
+   - `Approved` or `Approved with concerns` → skip to **Final Verification**.
+   - `Not approved` → continue to step 5.
+
+When `Approved with concerns` triggers Final Verification, the reviewer's waived Important findings are final for this era — the refiner does NOT iterate to remediate them. The waived findings remain in the review file (no code-side `## Review Notes` analog exists; the diff plus the review file are the artifacts).
 
 5. **Batch findings** — group related findings using your judgment:
    - Consider file proximity, logical coupling, conflict risk
@@ -154,9 +156,9 @@ An "era" is one full pass of the loop (Iteration 1 → hybrid re-reviews → Fin
    - `{REVIEW_OUTPUT_PATH}` — the SAME absolute path used in Iteration 1 (no era change within the era — hybrid re-reviews overwrite the same file).
    - `{REVIEWER_PROVENANCE}` — the verbatim line `**Reviewer:** <provider>/<model> via <cli>` constructed from `standard` and its corresponding `cli`, freshly constructed for THIS hybrid re-review iteration.
 
-5. **Dispatch `code-reviewer`** with model `standard` and corresponding `cli` from the model matrix (hybrid re-reviews are scoped and cheaper). Then extract and validate the reviewer's artifact handoff using the SAME substeps 3a–3e procedure as Iteration 1 Step 3 (anchored regex on the last `^REVIEW_ARTIFACT: (.+)$` line, path-equality, file-existence-and-non-empty, on-disk first-line provenance, then read the file from disk as authoritative). The reviewer overwrites the era-versioned file in place — the new first non-empty line reflects this iteration's `standard`-tier provenance. Use the same failure reasons (`reviewer response missing REVIEW_ARTIFACT marker`, `reviewer artifact path mismatch: expected <X>, got <Y>`, `reviewer artifact missing or empty at <path>`, `reviewer artifact provenance malformed at <path>: <specific check>`) on validation failure.
+5. **Dispatch `code-reviewer`** with model `standard` and corresponding `cli` from the model matrix (hybrid re-reviews are scoped and cheaper). Then extract and validate the reviewer's artifact handoff using the SAME substeps 3a–3e procedure as Iteration 1 Step 3 (anchored regex on the last `^REVIEW_ARTIFACT: (.+)$` line, path-equality, file-existence-and-non-empty, on-disk first-line provenance, then read the file from disk as authoritative). The reviewer overwrites the era-versioned file in place — the new first non-empty line reflects this iteration's `standard`-tier provenance. Use the same failure reasons (`reviewer artifact handoff failed: missing REVIEW_ARTIFACT marker`, `reviewer artifact handoff failed: path mismatch: expected <X> got <Y>`, `reviewer artifact handoff failed: missing or empty at <path>`, `reviewer artifact handoff failed: provenance malformed at <path>: <specific check>`) on validation failure.
 
-6. **Track the iteration's remediation log entry in your coordinator state.** The reviewer is the sole writer of the review file under this contract; you do NOT write to the reviewer artifact. The remediation log is tracked in your coordinator state across iterations and surfaces in the final Output Format via `Issues fixed`/`Issues remaining` counts and (on `STATUS: max_iterations_reached`) the `## Remaining Issues` section.
+6. **Track the iteration's remediation log entry in your coordinator state.** The reviewer is the sole writer of the review file under this contract; you do NOT write to the reviewer artifact. The remediation log is tracked in your coordinator state across iterations and surfaces in the final Output Format via `Issues fixed`/`Issues remaining` counts and (on `STATUS: not_approved_within_budget`) the `## Remaining Issues` section.
 
 7. **Assess and remediate** — same as iteration 1 steps 4-9.
 
@@ -178,43 +180,43 @@ When a review pass finds no Critical/Important issues (hybrid reviews converge):
 
    Then extract and validate the reviewer's artifact handoff using the SAME substeps 3a–3e procedure as Iteration 1 Step 3. On validation success, treat the on-disk file content as the authoritative final-verification review.
 
-2. **If clean** (no Critical/Important issues in the on-disk review):
-   - Record `Result: Clean after N iterations.` in your coordinator state. Do NOT write to the reviewer artifact (the iteration count surfaces via the Output Format's `Iterations: <N>` line; the on-disk review file content remains exactly as the final-verification reviewer wrote it).
-   - Report `STATUS: clean`. Return the era-versioned path as the `## Review File` in your output. Do NOT produce an unversioned copy at `<REVIEW_OUTPUT_PATH>.md` — that legacy copy is dropped under this contract.
+2. **Parse the final-verification verdict** from the on-disk review file (the same `**Verdict:**` line check as Iteration 1 Step 4). Branch:
 
-3. **If issues found:**
-   - **Reset the iteration budget** — start a new era by incrementing `ERA = ERA + 1`
-   - Compute the next versioned path `{WORKING_DIR}/{REVIEW_OUTPUT_PATH}-v<ERA>.md` (e.g. `-v2.md`, `-v3.md`). Do NOT create or write to this file yourself — the next reviewer dispatch (Iteration 1 of the new era) will create it by writing to the path you supply as `{REVIEW_OUTPUT_PATH}`.
-   - Re-enter the remediation loop from Iteration 1 step 5 (assess + remediate). The next `code-reviewer` dispatch in the new era is given the new `-v<ERA>.md` path as `{REVIEW_OUTPUT_PATH}`.
+   - **`Approved`:** Record `Result: Approved after N iterations.` in your coordinator state. Do NOT write to the reviewer artifact (the iteration count surfaces via the Output Format's `Iterations: <N>` line). Report `STATUS: approved`. Return the era-versioned path as the `## Review File` in your output. Do NOT produce an unversioned copy at `<REVIEW_OUTPUT_PATH>.md` — that legacy copy is dropped under this contract.
+
+   - **`Approved with concerns`:** Record `Result: Approved with concerns after N iterations.` in your coordinator state. Do NOT write to the reviewer artifact (the waived Important findings remain in the review file as the reviewer wrote them). Report `STATUS: approved_with_concerns`. Return the era-versioned path as the `## Review File` in your output.
+
+   - **`Not approved`:** Reset the iteration budget — start a new era by incrementing `ERA = ERA + 1`. Compute the next versioned path `{WORKING_DIR}/{REVIEW_OUTPUT_PATH}-v<ERA>.md` (e.g. `-v2.md`, `-v3.md`). Do NOT create or write to this file yourself — the next reviewer dispatch (Iteration 1 of the new era) will create it by writing to the path you supply as `{REVIEW_OUTPUT_PATH}`. Re-enter the remediation loop from Iteration 1 step 5 (assess + remediate). The next `code-reviewer` dispatch in the new era is given the new `-v<ERA>.md` path as `{REVIEW_OUTPUT_PATH}`.
 
 ### On Budget Exhaustion
 
-When iterations reach MAX_ITERATIONS without convergence:
+When iterations reach MAX_ITERATIONS without convergence (i.e. the most-recent reviewer outcome is still `Not approved` and the budget is exhausted):
 
 1. Track the cumulative remediation log in your coordinator state. Do NOT write to the reviewer artifact (the remaining issues are already in the file from the most recent reviewer write; the coordinator surfaces unfixed findings via the Output Format's `## Remaining Issues` section and surfaces fix counts via `Issues fixed`/`Issues remaining`).
-2. Report `STATUS: max_iterations_reached`.
+2. Report `STATUS: not_approved_within_budget`.
 
 ### On Clean First Review
 
-If the very first review finds no Critical/Important issues, still run Final Verification (full-diff review) before reporting clean. This ensures a cross-provider check even when the first pass looks clean.
+If the very first review's outcome is `Approved` or `Approved with concerns` (i.e. zero Critical findings), still run Final Verification (full-diff review) before reporting the success-path status. This ensures a cross-provider check even when the first pass looks clean.
 
 ## Failure Modes
 
-The following conditions produce `STATUS: failed`. Each condition maps to a one-line reason string used in your final output:
+All failure conditions produce `STATUS: failed` with a one-line reason string drawn from the four-category taxonomy below. The reason string appears in the `## Failure Reason` block of the Output Format.
 
-- **Coordinator orchestration tool unavailable** — reason: `coordinator dispatch unavailable`
-- **Worker dispatch failed (code-reviewer or coder)** — reason: `worker dispatch failed: <which worker>`
-- **Reviewer response missing the REVIEW_ARTIFACT marker** — reason: `reviewer response missing REVIEW_ARTIFACT marker`
-- **Reviewer artifact missing or empty on disk** — reason: `reviewer artifact missing or empty at <path>`
-- **Reviewer artifact path mismatch** — reason: `reviewer artifact path mismatch: expected <X>, got <Y>`
-- **Reviewer artifact provenance malformed** — reason: `reviewer artifact provenance malformed at <path>: <specific check>`
+| Category | Reason string template | Notes |
+|---|---|---|
+| Coordinator infra | `coordinator dispatch unavailable` | Emitted when `subagent_run_serial` is unavailable in this session. |
+| Worker dispatch | `worker dispatch failed: <which worker>` | `<which worker>` ∈ `code-reviewer`, `coder`. Covers first-pass, hybrid re-review, final-verification reviewer dispatches and remediator (coder) dispatches. |
+| Reviewer artifact handoff | `reviewer artifact handoff failed: <specific check>` | `<specific check>` ∈ `missing REVIEW_ARTIFACT marker`, `missing or empty at <path>`, `path mismatch: expected <X> got <Y>`, `provenance malformed at <path>: <sub-check>` (where `<sub-check>` ∈ `does not match supplied REVIEWER_PROVENANCE`, `format mismatch`, `inline-substring forbidden`, `missing or unrecognized Verdict label`). |
+
+The Input artifact category from the plan side has no code-side analog — git tracks code state.
 
 ## Output Format
 
 Report your final status using this exact format:
 
 ```
-STATUS: clean | max_iterations_reached
+STATUS: approved | approved_with_concerns | not_approved_within_budget | failed
 
 ## Summary
 Iterations: <N>
@@ -222,9 +224,12 @@ Issues found: <X> (<N> Critical, <N> Important, <N> Minor)
 Issues fixed: <Y>
 Issues remaining: <Z>
 
-## Remaining Issues (only if max_iterations_reached)
-[Full text of unfixed findings with file:line references]
+## Remaining Issues (only if not_approved_within_budget)
+[Full text of unfixed Critical and Important findings with file:line references]
 
 ## Review File
 <path to latest versioned review file>
+
+## Failure Reason
+<one-line reason; only present when STATUS: failed>
 ```
