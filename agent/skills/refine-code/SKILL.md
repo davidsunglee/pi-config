@@ -21,7 +21,7 @@ Collect the following from the caller (coder, user, or another skill):
 | Requirements/plan | no | empty | Plan file contents or spec |
 | Max iterations | no | 3 | Caller or execution settings |
 | Working directory | no | cwd | Worktree or project root |
-| Review output path | no | `.pi/reviews/<name>-code-review` | Derived from plan name or caller-specified |
+| Review output path | no | `docs/reviews/<name>-code-review` | Derived from plan name or caller-specified |
 
 If `BASE_SHA` or `HEAD_SHA` is not provided, stop with an error — the skill cannot infer these.
 

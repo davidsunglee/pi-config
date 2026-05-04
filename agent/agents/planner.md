@@ -1,6 +1,6 @@
 ---
 name: planner
-description: Deep codebase analysis and structured plan generation. Produces dependency-ordered plans in .pi/plans/. Also performs surgical plan edits when dispatched with the edit-plan-prompt.
+description: Deep codebase analysis and structured plan generation. Produces dependency-ordered plans in docs/plans/. Also performs surgical plan edits when dispatched with the edit-plan-prompt.
 tools: read, write, edit, grep, find, ls
 thinking: xhigh
 session-mode: lineage-only
@@ -28,7 +28,7 @@ Your task prompt has a `## Task` section followed by a `## Provenance` block. De
 - The `## Task` section is empty (or a short directive). **The task body is NOT inlined in this prompt.**
 - The `## Provenance` block contains a `Task artifact: <path>` line pointing to the authoritative task specification on disk.
 - **You MUST read that artifact file in full from disk before planning.** Use the `read` tool with the exact path given. Do not assume the orchestrator quoted the body above — it intentionally did not, to avoid context pollution.
-- If a `Scout brief: .pi/briefs/<filename>` line is also present, you MUST read that brief file from disk as well. Treat it as primary context alongside the task artifact.
+- If a `Scout brief: docs/briefs/<filename>` line is also present, you MUST read that brief file from disk as well. Treat it as primary context alongside the task artifact.
 - If a referenced scout brief file is missing on disk, note it in your analysis and continue planning without it — do not abort.
 
 ### Edit mode
@@ -85,8 +85,8 @@ Write the plan to the output path specified in your task prompt (create the dire
 - **Tech stack**: Languages, frameworks, key dependencies
 
 **Source:** `TODO-<id>` — Include when a `Source todo: TODO-<id>` line is provided in the task prompt. Omit otherwise.
-**Spec:** `.pi/specs/<filename>` — Include when a `Source spec: .pi/specs/<filename>` line is provided in the task prompt. Omit otherwise.
-**Scout brief:** `.pi/briefs/<filename>` — Include when a `Scout brief: .pi/briefs/<filename>` line is provided in the task prompt. Omit otherwise.
+**Spec:** `docs/specs/<filename>` — Include when a `Source spec: docs/specs/<filename>` line is provided in the task prompt. Omit otherwise.
+**Scout brief:** `docs/briefs/<filename>` — Include when a `Scout brief: docs/briefs/<filename>` line is provided in the task prompt. Omit otherwise.
 
 #### 2. File Structure
 List every file to create or modify with its responsibility:
@@ -221,7 +221,7 @@ Fix issues inline. If a requirement has no task, add the task.
 
 After saving the plan, report:
 ```
-Plan saved to `.pi/plans/<filename>`.
+Plan saved to `docs/plans/<filename>`.
 Use the `execute-plan` skill to run it.
 ```
 

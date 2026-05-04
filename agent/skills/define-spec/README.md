@@ -1,6 +1,6 @@
 # Define Spec skill
 
-Interactively turn a todo, existing spec, or freeform request into a structured spec file under `.pi/specs/`.
+Interactively turn a todo, existing spec, or freeform request into a structured spec file under `docs/specs/`.
 
 ## Role in the workflow
 
@@ -9,7 +9,7 @@ Interactively turn a todo, existing spec, or freeform request into a structured 
 ## Inputs
 
 - A todo ID such as `TODO-7ef7d441`.
-- An existing spec path under `.pi/specs/` to revise.
+- An existing spec path under `docs/specs/` to revise.
 - Freeform text describing the desired work.
 
 ## Execution modes
@@ -39,7 +39,7 @@ For mux runs, the subagent must end with:
 SPEC_WRITTEN: <absolute path>
 ```
 
-The orchestrator validates that path before presenting it for review. It also has a conservative transcript-backed recovery path for the known case where the subagent successfully wrote exactly one `.pi/specs/*.md` file but exited before emitting the final line.
+The orchestrator validates that path before presenting it for review. It also has a conservative transcript-backed recovery path for the known case where the subagent successfully wrote exactly one `docs/specs/*.md` file but exited before emitting the final line.
 
 ## Commit gate
 

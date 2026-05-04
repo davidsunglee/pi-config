@@ -13,7 +13,7 @@ At a high level, this config adds six things on top of stock pi:
 3. **Local subagents** for spec design, planning, plan refinement, coding, verifying, reviewing, and refining
 4. **Custom themes** including a theme-aware footer
 5. **Installed packages** for subagent dispatch, web access, token burden tracking, and Ghostty integration
-6. **Tracked workflow state** in `.pi/` (todos, specs, plans, reviews)
+6. **Tracked workflow state** in `docs/` (todos, specs, plans, reviews)
 
 Repository layout:
 
@@ -30,7 +30,7 @@ agent/
   package.json      Dev tooling: eslint, typescript, tests
   eslint.config.js
   tsconfig.json
-.pi/
+docs/
   designs/          Free-form design notes
   specs/            Structured specs from define-spec (with done/ archive)
   plans/            Generated plans (active, done, reviews)
@@ -110,31 +110,31 @@ Skills, extensions, subagents, and artifacts in this repo combine into a repeata
 
 ### How it works in practice
 
-1. **Create & refine a todo.** Todos live as markdown files in `.pi/todos/` and are tracked in git. Refinement is collaborative — the agent asks clarifying questions before writing a structured description.
+1. **Create & refine a todo.** Todos live as markdown files in `docs/todos/` and are tracked in git. Refinement is collaborative — the agent asks clarifying questions before writing a structured description.
 
-2. **Define a spec (optional).** The `define-spec` skill takes a todo, an existing spec under `.pi/specs/`, or freeform text. It probes the environment for a multiplexer (cmux, tmux, zellij, wezterm) and either dispatches a `spec-designer` subagent into its own pane for direct user Q&A, or runs the procedure inline if no mux is available. The spec is written to `.pi/specs/` and gated on user review before commit.
+2. **Define a spec (optional).** The `define-spec` skill takes a todo, an existing spec under `docs/specs/`, or freeform text. It probes the environment for a multiplexer (cmux, tmux, zellij, wezterm) and either dispatches a `spec-designer` subagent into its own pane for direct user Q&A, or runs the procedure inline if no mux is available. The spec is written to `docs/specs/` and gated on user review before commit.
 
-3. **Generate a plan.** The `generate-plan` skill dispatches the `planner` subagent with a fully assembled prompt (from `generate-plan-prompt.md`). The planner deeply reads the codebase and writes a structured plan to `.pi/plans/` containing numbered tasks, file lists, acceptance criteria, dependencies, and per-task model tier recommendations. When a spec exists, it is used as the primary input via path-based handoff (the orchestrator does not embed the full spec into its own context).
+3. **Generate a plan.** The `generate-plan` skill dispatches the `planner` subagent with a fully assembled prompt (from `generate-plan-prompt.md`). The planner deeply reads the codebase and writes a structured plan to `docs/plans/` containing numbered tasks, file lists, acceptance criteria, dependencies, and per-task model tier recommendations. When a spec exists, it is used as the primary input via path-based handoff (the orchestrator does not embed the full spec into its own context).
 
-4. **Refine the plan.** After generation, `generate-plan` invokes the `refine-plan` skill (also usable standalone), which dispatches a `plan-refiner` subagent. The refiner runs an iterative review-edit loop: dispatch `plan-reviewer`, persist the era-versioned review file under `.pi/plans/reviews/`, and dispatch `planner` in surgical-edit mode while the reviewer outcome is `Not approved` due to blocking Critical or Important findings. The skill itself owns the commit gate and writes versioned review artifacts each era.
+4. **Refine the plan.** After generation, `generate-plan` invokes the `refine-plan` skill (also usable standalone), which dispatches a `plan-refiner` subagent. The refiner runs an iterative review-edit loop: dispatch `plan-reviewer`, persist the era-versioned review file under `docs/plans/reviews/`, and dispatch `planner` in surgical-edit mode while the reviewer outcome is `Not approved` due to blocking Critical or Important findings. The skill itself owns the commit gate and writes versioned review artifacts each era.
 
 5. **Execute in waves.** The `execute-plan` skill decomposes tasks into dependency-ordered waves and dispatches `coder` subagents **in parallel**. Each worker receives a self-contained prompt (from `execute-task-prompt.md`) with task spec, plan context, and TDD instructions, and reports a typed status (`DONE`, `DONE_WITH_CONCERNS`, `NEEDS_CONTEXT`, `BLOCKED`). After each wave the orchestrator presents a combined wave-level concerns checkpoint so the user can continue, remediate selected tasks, or stop.
 
 6. **Verify and commit each wave.** A fresh-context `verifier` subagent re-reads task outputs and judges them per-criterion against each task's acceptance criteria — independent of the worker's self-assessment, with no shell access of its own. The orchestrator assembles the verifier-visible file set from the union of the task's declared `**Files:**` scope, the worker's self-report, and the observed diff state so a worker cannot narrow its own verification surface. Tasks that fail verification cannot be skipped. A checkpoint commit is then made and integration tests are classified into three sets: *baseline failures* (pre-existing, ignored), *deferred regressions* (plan-introduced, user-deferred), and *new regressions in the current wave* (block the wave). On the final wave the defer option is removed and completion is blocked until every deferred regression is resolved.
 
-7. **Refine code.** After all waves pass, the `refine-code` skill dispatches a `code-refiner` subagent that drives an iterative review-remediate loop: cross-provider `code-reviewer` passes, batched remediation by `coder` subagents, and remediation commits. The loop iterates until the reviewer outcome is `Approved`/`Approved with concerns`, or the iteration budget (default 3) is exhausted with `Not approved` still standing. Versioned review files are written to `.pi/reviews/`.
+7. **Refine code.** After all waves pass, the `refine-code` skill dispatches a `code-refiner` subagent that drives an iterative review-remediate loop: cross-provider `code-reviewer` passes, batched remediation by `coder` subagents, and remediation commits. The loop iterates until the reviewer outcome is `Approved`/`Approved with concerns`, or the iteration budget (default 3) is exhausted with `Not approved` still standing. Versioned review files are written to `docs/reviews/`.
 
-8. **Close out.** The plan moves to `.pi/plans/done/`, the linked todo is closed, and the `finishing-a-development-branch` skill offers merge, PR, keep, or discard options.
+8. **Close out.** The plan moves to `docs/plans/done/`, the linked todo is closed, and the `finishing-a-development-branch` skill offers merge, PR, keep, or discard options.
 
 ### Subagent architecture
 
 The workflow uses eight specialized subagents, each starting with **fresh context** — no session forking, no shared conversational history. Information flows through **file artifacts**:
 
-- **Todos** (`.pi/todos/`) track lifecycle state.
-- **Specs** (`.pi/specs/`) carry structured requirements from define-spec to generate-plan.
-- **Plans** (`.pi/plans/`) carry the task breakdown from generation through execution; `.pi/plans/reviews/` carries era-versioned plan-review artifacts.
+- **Todos** (`docs/todos/`) track lifecycle state.
+- **Specs** (`docs/specs/`) carry structured requirements from define-spec to generate-plan.
+- **Plans** (`docs/plans/`) carry the task breakdown from generation through execution; `docs/plans/reviews/` carries era-versioned plan-review artifacts.
 - **Prompt templates** (`generate-plan-prompt.md`, `review-plan-prompt.md`, `edit-plan-prompt.md`, `refine-plan-prompt.md`, `execute-task-prompt.md`, `verify-task-prompt.md`, `review-code-prompt.md`, `refine-code-prompt.md`, etc.) are filled per-dispatch with exactly the context each worker needs.
-- **Reviews** (`.pi/reviews/`) carry versioned code-review findings and remediation logs.
+- **Reviews** (`docs/reviews/`) carry versioned code-review findings and remediation logs.
 - **Git diffs** carry code changes between review iterations.
 
 Fresh-context subagents are deliberately more focused, more independent (reviewers can't be biased by watching generation), more resumable (re-run with the same artifact), and more debuggable (every artifact is a readable file).
@@ -155,9 +155,9 @@ Skills live in `agent/skills/` and encode reusable operating procedures. Each sk
 
 | Skill | Summary |
 | --- | --- |
-| [`define-spec`](agent/skills/define-spec/README.md) | Interactive spec writing from a todo, existing spec, or freeform request. Uses a mux-backed `spec-designer` pane when available, otherwise runs inline, then gates the resulting `.pi/specs/` file on user review and commit. |
-| [`generate-plan`](agent/skills/generate-plan/README.md) | Produces an implementation plan in `.pi/plans/` from a todo, spec/design document, or freeform text. Dispatches `planner`, uses path-based handoff for large artifacts, then hands off to `refine-plan`. |
-| [`refine-plan`](agent/skills/refine-plan/README.md) | Iterative plan review/edit loop. Dispatches `plan-refiner`, writes era-versioned reviews under `.pi/plans/reviews/`, validates coverage sources, and owns the plan commit gate. |
+| [`define-spec`](agent/skills/define-spec/README.md) | Interactive spec writing from a todo, existing spec, or freeform request. Uses a mux-backed `spec-designer` pane when available, otherwise runs inline, then gates the resulting `docs/specs/` file on user review and commit. |
+| [`generate-plan`](agent/skills/generate-plan/README.md) | Produces an implementation plan in `docs/plans/` from a todo, spec/design document, or freeform text. Dispatches `planner`, uses path-based handoff for large artifacts, then hands off to `refine-plan`. |
+| [`refine-plan`](agent/skills/refine-plan/README.md) | Iterative plan review/edit loop. Dispatches `plan-refiner`, writes era-versioned reviews under `docs/plans/reviews/`, validates coverage sources, and owns the plan commit gate. |
 | [`execute-plan`](agent/skills/execute-plan/README.md) | Executes structured plans wave by wave with parallel `coder` subagents, fresh-context verification, checkpoint commits, integration-regression tracking, and optional final code refinement. |
 | [`refine-code`](agent/skills/refine-code/README.md) | Iterative code review/remediation loop over a git range. Dispatches `code-refiner`, which coordinates reviewers and coders until `approved`/`approved_with_concerns`, or `not_approved_within_budget` when the budget is exhausted. |
 | [`requesting-code-review`](agent/skills/requesting-code-review/README.md) | Dispatches an independent `code-reviewer` against an explicit git diff and requirements context. Used before merging or after major work outside `execute-plan`. |
@@ -228,7 +228,7 @@ Adds `/session-breakdown`, an interactive analytics view over `~/.pi/agent/sessi
 
 The local file-based todo system.
 
-- Stores todos in `.pi/todos/`.
+- Stores todos in `docs/todos/`.
 - Exposes a `todo` tool with `list`, `get`, `create`, `update`, `append`, `delete`, `claim`, `release` (with assignment / lock semantics so sessions can claim work).
 - Provides interactive todo management in the TUI.
 - Tracks state in plain files that can be committed to git.
@@ -248,7 +248,7 @@ Eight local agent definitions live in `agent/agents/`. All run with fresh contex
 
 ### `planner.md`
 
-Read-only planning and surgical-edit agent. Deeply analyzes the codebase and writes structured plans to `.pi/plans/`. Also performs surgical plan edits when dispatched with the edit-plan prompt. Tools: `read, grep, find, ls, bash`. Thinking: `xhigh`.
+Read-only planning and surgical-edit agent. Deeply analyzes the codebase and writes structured plans to `docs/plans/`. Also performs surgical plan edits when dispatched with the edit-plan prompt. Tools: `read, grep, find, ls, bash`. Thinking: `xhigh`.
 
 ### `plan-reviewer.md`
 
@@ -260,7 +260,7 @@ Coordinator for one era of the plan review-edit loop. Dispatches `plan-reviewer`
 
 ### `spec-designer.md`
 
-Interactive spec-design subagent. Receives the spec-design procedure as an appended system prompt at dispatch time and conducts the Q&A directly with the user in its own multiplexer pane. Writes the spec to `.pi/specs/` and ends its turn with a `SPEC_WRITTEN: <absolute path>` line. Tools: `read, write, grep, find, ls`. Thinking: `xhigh`.
+Interactive spec-design subagent. Receives the spec-design procedure as an appended system prompt at dispatch time and conducts the Q&A directly with the user in its own multiplexer pane. Writes the spec to `docs/specs/` and ends its turn with a `SPEC_WRITTEN: <absolute path>` line. Tools: `read, write, grep, find, ls`. Thinking: `xhigh`.
 
 ### `coder.md`
 

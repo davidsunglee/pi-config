@@ -1,6 +1,6 @@
 # Execute Plan skill
 
-Execute a structured plan file from `.pi/plans/` through dependency-ordered waves of coder subagents, independent verification, integration checks, commits, and optional final review.
+Execute a structured plan file from `docs/plans/` through dependency-ordered waves of coder subagents, independent verification, integration checks, commits, and optional final review.
 
 ## Role in the workflow
 
@@ -73,7 +73,7 @@ Intermediate waves with current non-baseline or non-reconcilable failures presen
 
 ## Commits and finalization
 
-Each verified wave is checkpoint-committed. After all waves pass, the skill can invoke `refine-code` for iterative review/remediation, move the plan to `.pi/plans/done/`, close the linked todo, and invoke `finishing-a-development-branch`.
+Each verified wave is checkpoint-committed. After all waves pass, the skill can invoke `refine-code` for iterative review/remediation, move the plan to `docs/plans/done/`, close the linked todo, and invoke `finishing-a-development-branch`.
 
 ## Files
 

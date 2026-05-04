@@ -40,9 +40,9 @@ refine-plan: plan file <PLAN_PATH> missing or empty.
 
 Read a bounded preamble from the plan file (e.g., `head -n 40 <PLAN_PATH>`) and apply strict exact-match rules. Lines that count:
 
-- `**Spec:** ` followed by `` `.pi/specs/<filename>` `` (with surrounding backticks; also accept the same path written without backticks) → set `SOURCE_SPEC = "Source spec: .pi/specs/<filename>"`, and (if not already set) set `TASK_ARTIFACT = ".pi/specs/<filename>"`.
+- `**Spec:** ` followed by `` `docs/specs/<filename>` `` (with surrounding backticks; also accept the same path written without backticks) → set `SOURCE_SPEC = "Source spec: docs/specs/<filename>"`, and (if not already set) set `TASK_ARTIFACT = "docs/specs/<filename>"`.
 - `**Source:** TODO-<id>` → set `SOURCE_TODO = "Source todo: TODO-<id>"`.
-- `**Scout brief:** ` followed by `` `.pi/briefs/<filename>` `` → set `SCOUT_BRIEF = "Scout brief: .pi/briefs/<filename>"`.
+- `**Scout brief:** ` followed by `` `docs/briefs/<filename>` `` → set `SCOUT_BRIEF = "Scout brief: docs/briefs/<filename>"`.
 
 Apply CLI overrides (`--task-artifact`, `--source-todo`, `--scout-brief`) on top of any auto-discovered values — overrides win.
 
@@ -86,14 +86,14 @@ Read [agent/skills/_shared/coordinator-dispatch.md](../_shared/coordinator-dispa
 Compute:
 
 - `PLAN_BASENAME` = basename of `PLAN_PATH` with the `.md` extension stripped.
-- `REVIEW_OUTPUT_PATH` = `.pi/plans/reviews/<PLAN_BASENAME>-plan-review` (no version suffix or `.md` — `plan-refiner` adds those).
+- `REVIEW_OUTPUT_PATH` = `docs/plans/reviews/<PLAN_BASENAME>-plan-review` (no version suffix or `.md` — `plan-refiner` adds those).
 
-Create `.pi/plans/reviews/` if it does not exist.
+Create `docs/plans/reviews/` if it does not exist.
 
 Scan the reviews directory for the highest existing era number for this plan:
 
 ```bash
-ls .pi/plans/reviews/ 2>/dev/null \
+ls docs/plans/reviews/ 2>/dev/null \
   | grep -E "^${PLAN_BASENAME}-plan-review-v[0-9]+\.md$" \
   | sed -E 's/.*-v([0-9]+)\.md$/\1/' \
   | sort -n \
@@ -111,8 +111,8 @@ Fill placeholders:
 - `{PLAN_PATH}` — from Step 1.
 - `{TASK_ARTIFACT}` — `Task artifact: <path>` if set, else empty string.
 - `{SOURCE_TODO}` — `Source todo: TODO-<id>` if set, else empty string.
-- `{SOURCE_SPEC}` — `Source spec: .pi/specs/<filename>` if set, else empty string.
-- `{SCOUT_BRIEF}` — `Scout brief: .pi/briefs/<filename>` if set, else empty string.
+- `{SOURCE_SPEC}` — `Source spec: docs/specs/<filename>` if set, else empty string.
+- `{SCOUT_BRIEF}` — `Scout brief: docs/briefs/<filename>` if set, else empty string.
 - `{ORIGINAL_SPEC_INLINE}` — the `TASK_DESCRIPTION` from Step 1. Populated for todo/freeform inputs forwarded by `generate-plan` via `--task-description`, populated when a standalone caller passes `--task-description <text>`, and empty for file-based inputs that supply `TASK_ARTIFACT` instead.
 - `{STRUCTURAL_ONLY_NOTE}` — non-empty paragraph if `STRUCTURAL_ONLY` is true; empty string otherwise (see Step 7.5).
 - `{MAX_ITERATIONS}` — from Step 1.
@@ -199,7 +199,7 @@ Present the budget-exhaustion menu exactly as:
 
 **On `(a)`:** Run Step 10a (commit current era). Step 10a MUST succeed (`COMMIT = committed`) before the next era is dispatched. If Step 10a sets `COMMIT = not_attempted` (commit failed for any reason — pre-commit hook failure, dirty index, underlying error), STOP refinement immediately: preserve `STATUS = not_approved_within_budget` and the `COMMIT = not_attempted [reason]` value from Step 10a, do **NOT** dispatch the next era, and skip directly to Step 11. Continuing into a fresh era after a failed commit would leave the prior era's edits uncommitted while a new era runs — the abandoned-state recovery hazard the spec's two-option menu was designed to prevent.
 
-Only when Step 10a sets `COMMIT = committed` may the skill re-run from Step 6 onward, with `STARTING_ERA` recomputed by re-scanning `.pi/plans/reviews/` (it will now reflect the just-committed file plus any uncommitted files; the rule remains `max(existing_N) + 1`). Loop until either `STATUS: approved` / `STATUS: approved_with_concerns` (proceed normally) or the user picks `(b)`.
+Only when Step 10a sets `COMMIT = committed` may the skill re-run from Step 6 onward, with `STARTING_ERA` recomputed by re-scanning `docs/plans/reviews/` (it will now reflect the just-committed file plus any uncommitted files; the rule remains `max(existing_N) + 1`). Loop until either `STATUS: approved` / `STATUS: approved_with_concerns` (proceed normally) or the user picks `(b)`.
 
 **On `(b)`:** In `AUTO_COMMIT_ON_APPROVAL = true` mode, run Step 10a (auto-commit). In standalone mode, prompt:
 
@@ -251,5 +251,5 @@ The `REVIEW_PATHS` list contains every review file written during the entire `re
 
 - **`commit` skill not present**: stop with a clear error pointing at `agent/skills/commit/SKILL.md`.
 - **Coordinator dispatch CLI is not `pi`**: defer to the shared `coordinator-dispatch.md` procedure. The shared file's two hard-stop conditions ("no tier resolves to `pi`" and "all `pi`-eligible tiers failed") are the only sanctioned outcomes here; the prior cross-reference to `refine-code` is removed because the shared file is the single authority for both skills. Surface the shared file's verbatim error message to the caller, set `STATUS = failed` with the verbatim error as the reason, and exit.
-- **Plan path is in `.pi/plans/done/` or another archived location**: proceed normally; era allocation still scans `.pi/plans/reviews/` keyed by `PLAN_BASENAME`.
-- **Coordinator returns paths outside `.pi/plans/reviews/`**: treat as `STATUS: failed` with reason `coordinator returned review path outside .pi/plans/reviews/`.
+- **Plan path is in `docs/plans/done/` or another archived location**: proceed normally; era allocation still scans `docs/plans/reviews/` keyed by `PLAN_BASENAME`.
+- **Coordinator returns paths outside `docs/plans/reviews/`**: treat as `STATUS: failed` with reason `coordinator returned review path outside docs/plans/reviews/`.
