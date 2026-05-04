@@ -5,7 +5,7 @@
     "skills",
     "docs"
   ],
-  "status": "open",
+  "status": "done",
   "created_at": "2026-05-03T21:47:07.747Z"
 }
 
@@ -17,3 +17,5 @@ Acceptance criteria:
 - Preserve references to Pi configuration/runtime files that genuinely must remain under `.pi/`.
 - Update skill instructions, examples, and any tests/fixtures that mention the old artifact locations.
 - Run relevant validation or tests and document the commands/results.
+
+Completed via plan: .pi/plans/done/2026-05-03-2026-05-03-docs-artifact-root-migration.md
