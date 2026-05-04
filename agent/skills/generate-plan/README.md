@@ -1,6 +1,6 @@
 # Generate Plan skill
 
-Generate a structured implementation plan in `.pi/plans/` from a todo, spec/design document, or freeform request.
+Generate a structured implementation plan in `docs/plans/` from a todo, spec/design document, or freeform request.
 
 ## Role in the workflow
 
@@ -17,7 +17,7 @@ Generate a structured implementation plan in `.pi/plans/` from a todo, spec/desi
 Large durable artifacts are passed by filesystem path instead of embedded into the orchestrator prompt. For file inputs, the planner reads the artifact from disk. The orchestrator only extracts supported preamble metadata such as:
 
 - `Source: TODO-<id>`
-- `Scout brief: .pi/briefs/<filename>`
+- `Scout brief: docs/briefs/<filename>`
 
 This preserves orchestrator context and keeps the artifact itself as the source of truth.
 
@@ -32,7 +32,7 @@ This preserves orchestrator context and keeps the artifact itself as the source 
 
 ## Output plan expectations
 
-The planner writes a plan file under `.pi/plans/` with the structure expected by `execute-plan`: goal, architecture summary, tech stack, file structure, numbered tasks, dependencies, risk assessment, and optional test command.
+The planner writes a plan file under `docs/plans/` with the structure expected by `execute-plan`: goal, architecture summary, tech stack, file structure, numbered tasks, dependencies, risk assessment, and optional test command.
 
 ## Relationship to refine-plan
 

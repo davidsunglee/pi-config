@@ -31,18 +31,18 @@ Unless `--structural-only` is set, the skill requires either an existing task ar
 1. Validate that the repository and plan file exist.
 2. Read the plan preamble and auto-discover provenance from supported `**Spec:**`, `**Source:**`, and `**Scout brief:**` lines.
 3. Resolve model tiers from `~/.pi/agent/model-tiers.json`.
-4. Allocate the next review era under `.pi/plans/reviews/`.
+4. Allocate the next review era under `docs/plans/reviews/`.
 5. Fill `refine-plan-prompt.md` and dispatch `plan-refiner`.
 6. Parse the coordinator's compact result.
 7. Commit the plan and newly written review artifacts when the outcome is `approved` or `approved_with_concerns`, or report `not_approved_within_budget`/`failed` to the caller.
 
 ## Era-versioned reviews
 
-Review artifacts are written under `.pi/plans/reviews/` using the plan basename and an incrementing era number, for example:
+Review artifacts are written under `docs/plans/reviews/` using the plan basename and an incrementing era number, for example:
 
 ```text
-.pi/plans/reviews/my-plan-plan-review-v1.md
-.pi/plans/reviews/my-plan-plan-review-v2.md
+docs/plans/reviews/my-plan-plan-review-v1.md
+docs/plans/reviews/my-plan-plan-review-v2.md
 ```
 
 The skill scans existing review files before each era so standalone and continued runs do not overwrite prior artifacts.

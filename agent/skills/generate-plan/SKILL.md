@@ -3,7 +3,7 @@ name: generate-plan
 description: "Generates a structured implementation plan from a todo or spec file. Dispatches the planner subagent for deep codebase analysis, then runs an iterative review-edit loop. Use when the user wants to plan work before executing it."
 ---
 
-Dispatch the `planner` subagent to analyze the codebase and produce a structured plan file in `.pi/plans/`, then review and refine the plan through an iterative review-edit loop.
+Dispatch the `planner` subagent to analyze the codebase and produce a structured plan file in `docs/plans/`, then review and refine the plan through an iterative review-edit loop.
 
 ## Step 1: Determine the input source
 
@@ -29,7 +29,7 @@ From that bounded preamble, extract provenance using strict exact-match rules:
 - Inspect only the preamble area at the top of the file (everything above the first `## ` heading, or the bounded first ~40 lines, whichever comes first).
 - Only exact supported lines count:
   - `Source: TODO-<id>` → set `{SOURCE_TODO}` to `Source todo: TODO-<id>`.
-  - `Scout brief: .pi/briefs/<filename>` → set `{SCOUT_BRIEF}` to `Scout brief: .pi/briefs/<filename>`, **then verify the referenced file exists on disk**:
+  - `Scout brief: docs/briefs/<filename>` → set `{SCOUT_BRIEF}` to `Scout brief: docs/briefs/<filename>`, **then verify the referenced file exists on disk**:
     - If the brief file does not exist, warn the user (`Scout brief referenced in spec not found at <path> — proceeding without it.`), leave `{SCOUT_BRIEF}` empty, and continue without failing.
     - **Do NOT read the brief contents into the orchestrator prompt.** The planner reads the brief from disk itself — this is the whole point of path-based handoff.
 - Lines that don't match one of the supported forms exactly are ignored.
@@ -39,7 +39,7 @@ Then populate the remaining fields:
 
 - Set `{TASK_ARTIFACT}` to `Task artifact: <input path>`.
 - Set `{TASK_DESCRIPTION}` to an empty string (the artifact on disk IS the task description).
-- If the input path is under `.pi/specs/`, set `{SOURCE_SPEC}` to `Source spec: .pi/specs/<filename>`. For other file inputs (RFCs, design docs at arbitrary paths), leave `{SOURCE_SPEC}` empty.
+- If the input path is under `docs/specs/`, set `{SOURCE_SPEC}` to `Source spec: docs/specs/<filename>`. For other file inputs (RFCs, design docs at arbitrary paths), leave `{SOURCE_SPEC}` empty.
 
 ### 1c. Freeform description
 
@@ -82,13 +82,13 @@ If `~/.pi/agent/model-tiers.json` is missing or unreadable, stop with the canoni
    - `{TASK_DESCRIPTION}` — for todo and freeform inputs, the inlined text from Step 1. For file inputs, an empty string (the artifact on disk is the task description).
    - `{TASK_ARTIFACT}` — for file inputs, `Task artifact: <input path>`. For todo and freeform inputs, an empty string.
    - `{WORKING_DIR}` — absolute path to cwd
-   - `{OUTPUT_PATH}` — `.pi/plans/yyyy-MM-dd-<short-description>.md`
-     - For **file inputs**, derive `<short-description>` from the **input filename** (basename without extension, e.g., `.pi/specs/reduce-context.md` → `reduce-context`). Do NOT derive it from the document body — the body is not loaded into the orchestrator prompt.
+   - `{OUTPUT_PATH}` — `docs/plans/yyyy-MM-dd-<short-description>.md`
+     - For **file inputs**, derive `<short-description>` from the **input filename** (basename without extension, e.g., `docs/specs/reduce-context.md` → `reduce-context`). Do NOT derive it from the document body — the body is not loaded into the orchestrator prompt.
      - For **todo inputs**, derive from the todo title.
      - For **freeform inputs**, derive from the task text.
    - `{SOURCE_TODO}` — `Source todo: TODO-<id>` when a source todo ID is available — either directly (input was a todo ID) or indirectly (extracted from a file's preamble `Source: TODO-<id>` line during provenance extraction in Step 1). Empty string otherwise.
-   - `{SOURCE_SPEC}` — `Source spec: .pi/specs/<filename>` if the input file path is under `.pi/specs/`, empty string otherwise.
-   - `{SCOUT_BRIEF}` — `Scout brief: .pi/briefs/<filename>` if a scout brief was extracted from the file preamble and the brief file exists on disk, empty string otherwise.
+   - `{SOURCE_SPEC}` — `Source spec: docs/specs/<filename>` if the input file path is under `docs/specs/`, empty string otherwise.
+   - `{SCOUT_BRIEF}` — `Scout brief: docs/briefs/<filename>` if a scout brief was extracted from the file preamble and the brief file exists on disk, empty string otherwise.
 3. Dispatch `planner` agent synchronously:
    ```
    subagent_run_serial { tasks: [
@@ -142,7 +142,7 @@ Require explicit user confirmation before invoking execute-plan in that case. Do
 - **File path provided:** Pass by path via `{TASK_ARTIFACT}`. Do NOT inline the file body into `{TASK_DESCRIPTION}`. Only do a bounded preamble read (e.g., `head -n 40`) for provenance extraction. The planner reads the full artifact from disk.
 - **Scout brief referenced but missing on disk:** Warn the user and continue planning without it. Do not block.
 - **Refine-plan failures:** when refine-plan returns `STATUS: failed` (e.g. plan file missing, dispatch failure, review write failure), surface the `FAILURE_REASON` line to the user and skip the execute-plan offer until the underlying issue is resolved. Do not retry refine-plan automatically.
-- **`.pi/plans/` missing:** The subagent handles creating the directory; no action needed from the main agent.
+- **`docs/plans/` missing:** The subagent handles creating the directory; no action needed from the main agent.
 
 ## Scope note on path-based handoff
 

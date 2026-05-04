@@ -39,7 +39,7 @@ The `code-refiner` performs the inner loop:
 - batch related fixes by file proximity and logical coupling,
 - dispatch `coder` subagents for remediation,
 - commit remediation changes,
-- write versioned review artifacts under `.pi/reviews/`,
+- write versioned review artifacts under `docs/reviews/`,
 - stop when the reviewer outcome is `Approved`/`Approved with concerns`, or the budget is exhausted with `Not approved` still standing.
 
 ## Status handling

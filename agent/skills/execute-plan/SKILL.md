@@ -1,6 +1,6 @@
 ---
 name: execute-plan
-description: "Executes a structured plan file from .pi/plans/. Decomposes tasks into dependency-ordered waves and dispatches coder subagents in parallel. Use when the user wants to execute an existing plan."
+description: "Executes a structured plan file from docs/plans/. Decomposes tasks into dependency-ordered waves and dispatches coder subagents in parallel. Use when the user wants to execute an existing plan."
 ---
 
 # Execute Plan
@@ -114,7 +114,7 @@ If the user selects "current workspace" during customization, proceed without a 
 ## Step 1: Locate the plan file
 
 - If the user provides a path, use it directly.
-- If the user says "run the plan" or similar without a path, list `.pi/plans/` (excluding `done/`) and let the user pick.
+- If the user says "run the plan" or similar without a path, list `docs/plans/` (excluding `done/`) and let the user pick.
 - If only one plan exists, confirm with the user before proceeding.
 - Read the full contents of the plan file.
 
@@ -253,7 +253,7 @@ Always pass `cli` explicitly on every orchestration call, even when it resolves 
 
 **Skip if:** Integration test is disabled (Step 3 settings) or no test command is available.
 
-Before executing the first wave, run the integration suite via the `test-runner` subagent (see the shared test-runner dispatch subsection below) with `{ARTIFACT_PATH} = <working-dir>/.pi/test-runs/<plan-name>/baseline.log` (an absolute path under the plan's working directory) and `{PHASE_LABEL} = baseline`. The agent applies the two-bucket extraction contract documented in `agent/agents/test-runner.md`: stable suite-native identifiers in `FAILING_IDENTIFIERS:` and non-reconcilable failure evidence (panics, build errors, collection errors with no per-test identifier) in `NON_RECONCILABLE_FAILURES:`. The orchestrator reads both buckets back from the artifact.
+Before executing the first wave, run the integration suite via the `test-runner` subagent (see the shared test-runner dispatch subsection below) with `{ARTIFACT_PATH} = <working-dir>/docs/test-runs/<plan-name>/baseline.log` (an absolute path under the plan's working directory) and `{PHASE_LABEL} = baseline`. The agent applies the two-bucket extraction contract documented in `agent/agents/test-runner.md`: stable suite-native identifiers in `FAILING_IDENTIFIERS:` and non-reconcilable failure evidence (panics, build errors, collection errors with no per-test identifier) in `NON_RECONCILABLE_FAILURES:`. The orchestrator reads both buckets back from the artifact.
 
 #### Baseline recording
 
@@ -282,7 +282,7 @@ Options:
 (x) Stop plan execution — fix the suite first.
 ```
 - **(c) Continue anyway:** freeze `baseline_failures` (which may be empty) and proceed. `baseline_failures` is never mutated for the rest of the plan run.
-- **(x) Stop plan execution:** stop with `Plan execution cancelled — fix baseline non-reconcilable failures first.` The per-plan `.pi/test-runs/<plan-name>/` directory is preserved on this exit path so the user can inspect the baseline artifact.
+- **(x) Stop plan execution:** stop with `Plan execution cancelled — fix baseline non-reconcilable failures first.` The per-plan `docs/test-runs/<plan-name>/` directory is preserved on this exit path so the user can inspect the baseline artifact.
 
 In all three branches, `baseline_failures` is frozen once recorded and never mutated by any later wave, post-wave continue, debugging pass, or final-gate run.
 
@@ -294,12 +294,12 @@ See [`integration-regression-model.md`](integration-regression-model.md) for the
 
 Step 7, Step 12.2, the Step 12 Debugger-first flow's success re-test, and Step 16's final-gate gate use the same `test-runner` subagent to execute the integration suite. The orchestrator never runs the test command itself.
 
-**Per-plan runs directory.** Compute `<plan-name>` as the plan filename without the `.md` extension; before the first `test-runner` dispatch in the plan, create it with `mkdir -p .pi/test-runs/<plan-name>`.
+**Per-plan runs directory.** Compute `<plan-name>` as the plan filename without the `.md` extension; before the first `test-runner` dispatch in the plan, create it with `mkdir -p docs/test-runs/<plan-name>`.
 
 **Filename scheme (relative to the plan's working directory).** Join each relative path with `<working-dir>` to produce the absolute `{ARTIFACT_PATH}` supplied to `test-runner`:
-- Step 7 baseline capture: `.pi/test-runs/<plan-name>/baseline.log` → `{ARTIFACT_PATH} = <working-dir>/.pi/test-runs/<plan-name>/baseline.log` (single file; written exactly once).
-- Step 12.2 post-wave + Step 12 Debugger-first re-test: `.pi/test-runs/<plan-name>/wave-<N>-attempt-<K>.log` → `{ARTIFACT_PATH} = <working-dir>/.pi/test-runs/<plan-name>/wave-<N>-attempt-<K>.log`, where `<K>` increments on every re-entry within wave `<N>`.
-- Step 16 final-gate runs: `.pi/test-runs/<plan-name>/final-gate-<seq>.log` → `{ARTIFACT_PATH} = <working-dir>/.pi/test-runs/<plan-name>/final-gate-<seq>.log`, where `<seq>` increments on every gate entry.
+- Step 7 baseline capture: `docs/test-runs/<plan-name>/baseline.log` → `{ARTIFACT_PATH} = <working-dir>/docs/test-runs/<plan-name>/baseline.log` (single file; written exactly once).
+- Step 12.2 post-wave + Step 12 Debugger-first re-test: `docs/test-runs/<plan-name>/wave-<N>-attempt-<K>.log` → `{ARTIFACT_PATH} = <working-dir>/docs/test-runs/<plan-name>/wave-<N>-attempt-<K>.log`, where `<K>` increments on every re-entry within wave `<N>`.
+- Step 16 final-gate runs: `docs/test-runs/<plan-name>/final-gate-<seq>.log` → `{ARTIFACT_PATH} = <working-dir>/docs/test-runs/<plan-name>/final-gate-<seq>.log`, where `<seq>` increments on every gate entry.
 
 **Dispatch.** Read `agent/skills/execute-plan/test-runner-prompt.md` once and fill `{TEST_COMMAND}` from Step 3 settings, `{WORKING_DIR}` with the absolute working directory, `{ARTIFACT_PATH}` with the absolute path above, and `{PHASE_LABEL}` with `baseline`, `wave-<N>-attempt-<K>`, or `final-gate-<seq>`.
 
@@ -438,7 +438,7 @@ These are the canonical intervention options for blocked tasks. Do not invent ne
 - **(c) More context:** prompt the user for the additional context (free-form text). Re-dispatch this single task to a `coder` worker with the original task spec plus the supplied context appended under a `## Additional Context` section in the worker prompt. Keep the task's existing model tier unless the user also picks (m) for the same task on a subsequent pass.
 - **(m) Better model:** only offered when the task's current tier is `cheap` or `standard`. Re-dispatch this single task to a `coder` worker using the next tier up (`cheap` → `standard`, `standard` → `capable`). Resolve the concrete model string via `~/.pi/agent/model-tiers.json` as described in Step 6.
 - **(s) Split into sub-tasks:** decompose the task into smaller sub-tasks in-session. Each sub-task must keep the same output file(s) and acceptance criteria coverage between them (no criterion may be dropped). Dispatch the sub-tasks as a mini-wave bounded by the pi-interactive-subagent `MAX_PARALLEL_HARD_CAP` cap (see Step 5). If there is a natural ordering between sub-tasks, run them sequentially instead. The parent task's slot is replaced by the sub-tasks for all subsequent tracking; each sub-task is treated as an independent task in this wave for Step 9 classification and gate re-entry. ⚠ Sub-task dispatches run pre-commit: their changes must remain in the working tree (uncommitted) at the point Step 11 dispatches the verifier. See Step 11.2 for the fallback diff range if this is violated. Retry budget: see Step 13.
-- **(x) Stop execution:** halt execution immediately. Do NOT perform Step 11 or Step 12 for this wave. Report partial progress via Step 14. All prior wave commits remain in git history. The per-plan .pi/test-runs/<plan-name>/ directory is preserved on this exit path so the user can inspect run artifacts after stop.
+- **(x) Stop execution:** halt execution immediately. Do NOT perform Step 11 or Step 12 for this wave. Report partial progress via Step 14. All prior wave commits remain in git history. The per-plan docs/test-runs/<plan-name>/ directory is preserved on this exit path so the user can inspect run artifacts after stop.
 
 If the user picks `(x) Stop execution` for any blocked task, stop the whole plan regardless of outstanding choices for other blocked tasks. Do not continue asking about the remaining blocked tasks.
 
@@ -470,7 +470,7 @@ Options:
 
 - **(c) Continue to verification.** Exit §3. Leave every concerned task's Step 9 status as `DONE_WITH_CONCERNS` and proceed to §4; the verifier is the next gate and will judge the work on its own terms.
 - **(r) Remediate selected task(s).** Prompt the user for (a) the task numbers to remediate (one or more from `CONCERNED_TASKS`) and (b) a single freeform guidance block that applies to those tasks. Re-dispatch each selected task to a fresh `coder` worker using the same task spec, with the worker's original concerns block and the user's guidance appended under a `## Concerns To Address` section in the worker prompt. Each re-dispatch counts against that task's retry budget; see Step 13. When the re-dispatches return, apply Step 9 again. If any re-dispatched task comes back `BLOCKED`, return to §2 with that task. Otherwise rebuild `CONCERNED_TASKS` from the new wave state and re-enter §3 from its top; a task that returns `DONE` after remediation is removed from `CONCERNED_TASKS`, and a task that returns `DONE_WITH_CONCERNS` again re-appears in the next combined view. Tasks that were not selected for remediation keep their prior Step 9 status and re-appear unchanged in the next view.
-- **(x) Stop execution.** Halt immediately. Do NOT run Step 11 or Step 12 for this wave. Report partial progress via Step 14. All prior wave commits remain in git history. The per-plan .pi/test-runs/<plan-name>/ directory is preserved on this exit path so the user can inspect run artifacts after stop.
+- **(x) Stop execution.** Halt immediately. Do NOT run Step 11 or Step 12 for this wave. Report partial progress via Step 14. All prior wave commits remain in git history. The per-plan docs/test-runs/<plan-name>/ directory is preserved on this exit path so the user can inspect run artifacts after stop.
 
 Repeat §3 until `CONCERNED_TASKS` is empty (either because the user picked `(c)` or because every concerned task has been remediated to `DONE`) or the user picks `(x)`.
 
@@ -562,7 +562,7 @@ git commit -m "feat(plan): wave <N> - <plan_goal_summary>
 
 **Skip if:** Integration test is disabled (Step 3 settings) or no test command is available.
 
-Run the integration suite via the `test-runner` subagent (see Step 7's shared test-runner dispatch subsection) with `{ARTIFACT_PATH} = <working-dir>/.pi/test-runs/<plan-name>/wave-<N>-attempt-<K>.log` (an absolute path under the plan's working directory, where `<N>` is the current wave number and `<K>` is a 1-based attempt counter for this wave, starting at 1 and incremented on each Step 12 Debugger-first re-test) and `{PHASE_LABEL} = wave-<N>-attempt-<K>`. After artifact readback, read both the stable failing-identifier set and the non-reconcilable failure list from the artifact and compute the per-run inputs from [`integration-regression-model.md`](integration-regression-model.md):
+Run the integration suite via the `test-runner` subagent (see Step 7's shared test-runner dispatch subsection) with `{ARTIFACT_PATH} = <working-dir>/docs/test-runs/<plan-name>/wave-<N>-attempt-<K>.log` (an absolute path under the plan's working directory, where `<N>` is the current wave number and `<K>` is a 1-based attempt counter for this wave, starting at 1 and incremented on each Step 12 Debugger-first re-test) and `{PHASE_LABEL} = wave-<N>-attempt-<K>`. After artifact readback, read both the stable failing-identifier set and the non-reconcilable failure list from the artifact and compute the per-run inputs from [`integration-regression-model.md`](integration-regression-model.md):
 
 - `current_failing_stable` := contents of `FAILING_IDENTIFIERS:` in the artifact.
 - `current_non_reconcilable` := contents of `NON_RECONCILABLE_FAILURES:` in the artifact.
@@ -587,7 +587,7 @@ Options:
 
 - **(d) Debug failures now:** Run the `Debugger-first flow` (below) with the **Step 12 (post-wave)** parameter row, scoped to `current_non_baseline_stable ∪ current_non_reconcilable`. Do NOT undo the wave commit up front; the debugging dispatch inspects the committed state. This path counts as a retry toward the 3-retry limit in Step 13.
 - **(c) Continue despite failures:** Proceed to wave `<N+1>`. **`baseline_failures` is NOT mutated.** No deferred state is persisted across waves. The next wave's integration run is reconciled solely against the frozen `baseline_failures` set, so any failure surfaced this wave that persists into the next wave will be flagged again under `current_non_baseline_stable` (or `current_non_reconcilable`) until it is fixed or the user stops execution. Warn: "⚠️ Continuing past wave `<N>` integration failures. These failures are NOT being recorded as baseline; the next wave will reconcile against the original frozen baseline, so unresolved failures will be flagged again. Final plan completion remains blocked until a later integration run has both `current_non_baseline_stable` empty and `current_non_reconcilable` empty — choosing `(c)` defers, but does not waive, that gate."
-- **(x) Stop plan execution:** Halt execution. All prior wave commits remain in git history. Report partial progress (Step 14). The per-plan `.pi/test-runs/<plan-name>/` directory is preserved on this exit path so the user can inspect run artifacts after stop.
+- **(x) Stop plan execution:** Halt execution. All prior wave commits remain in git history. Report partial progress (Step 14). The per-plan `docs/test-runs/<plan-name>/` directory is preserved on this exit path so the user can inspect run artifacts after stop.
 
 **Final-wave menu** (wave `<N>` where `<N> == total_waves`):
 
@@ -600,7 +600,7 @@ Options:
 The continue option is intentionally absent on the final wave by design: there is no subsequent wave to absorb unresolved failures, and the precondition that final completion is blocked until current non-baseline stable failures and non-reconcilable failures are both empty forbids silently shipping them. On the final wave, the user MUST either debug or stop.
 
 - **(d) Debug failures now:** Same as the intermediate-wave `(d)` — run the `Debugger-first flow` (below) with the **Step 12 (post-wave)** parameter row, scoped to `current_non_baseline_stable ∪ current_non_reconcilable`, counting toward the Step 13 retry limit. Step 16's "Final integration regression gate (precondition)" applies the same baseline-only reconciliation against the most recent integration run before the plan can report success.
-- **(x) Stop plan execution:** Halt execution. Prior wave commits remain in git history. Report partial progress (Step 14). The per-plan `.pi/test-runs/<plan-name>/` directory is preserved on this exit path so the user can inspect run artifacts after stop.
+- **(x) Stop plan execution:** Halt execution. Prior wave commits remain in git history. Report partial progress (Step 14). The per-plan `docs/test-runs/<plan-name>/` directory is preserved on this exit path so the user can inspect run artifacts after stop.
 
 ### Debugger-first flow
 
@@ -644,7 +644,7 @@ If a worker produces empty, missing, or incorrect output:
 1. Retry automatically up to **3 times** (with improvements to the task prompt if possible). **Shared counter:** All re-dispatches from the Blocked handling phase (Step 10), the Concerns handling phase `(r)` remediation (Step 10), and Step 11 failure routing (verifier `VERDICT: FAIL`) share a single per-task retry counter. Exhaustion in one path exhausts it for all paths — a task that has been re-dispatched twice through the Blocked handling phase and once through the Concerns handling phase has used all 3 retries, and any subsequent Step 11 `VERDICT: FAIL` for that task goes directly to the user-prompt in step 2 below rather than triggering another automatic retry. **Sub-task split budget rule:** Choosing `(s) Split into sub-tasks` in the Blocked handling phase (Step 10) consumes 1 retry against the parent task's budget, and each resulting sub-task inherits the parent's remaining retry count rather than a fresh 3-retry budget. This closes the bypass where an exhausted parent could be split to obtain additional effective retries.
 2. If still failing after 3 retries, **notify the user at the end of the wave** and ask:
    - Retry again (optionally with a different model or more context). Choosing `Retry again` **resets the per-task 3-retry budget for that task** — the user has explicitly authorized a fresh remediation window, so the shared counter described in step 1 (Blocked handling phase re-dispatch + Concerns handling phase `(r)` re-dispatch + Step 11 `VERDICT: FAIL` retries) is cleared back to 3 for this task only. A subsequent failure on that task re-enters the automatic-retry loop at the top of step 1 with a full budget.
-   - Stop the entire plan. The per-plan .pi/test-runs/<plan-name>/ directory is preserved on this exit path so the user can inspect run artifacts after stop.
+   - Stop the entire plan. The per-plan docs/test-runs/<plan-name>/ directory is preserved on this exit path so the user can inspect run artifacts after stop.
 
    There is no option to skip a failed task. A wave with any unresolved failure — including a verifier `VERDICT: FAIL` from Step 11 treated as a task failure — must either be retried to resolution or stopped. `VERDICT: FAIL` from Step 11 is routed through this same failure-handling path with no skip option.
 
@@ -657,7 +657,7 @@ Apply wave pacing from Step 3. These options only govern the cadence of waves wh
 ## Step 14: Report partial progress
 
 **Execution stopped early (user request or unrecoverable failure):**
-- Leave the plan file in `.pi/plans/` for reference and any manual follow-up.
+- Leave the plan file in `docs/plans/` for reference and any manual follow-up.
 - Report which tasks completed, which failed, and which remain.
 
 **Most recent integration run failures:** If a `test-runner` artifact exists for this plan (any of the post-wave `wave-<N>-attempt-<K>.log` or final-gate `final-gate-<seq>.log` files), use the most recent artifact and recompute `current_non_baseline_stable` and `current_non_reconcilable` against the frozen `baseline_failures` set. Include the unresolved failures under dedicated headings in the partial-progress report:
@@ -673,7 +673,7 @@ These failures were observed in the most recent integration run on this branch a
 They must be debugged before this branch is considered shippable.
 ```
 
-The most recent artifact path itself is preserved on every `(x) Stop plan execution` exit path (the per-plan `.pi/test-runs/<plan-name>/` directory is kept on stop) so the user can inspect the raw run output alongside this report.
+The most recent artifact path itself is preserved on every `(x) Stop plan execution` exit path (the per-plan `docs/test-runs/<plan-name>/` directory is kept on stop) so the user can inspect the raw run output alongside this report.
 
 ## Step 15: Request code review
 
@@ -686,7 +686,7 @@ After all waves complete successfully (and if the user chose review in Step 3):
    - Requirements = full plan file contents
    - Max iterations = from Step 3 settings (default 3)
    - Working directory = current workspace path
-   - Review output path = `.pi/reviews/<plan-name>-code-review` (derived from plan filename, e.g., plan `2026-04-06-my-feature.md` → `.pi/reviews/2026-04-06-my-feature-code-review`)
+   - Review output path = `docs/reviews/<plan-name>-code-review` (derived from plan filename, e.g., plan `2026-04-06-my-feature.md` → `docs/reviews/2026-04-06-my-feature-code-review`)
 
 2. **Invoke the `refine-code` skill** with the gathered inputs.
 
@@ -696,9 +696,9 @@ After all waves complete successfully (and if the user chose review in Step 3):
 
    **`approved_with_concerns`:** Include the review summary (iteration count, review file path, AND a note pointing the user at the review file's `### Outcome` reasoning — which names the waived Important findings and the rationale for waiving each) in the Step 16 completion report. Proceed to Step 16.
 
-   **`not_approved_within_budget`:** Present remaining findings to the user; offer: **(a)** keep iterating (budget resets), **(b)** proceed with issues noted, or **(c)** stop execution. The per-plan .pi/test-runs/<plan-name>/ directory is preserved on this exit path so the user can inspect run artifacts after stop.
+   **`not_approved_within_budget`:** Present remaining findings to the user; offer: **(a)** keep iterating (budget resets), **(b)** proceed with issues noted, or **(c)** stop execution. The per-plan docs/test-runs/<plan-name>/ directory is preserved on this exit path so the user can inspect run artifacts after stop.
 
-   **`failed`:** Surface the `refine-code` failure reason to the user and stop execution. Report partial progress via Step 14. The per-plan .pi/test-runs/<plan-name>/ directory is preserved on this exit path so the user can inspect run artifacts after stop.
+   **`failed`:** Surface the `refine-code` failure reason to the user and stop execution. Report partial progress via Step 14. The per-plan docs/test-runs/<plan-name>/ directory is preserved on this exit path so the user can inspect run artifacts after stop.
 
    **Review disabled** (user chose to disable in Step 3): Skip directly to Step 16.
 
@@ -712,7 +712,7 @@ Otherwise, always run this gate: re-run the full integration suite and confirm n
 
 **Gate protocol:**
 
-1. **Re-dispatch the integration suite via `test-runner`** per Step 7's shared test-runner dispatch subsection with `{ARTIFACT_PATH} = <working-dir>/.pi/test-runs/<plan-name>/final-gate-<seq>.log` (an absolute path under the plan's working directory, where `<seq>` is a 1-based counter incremented for every gate entry — initial entry is `1`, each subsequent re-entry from `(d) Debug failures now` is `2`, `3`, …) and `{PHASE_LABEL} = final-gate-<seq>`. Read back the artifact per Step 7's "Reading run results" rule.
+1. **Re-dispatch the integration suite via `test-runner`** per Step 7's shared test-runner dispatch subsection with `{ARTIFACT_PATH} = <working-dir>/docs/test-runs/<plan-name>/final-gate-<seq>.log` (an absolute path under the plan's working directory, where `<seq>` is a 1-based counter incremented for every gate entry — initial entry is `1`, each subsequent re-entry from `(d) Debug failures now` is `2`, `3`, …) and `{PHASE_LABEL} = final-gate-<seq>`. Read back the artifact per Step 7's "Reading run results" rule.
 
 2. **Compute the per-run inputs** from [`integration-regression-model.md`](integration-regression-model.md):
    - `current_failing_stable` := contents of `FAILING_IDENTIFIERS:` in the final-gate artifact.
@@ -735,16 +735,16 @@ Otherwise, always run this gate: re-run the full integration suite and confirm n
 
 4. **Menu actions:**
    - **(d) Debug failures now:** Run the shared `Debugger-first flow` (defined under Step 12) with the **Step 16 (final-gate)** parameter row, scoped to `current_non_baseline_stable ∪ current_non_reconcilable`. That flow judges success by re-entering this gate at step 1 (re-run the suite, recompute `current_failing_stable`, `current_non_reconcilable`, and `current_non_baseline_stable`), so a remediation attempt succeeds when both gate-blocking sets are empty on the re-run. Repeat until both gate-blocking sets are empty or the user picks `(x)`. Each debugging attempt counts toward the Step 13 retry budget for the implicated tasks.
-   - **(x) Stop execution:** Halt execution. Report partial progress via Step 14 so the user has a complete picture of failures left on the branch: list the unresolved `current_non_baseline_stable` and `current_non_reconcilable` from the most recent final-gate artifact under the Step 14 most-recent-run headings. Do NOT move the plan file, close the todo, or run branch completion. The per-plan `.pi/test-runs/<plan-name>/` directory is preserved on this exit path so the user can inspect run artifacts after stop.
+   - **(x) Stop execution:** Halt execution. Report partial progress via Step 14 so the user has a complete picture of failures left on the branch: list the unresolved `current_non_baseline_stable` and `current_non_reconcilable` from the most recent final-gate artifact under the Step 14 most-recent-run headings. Do NOT move the plan file, close the todo, or run branch completion. The per-plan `docs/test-runs/<plan-name>/` directory is preserved on this exit path so the user can inspect run artifacts after stop.
 
 **Blocking guarantee:** Steps `### 1. Move plan to done`, `### 2. Close linked todo`, and `### 4. Branch completion` MUST NOT execute while `current_non_baseline_stable ∪ current_non_reconcilable` is non-empty. The only exits from this gate are: (a) both sets become empty (gate passes), or (b) the user selects `(x) Stop execution`.
 
 ### 1. Move plan to done
 
 **Unconditional** — the plan was executed regardless of what happens to the branch:
-- Create `.pi/plans/done/` if it doesn't exist
-- Move the plan file to `.pi/plans/done/`
-- Delete the per-plan `.pi/test-runs/<plan-name>/` directory now that the final integration regression gate has passed: `rm -rf .pi/test-runs/<plan-name>`. This cleanup runs ONLY on successful gate exit (i.e. when this `### 1. Move plan to done` sub-step executes). Every stop exit path — Step 10's wave gate, Step 12's intermediate-wave or final-wave menu, Step 13's failure-handling prompt, Step 15's review max-iterations menu, and Step 16's final-gate menu — leaves `.pi/test-runs/<plan-name>/` in place so the user can inspect run artifacts after stop.
+- Create `docs/plans/done/` if it doesn't exist
+- Move the plan file to `docs/plans/done/`
+- Delete the per-plan `docs/test-runs/<plan-name>/` directory now that the final integration regression gate has passed: `rm -rf docs/test-runs/<plan-name>`. This cleanup runs ONLY on successful gate exit (i.e. when this `### 1. Move plan to done` sub-step executes). Every stop exit path — Step 10's wave gate, Step 12's intermediate-wave or final-wave menu, Step 13's failure-handling prompt, Step 15's review max-iterations menu, and Step 16's final-gate menu — leaves `docs/test-runs/<plan-name>/` in place so the user can inspect run artifacts after stop.
 
 ### 2. Close linked todo
 
@@ -754,7 +754,7 @@ Scan the plan file for a line matching `**Source:** TODO-<id>`. This line appear
 2. Read the todo using the `todo` tool to check if it exists and its current status
 3. If the todo exists and is not already "done":
    - Update the todo status to "done"
-   - Append to the todo body: `\nCompleted via plan: .pi/plans/done/<plan-filename>.md`
+   - Append to the todo body: `\nCompleted via plan: docs/plans/done/<plan-filename>.md`
    - Record the closed todo ID for the summary report
 4. If the todo does not exist, is already "done", or reading it fails: skip silently (no error, no warning)
 

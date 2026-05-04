@@ -1,6 +1,6 @@
 ---
 name: define-spec
-description: "Interactive spec writing from a todo, an existing spec under .pi/specs/, or freeform text. Dispatches a spec-designer subagent in a multiplexer pane when one is available, falling back to running the procedure on the main agent. Writes a structured spec to .pi/specs/ and gates the commit on user review."
+description: "Interactive spec writing from a todo, an existing spec under docs/specs/, or freeform text. Dispatches a spec-designer subagent in a multiplexer pane when one is available, falling back to running the procedure on the main agent. Writes a structured spec to docs/specs/ and gates the commit on user review."
 ---
 
 # Define Spec
@@ -77,7 +77,7 @@ subagent_run_serial {
     {
       name: "spec-designer",
       agent: "spec-designer",
-      task: "<raw user input — todo ID, .pi/specs/<path>.md, or freeform text>",
+      task: "<raw user input — todo ID, docs/specs/<path>.md, or freeform text>",
       systemPrompt: "<full body of procedure.md from Step 2>",
       model: "<capable tier from model-tiers.json>",
       cli: "<resolved dispatch cli>"
@@ -108,7 +108,7 @@ Evaluate the subagent's `finalMessage`, `exitCode`, `state`, `error`, and `trans
 
 A `SPEC_WRITTEN: <absolute path>` line in `finalMessage` is the primary completion signal. Parse it as a single line on its own, no surrounding backticks or commentary on the same line.
 
-Transcript-backed recovery is a narrow salvage path for the known failure mode where the subagent successfully wrote the spec but ended its session on the write/edit tool call instead of sending the final `SPEC_WRITTEN:` text message. It must never scan for the newest file in `.pi/specs/` or guess from filesystem state alone. It may recover only from successful write/edit evidence in `transcriptPath`, and it still proceeds through the normal user review gate before any commit.
+Transcript-backed recovery is a narrow salvage path for the known failure mode where the subagent successfully wrote the spec but ended its session on the write/edit tool call instead of sending the final `SPEC_WRITTEN:` text message. It must never scan for the newest file in `docs/specs/` or guess from filesystem state alone. It may recover only from successful write/edit evidence in `transcriptPath`, and it still proceeds through the normal user review gate before any commit.
 
 Cases (evaluated in this order):
 
@@ -126,7 +126,7 @@ Cases (evaluated in this order):
 
      Stop.
 
-  2. From successful tool-result records only (not proposed tool calls), identify candidate spec paths written by the subagent. Accept success evidence such as Claude Code `toolUseResult.filePath` records with `type: "create"` / `"update"`, or tool-result text like `File created successfully at:` / `File updated successfully at:`. A candidate path must end in `.md` and be either an absolute path under the current repo's `.pi/specs/` directory or a relative path beginning with `.pi/specs/`.
+  2. From successful tool-result records only (not proposed tool calls), identify candidate spec paths written by the subagent. Accept success evidence such as Claude Code `toolUseResult.filePath` records with `type: "create"` / `"update"`, or tool-result text like `File created successfully at:` / `File updated successfully at:`. A candidate path must end in `.md` and be either an absolute path under the current repo's `docs/specs/` directory or a relative path beginning with `docs/specs/`.
 
   3. Normalize relative candidates against the current repo root. Recovery succeeds only if there is exactly one unique candidate path, the file exists on disk, and the file is non-empty. Apply input-shape validation where available:
      - Todo input (`TODO-<id>`): the candidate file must contain the exact provenance line `Source: TODO-<id>`.
@@ -138,7 +138,7 @@ Cases (evaluated in this order):
 
      Then proceed to Step 5 with the recovered absolute path.
 
-  5. If recovery finds zero candidates, multiple candidates, a candidate outside the repo's `.pi/specs/`, an empty/missing file, or a provenance/path mismatch, report:
+  5. If recovery finds zero candidates, multiple candidates, a candidate outside the repo's `docs/specs/`, an empty/missing file, or a provenance/path mismatch, report:
      > Spec design did not complete: `spec-designer` exited without emitting `SPEC_WRITTEN: <path>`, and transcript-backed recovery did not find exactly one valid written spec path. Transcript: `<transcriptPath>`. No validated spec path, no commit attempted.
 
      Stop.
@@ -178,7 +178,7 @@ If the `commit` skill fails, report the error verbatim and stop. Leave the file 
 
 Behavior per choice:
 
-- **(r) Refine:** invoke `/define-spec <path>` recursively, passing the captured spec path as-is (typically the absolute path from the original `SPEC_WRITTEN: <absolute path>` line). The procedure's input-shape detector accepts both relative `.pi/specs/<name>.md` and absolute paths containing `/.pi/specs/`, so the existing-spec branch fires on the recursive run and overwrites the draft with preamble preservation. On the recursive run, the same orchestrator probe + dispatch + validate + commit-gate flow applies.
+- **(r) Refine:** invoke `/define-spec <path>` recursively, passing the captured spec path as-is (typically the absolute path from the original `SPEC_WRITTEN: <absolute path>` line). The procedure's input-shape detector accepts both relative `docs/specs/<name>.md` and absolute paths containing `/docs/specs/`, so the existing-spec branch fires on the recursive run and overwrites the draft with preamble preservation. On the recursive run, the same orchestrator probe + dispatch + validate + commit-gate flow applies.
 - **(x) Stop:** emit `Leaving <path> uncommitted. Edit and commit yourself.` and stop.
 
 ## Step 8: Offer `generate-plan`
@@ -196,6 +196,6 @@ If yes, invoke `generate-plan` with `<path>`. If no, stop.
 - **Mux probe wrong (false positive / false negative).** The probe is aligned with the runtime's `selectBackend()` / `cmux.ts` checks (env var + command available), so divergence requires either (a) the env var being set without the matching CLI on PATH, or (b) the runtime's check changing in a future `pi-interactive-subagent` release. A false-negative probe (probe says no mux, mux actually available) drops the user into the inline branch — functionally correct but uses orchestrator context unnecessarily. A false-positive probe (probe says mux, runtime then disagrees) routes `subagent_run_serial` to the headless backend, which can't host an interactive session — `spec-designer` would receive its task without a user-driven Q&A surface. Mitigation: keep the probe rules in lockstep with `cmux.ts`; if a future change drifts, users can force the inline branch with `PI_SUBAGENT_MODE=headless` or one of the override phrases.
 - **User-input override false positive.** If the user's input contains "subagent" without meaning override (e.g. "build a subagent thing"), the substring match will trigger inline mode. Mitigation is the specific phrase set in Step 1b. Residual risk is documented; users wanting subagent dispatch can rephrase.
 - **Inline-branch session terminated mid-procedure.** No spec written, no commit, nothing to recover. User re-runs `/define-spec`. If a partial spec was written before termination, it stays on disk; user can delete or edit manually.
-- **Subagent wrote a spec but missed `SPEC_WRITTEN:`.** Step 4 case (2) covers this with conservative transcript-backed recovery. Recovery is allowed only from successful write/edit evidence in the transcript and only when exactly one valid `.pi/specs/*.md` path can be validated; otherwise fail closed with no commit.
+- **Subagent wrote a spec but missed `SPEC_WRITTEN:`.** Step 4 case (2) covers this with conservative transcript-backed recovery. Recovery is allowed only from successful write/edit evidence in the transcript and only when exactly one valid `docs/specs/*.md` path can be validated; otherwise fail closed with no commit.
 - **`commit` skill failure.** Step 6 covers this. Report and stop; user resolves the underlying issue.
 - **Multi-subsystem input, user insists on a single spec.** The procedure's Step 3 scope-decomposition check handles this — user override is honored, an Open Question is recorded, and the spec is written. Downstream `generate-plan` may produce a coarse plan.

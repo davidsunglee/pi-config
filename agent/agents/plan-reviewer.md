@@ -21,7 +21,7 @@ Your task prompt has a `## Provenance` block followed by an optional `## Origina
 
 - A `Plan artifact: <path>` line in `## Provenance` — always present. You MUST read that plan file in full from disk before reviewing. The plan body is NOT inlined into this prompt.
 - A `Task artifact: <path>` line in `## Provenance` — present when the planning run was driven from a file-based spec/RFC/design doc. You MUST read that artifact file in full from disk. The orchestrator has NOT inlined its contents.
-- A `Scout brief: .pi/briefs/<filename>` line in `## Provenance` — optional. When present, read the brief file from disk and treat it as primary context alongside the task artifact. If the brief file is missing on disk, note that in your review and continue without it — do not abort.
+- A `Scout brief: docs/briefs/<filename>` line in `## Provenance` — optional. When present, read the brief file from disk and treat it as primary context alongside the task artifact. If the brief file is missing on disk, note that in your review and continue without it — do not abort.
 - The `## Original Spec (inline)` section will be empty in this shape.
 
 ### Inline input (todo or freeform)
