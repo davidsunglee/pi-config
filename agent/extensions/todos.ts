@@ -32,6 +32,7 @@
 import { DynamicBorder, copyToClipboard, getMarkdownTheme, keyHint, type ExtensionAPI, type ExtensionContext, type KeybindingsManager, type Theme } from "@mariozechner/pi-coding-agent";
 import { StringEnum } from "@mariozechner/pi-ai";
 import { Type, type Static } from "typebox";
+import { execFileSync } from "node:child_process";
 import path from "node:path";
 import fs from "node:fs/promises";
 import { existsSync } from "node:fs";
@@ -725,10 +726,34 @@ function getTodosDir(cwd: string): string {
 	return path.resolve(cwd, TODO_DIR_NAME);
 }
 
+function getGitRoot(cwd: string): string | null {
+	try {
+		const root = execFileSync("git", ["rev-parse", "--show-toplevel"], {
+			cwd,
+			encoding: "utf8",
+			stdio: ["ignore", "pipe", "ignore"],
+		}).trim();
+		return root || null;
+	} catch {
+		return null;
+	}
+}
+
+function formatTodosDirLabel(todosDir: string, cwd: string): string {
+	const gitRoot = getGitRoot(cwd);
+	if (!gitRoot) return todosDir;
+
+	const relativePath = path.relative(gitRoot, todosDir);
+	if (!relativePath) return ".";
+	if (relativePath === ".." || relativePath.startsWith(`..${path.sep}`) || path.isAbsolute(relativePath)) return todosDir;
+	return relativePath;
+}
+
 function getTodosDirLabel(cwd: string): string {
 	const overridePath = process.env[TODO_PATH_ENV];
 	if (overridePath && overridePath.trim()) {
-		return path.resolve(cwd, overridePath.trim());
+		const todosDir = path.resolve(cwd, overridePath.trim());
+		return formatTodosDirLabel(todosDir, cwd);
 	}
 	return TODO_DIR_NAME;
 }
@@ -1409,7 +1434,7 @@ export default function todosExtension(pi: ExtensionAPI) {
 			`Manage file-based todos in ${todosDirLabel} (list, list-all, get, create, update, append, delete, claim, release). ` +
 			"Title is the short summary; body is long-form markdown notes (update replaces, append adds). " +
 			"Todo ids are shown as TODO-<hex>; id parameters accept TODO-<hex> or the raw hex filename. " +
-			"Claim tasks before working on them to avoid conflicts, and close them when complete.", 
+			"Claim tasks before working on them to avoid conflicts, and close them when complete.",
 		parameters: TodoParams,
 
 		async execute(_toolCallId, params: Static<typeof TodoParams>, _signal, _onUpdate, ctx) {
@@ -1728,8 +1753,12 @@ export default function todosExtension(pi: ExtensionAPI) {
 				return new Text(text, 0, 0);
 			}
 
-			const singleDetails = details as Extract<TodoToolDetails, { todo: TodoRecord }>;
-			let text = renderTodoDetail(theme, singleDetails.todo, expanded);
+			if (!("todo" in details) || !details.todo) {
+				const text = result.content[0];
+				return new Text(text?.type === "text" ? text.text : "", 0, 0);
+			}
+
+			let text = renderTodoDetail(theme, details.todo, expanded);
 			const actionLabel =
 				details.action === "create"
 					? "Created"
@@ -1757,7 +1786,7 @@ export default function todosExtension(pi: ExtensionAPI) {
 	});
 
 	pi.registerCommand("todos", {
-		description: "List todos from .pi/todos",
+		description: `List todos from ${todosDirLabel}`,
 		handler: async (args, ctx) => {
 			const todosDir = getTodosDir(ctx.cwd);
 			const todos = await listTodos(todosDir);
@@ -1771,7 +1800,7 @@ export default function todosExtension(pi: ExtensionAPI) {
 			}
 
 			let nextPrompt: string | null = null;
-			let rootTui: TUI | undefined;
+			let rootTui: TUI | null = null;
 			await ctx.ui.custom<void>((tui, theme, keybindings, done) => {
 				rootTui = tui;
 				let selector: TodoSelectorComponent | null = null;
@@ -2033,10 +2062,9 @@ export default function todosExtension(pi: ExtensionAPI) {
 
 			if (nextPrompt) {
 				ctx.ui.setEditorText(nextPrompt);
-				rootTui?.requestRender();
+				(rootTui as TUI | null)?.requestRender();
 			}
 		},
 	});
 
 }
-
