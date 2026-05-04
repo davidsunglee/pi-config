@@ -324,19 +324,15 @@ Before dispatching the first wave, record the current HEAD SHA for the post-comp
 PRE_EXECUTION_SHA=$(git rev-parse HEAD)
 ```
 
-### Main-branch confirmation
+### Direct-branch warning
 
-If executing directly on main/master/develop (not on a feature branch, not in a worktree), prompt the user once before the first commit:
+If executing directly in the current workspace rather than a worktree, emit this warning once before the first wave:
 
 ```
 ⚠️ You're on `<branch_name>`. Commits will be made directly to <branch_name> after each wave.
-Continue? (y/n)
 ```
 
-- **If `y`:** Proceed with commits after each wave as configured.
-- **If `n`:** Cancel execution. The user should create a feature branch or worktree first.
-
-This confirmation is asked once at the start, not per wave. If the user is on a feature branch or in a worktree, skip this check entirely — commits on feature branches are expected.
+Continue execution without asking for an additional confirmation.
 
 For each wave, dispatch all tasks in parallel:
 ```
@@ -412,11 +408,11 @@ Example layout:
 
 Wave outcomes:
   - Task 3: Add baseline test capture           DONE
-  - Task 4: Add main-branch confirmation guard  BLOCKED
+  - Task 4: Add direct-branch warning          BLOCKED
 
 Blocked tasks:
 
-[Task 4] Add main-branch confirmation guard
+[Task 4] Add direct-branch warning
   Files: agent/skills/execute-plan/SKILL.md
   Blocker:
     <full blocker text from the worker report>

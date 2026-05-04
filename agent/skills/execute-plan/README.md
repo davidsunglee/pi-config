@@ -22,7 +22,7 @@ An optional `## Test Command` fenced bash block provides the integration test co
 
 Before execution, the skill determines whether the current checkout is already a worktree or feature branch. Existing isolated workspaces are reused after a dirty-state safety check. Work started from `main`, `master`, or `develop` defaults to a new git worktree via the `using-git-worktrees` skill.
 
-Direct commits to main-like branches require an explicit confirmation before the first checkpoint commit.
+Direct execution in the current workspace on main-like branches emits a one-time warning before the first wave and then proceeds without an additional pre-commit confirmation gate.
 
 ## Execution settings
 
