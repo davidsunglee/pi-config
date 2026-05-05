@@ -110,6 +110,30 @@ FOR multi-item feedback:
   4. Verify no regressions
 ```
 
+Implement one item at a time. Pushback, clarification, and verification happen BEFORE the implementation step — TDD applies to the implementation of each individual item once the item has been read, understood, and verified, not to the verification or pushback phase itself.
+
+## Implementing a Verified Item (TDD)
+
+Once an item has been verified as a real, applicable change for THIS codebase, apply the `test-driven-development` skill per item:
+
+```
+FOR each verified item:
+  IF the item changes production behavior or fixes a bug:
+    1. Write a failing test through a public interface
+       (API, UI, CLI, service boundary, or persistence-facing interface)
+       that captures the desired behavior or reproduces the real failure path.
+    2. Run the test and verify RED for the expected reason
+       (feature absent, bug present, or behavior not yet implemented).
+    3. Make the minimal production change to pass the test.
+    4. Run the targeted test and the relevant surrounding tests
+       and verify GREEN with no unexpected errors or warnings.
+    5. Mock only true external boundaries; use real internal collaborators.
+  ELSE (docs/config/comments-only or other non-production-behavior change):
+    Document "TDD not applicable — <one-line reason>" and apply the change.
+```
+
+Verification and pushback come first; TDD is not a prerequisite for asking clarifying questions or pushing back on suggestions you believe are wrong. Once you and the reviewer agree on what should change, the change itself goes through red-green-refactor. Do not batch implementations to skip per-item RED/GREEN verification.
+
 ## When To Push Back
 
 Push back when:

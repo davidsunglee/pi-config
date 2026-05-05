@@ -1,60 +1,57 @@
 ## Test-Driven Development
 
-**Iron Law:** NO PRODUCTION CODE WITHOUT A FAILING TEST FIRST. If you write production code before a test, delete it and start over. "Delete means delete" — do not keep it as reference, do not adapt it while writing tests.
+**Test first.** No production behavior change without a failing test that exercises the desired behavior through a public interface. If exploratory production code already exists for this task, revert it or set it aside, write the intended failing test, verify RED, then implement from the test. Document or ask before making an exception.
 
-**Consult the full skill.** For any implementation or bug-fix work in this task, consult the `test-driven-development` skill before writing code. This block is a summary, not a substitute — the full skill has the rationalization-prevention table, red-flags list, verification checklist, and when-stuck troubleshooting you will need if you get tempted to skip a step.
+**Consult the full skill.** For any implementation or bug-fix work in this task, consult the `test-driven-development` skill before writing code. This block is a summary, not a substitute — see the full skill for the workflow, good-test qualities, stop conditions/recovery, and completion checklist.
 
 ### Red-Green-Refactor cycle
 
-For every new behavior, bug fix, or change in this task:
+For every behavior change in this task, work in vertical tracer bullets — one behavior at a time:
 
-1. **RED — Write one failing test** that describes the desired behavior. One behavior per test, clear name, real code (no mocks unless unavoidable).
-2. **Verify RED — run the test and watch it fail.** MANDATORY. Confirm: test fails (does not error on a typo), and the failure message matches the expected "feature missing" reason. If the test passes, you are testing existing behavior — fix the test. If it errors, fix the error and re-run until it fails correctly.
-3. **GREEN — write the minimal code to pass.** Just enough to make this test pass. No extra options, no speculative features, no "while I'm here" refactors.
-4. **Verify GREEN — run the test and watch it pass.** MANDATORY. Confirm: the new test passes, all other tests still pass, output is pristine (no errors or warnings).
-5. **Refactor — clean up while green.** Remove duplication, improve names, extract helpers. Keep tests green. Do not add behavior.
+1. **RED — write one failing test** for one observable behavior, named after the behavior, exercised through a public interface (API, UI, CLI, service boundary, or persistence-facing interface). Use real internal collaborators.
+2. **Verify RED — run the test and watch it fail** for the expected reason (feature absent, bug present, or behavior not yet implemented). If it errors on a typo or setup issue, fix that first; if it passes immediately, the test is wrong — fix it before continuing.
+3. **GREEN — write the smallest production change that passes the test.** No speculative features, broad refactors, or "while I'm here" work.
+4. **Verify GREEN — run the targeted test and the relevant surrounding tests.** Output should be pristine. If they fail, fix production code; do not weaken the test unless RED proved the test was wrong.
+5. **Refactor — only while green.** Improve names, remove duplication, deepen modules. Run tests after each step.
 
-Repeat for the next behavior. If the task lists test files, follow this cycle for each behavior those tests cover.
+Repeat from RED for the next behavior. Each behavior change needs a test through a public interface — this does not mean every private helper or method needs its own implementation-coupled test.
 
-### Rationalizations to reject
+### Mocking
 
-If you catch yourself thinking any of these, STOP and follow TDD — these are the excuses the full skill explicitly calls out:
+Mock only true external boundaries: external APIs, payments/email, time/randomness, unavailable services, and sometimes filesystem/database when a controlled real dependency is impractical. Use real internal collaborators. Do not mock internal modules/classes just to observe interactions, and do not assert internal call counts/order for code you own.
 
-- "Too simple to test" / "I'll test after" / "Already manually tested"
-- "Keep the code as reference while I write tests" (you will adapt it — delete it)
-- "Deleting X hours of work is wasteful" (sunk cost — unverified code is technical debt)
-- "TDD will slow me down" / "Manual test is faster"
-- "Tests-after achieves the same goals" (no — tests-after asks "what does this do?"; tests-first asks "what should this do?")
-- "It's about spirit, not ritual" / "I'm being pragmatic" / "This is different because…"
+### Stop conditions and recovery
 
-### Red flags — if any of these are true, stop and start over
+Stop and correct course if:
 
-- You wrote production code before the test
-- The test passed on the first run (you are testing existing behavior)
-- You cannot explain why the test failed in the RED step
-- You plan to add tests "later"
-- You kept pre-existing unverified code as "reference" and adapted it
+- Production code was written before a failing test in this task.
+- The test passed immediately.
+- You cannot explain why RED failed.
+- You are adding many tests before any implementation.
+- Tests mostly mock internal code.
+- You are rationalizing "too simple," "manual test is enough," "I'll add tests later," or "tests-after is the same."
 
-### Verification checklist (before reporting DONE)
-
-- [ ] Every new function or method has a test
-- [ ] You watched each test fail before implementing
-- [ ] Each test failed for the expected reason (feature missing, not a typo)
-- [ ] You wrote minimal code to pass each test
-- [ ] All tests pass, not just the new ones
-- [ ] Output is pristine — no errors, no warnings
-- [ ] Tests exercise real code (mocks only when unavoidable)
-- [ ] Edge cases and error paths are covered
-
-If you cannot check every box, you skipped TDD — start over before reporting.
+**Recovery:** revert or set aside the premature implementation, write the intended failing test, verify RED, then implement from the test. Ask before making an exception.
 
 ### When stuck
 
-- "I do not know how to test this" → write the wished-for API in the test first, then implement to match. If still stuck, report NEEDS_CONTEXT.
-- "The test is too complicated" → the design is too complicated. Simplify the interface.
-- "I have to mock everything" → the code is too coupled. Use dependency injection.
+- "I do not know how to test this" → write the wished-for public API in the test first, then implement to match. If still stuck, report NEEDS_CONTEXT.
+- "The test is too complicated" → the design is too complicated. Simplify the public interface.
+- "I have to mock everything internal" → the code is too coupled. Use dependency injection at the boundary, not for every internal collaborator.
 - "The setup is huge" → extract helpers; if still complex, simplify the design.
 
 ### Bug fixes
 
-Reproduce the bug with a failing test first. Only then fix. The test proves the fix and prevents regression. Never fix a bug without a test.
+For a non-trivial bug, reproduce the failure with the smallest test that follows the real failure path through a public interface. Confirm RED reflects the observed bug (not a synthetic substitute), then fix minimally. Keep the regression test. Never fix a non-trivial bug without a regression test unless explicitly permitted.
+
+### Completion checklist (before reporting DONE)
+
+- [ ] Each behavior change has a test through a public interface.
+- [ ] You watched each new or changed test fail for the expected reason before implementing.
+- [ ] Production changes were minimal for the tests.
+- [ ] Refactors happened only while green.
+- [ ] Targeted and relevant surrounding tests pass with no unexpected errors or warnings.
+- [ ] Mocks are limited to true external boundaries.
+- [ ] Any skipped TDD exception was explicitly approved or documented.
+
+If you cannot check every box, you skipped TDD — recover before reporting.

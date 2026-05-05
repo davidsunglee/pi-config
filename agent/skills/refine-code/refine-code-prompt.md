@@ -123,6 +123,27 @@ When `Approved with concerns` triggers Final Verification, the reviewer's waived
    ]}
    ```
 
+   **Required content of the `<filled remediation prompt>`:**
+
+   Each remediation prompt you build for a `coder` dispatch MUST include all of the following sections. Construct them from the on-disk review file (the authoritative source from Step 3e), not from `finalMessage`:
+
+   - **Findings to fix.** Verbatim text of each batched finding from the review file (severity label, file:line references, and the reviewer's description). Do not paraphrase.
+   - **Scope.** The exact set of files/functions/regions the coder is allowed to modify for this batch. Out-of-scope edits are rejected.
+   - **TDD contract for production behavior changes.** For any finding that requires a production behavior change or bug fix, the coder MUST follow the `test-driven-development` skill on each behavior change in the batch:
+     1. Write a failing regression/behavior test through a public interface (API, UI, CLI, service boundary, or persistence-facing interface) that exercises the real failure path or the intended observable behavior. Do not target private helpers or internal call sequences.
+     2. Run the test and **verify RED** for the expected reason (the bug reproduces, or the desired behavior is absent). Fix typos/setup until the failure is meaningful.
+     3. Apply the minimal production fix to make the test pass; no speculative features or "while I'm here" refactors.
+     4. Run the targeted test and the relevant surrounding tests and **verify GREEN** with no unexpected errors or warnings.
+     5. Mock only true external boundaries; use real internal collaborators.
+   - **RED/GREEN evidence requirement.** The coder report MUST, for each production behavior change in the batch, include:
+     - **RED:** the failing test added (or extended) and the expected failure reason.
+     - **GREEN:** the test(s) now passing and confirmation the relevant suite still passes.
+
+     Each line one or two sentences. Missing RED/GREEN evidence for a production behavior change is grounds for the next reviewer pass to flag the remediation as incomplete.
+   - **TDD-not-applicable allowance.** For findings that change only documentation, configuration, comments, provenance/metadata, or other non-production-behavior content, the coder MAY write `TDD not applicable — <one-line reason>` in lieu of RED/GREEN evidence for that finding. The reason MUST be explicit (e.g. "docs-only correction in CONTRIBUTING.md", "config rename in tsconfig", "review-file provenance line update only"). This allowance does NOT apply to production behavior changes or bug fixes.
+
+   These remediation-prompt requirements govern the coder dispatch only. They do NOT change the coordinator/reviewer artifact protocol (provenance stamping, REVIEW_ARTIFACT marker, file-existence and path-equality checks, era handling, or failure modes) defined elsewhere in this prompt.
+
 7. **Commit remediation:**
    ```bash
    git add -A
