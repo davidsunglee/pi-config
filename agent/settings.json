@@ -1,5 +1,5 @@
 {
-  "lastChangelogVersion": "0.72.1",
+  "lastChangelogVersion": "0.73.0",
   "defaultProvider": "openai-codex",
   "defaultModel": "gpt-5.5",
   "defaultThinkingLevel": "high",
@@ -20,6 +20,7 @@
   "packages": [
     "~/Code/pi-interactive-subagent",
     "npm:pi-ghostty",
+    "npm:pi-mcp-adapter",
     "npm:pi-token-burden",
     "npm:pi-web-access",
     "npm:@aliou/pi-processes"
