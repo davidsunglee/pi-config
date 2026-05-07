@@ -146,6 +146,89 @@ VERDICT: PASS
             os.unlink(path)
 
 
+class TestExtraTokensAfterVerdict(unittest.TestCase):
+    def test_extra_token_after_pass_is_protocol_error(self):
+        content = """## Phase 1 Evidence
+
+## Per-Criterion Verdicts
+
+[Criterion 1] PASS extra
+reason: trailing token after verdict
+
+## Overall Verdict
+
+VERDICT: PASS
+"""
+        path = write_temp_report(content)
+        try:
+            rc, data, _, _ = run_script(
+                "--report", path, "--criteria-count", "1"
+            )
+            self.assertNotEqual(rc, 0)
+            self.assertIsNotNone(data)
+            self.assertEqual(data["verdict"], "FAIL")
+            errors = data["protocol_errors"]
+            self.assertTrue(
+                any("extra tokens" in e.lower() for e in errors),
+                f"Expected extra-tokens malformed-header error: {errors}",
+            )
+            # Criterion must not be recorded as a valid PASS.
+            self.assertEqual(data["per_criterion"], [])
+        finally:
+            os.unlink(path)
+
+    def test_extra_token_after_fail_is_protocol_error(self):
+        content = """## Phase 1 Evidence
+
+## Per-Criterion Verdicts
+
+[Criterion 1] FAIL because reasons
+reason: trailing token after verdict
+
+## Overall Verdict
+
+VERDICT: FAIL
+"""
+        path = write_temp_report(content)
+        try:
+            rc, data, _, _ = run_script(
+                "--report", path, "--criteria-count", "1"
+            )
+            self.assertNotEqual(rc, 0)
+            self.assertIsNotNone(data)
+            self.assertEqual(data["verdict"], "FAIL")
+            errors = data["protocol_errors"]
+            self.assertTrue(
+                any("extra tokens" in e.lower() for e in errors),
+                f"Expected extra-tokens malformed-header error: {errors}",
+            )
+        finally:
+            os.unlink(path)
+
+    def test_trailing_whitespace_after_verdict_is_accepted(self):
+        # Trailing spaces are not extra tokens; the line is stripped before
+        # matching, so this must remain valid.
+        content = (
+            "## Phase 1 Evidence\n\n"
+            "## Per-Criterion Verdicts\n\n"
+            "[Criterion 1] PASS   \n"
+            "reason: ok\n\n"
+            "## Overall Verdict\n\n"
+            "VERDICT: PASS\n"
+        )
+        path = write_temp_report(content)
+        try:
+            rc, data, _, _ = run_script(
+                "--report", path, "--criteria-count", "1"
+            )
+            self.assertEqual(rc, 0)
+            self.assertEqual(data["verdict"], "PASS")
+            self.assertEqual(len(data["per_criterion"]), 1)
+            self.assertEqual(data["per_criterion"][0]["verdict"], "PASS")
+        finally:
+            os.unlink(path)
+
+
 class TestDuplicateCriterion(unittest.TestCase):
     def test_duplicate_criterion_protocol_error(self):
         content = """## Phase 1 Evidence

@@ -172,9 +172,11 @@ def parse_per_criterion_verdicts(section_text, k):
             continue
         m = re.match(r"^\[Criterion (\d+)\]\s+(\S+)(.*)$", stripped)
         if m:
-            header_positions.append((idx, int(m.group(1)), m.group(2)))
+            header_positions.append(
+                (idx, int(m.group(1)), m.group(2), m.group(3))
+            )
 
-    for hi, (idx, n, token) in enumerate(header_positions):
+    for hi, (idx, n, token, trailing) in enumerate(header_positions):
         end = header_positions[hi + 1][0] if hi + 1 < len(header_positions) else len(lines)
         block_lines = lines[idx + 1:end]
         reason = _extract_reason(block_lines)
@@ -182,6 +184,11 @@ def parse_per_criterion_verdicts(section_text, k):
         if token not in ("PASS", "FAIL"):
             errors.append(
                 f"verifier malformed criterion header: [Criterion {n}] has invalid verdict token '{token}' (must be PASS or FAIL)"
+            )
+            continue
+        if trailing.strip():
+            errors.append(
+                f"verifier malformed criterion header: [Criterion {n}] has extra tokens after verdict (must be exactly '[Criterion {n}] PASS' or '[Criterion {n}] FAIL')"
             )
             continue
         if n in seen:
