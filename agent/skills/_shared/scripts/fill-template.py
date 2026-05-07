@@ -77,17 +77,38 @@ Placeholder Semantics:
         try:
             with open(args.template, 'r') as f:
                 template_content = f.read()
-        except FileNotFoundError:
+        except OSError as e:
+            sys.stderr.write(json.dumps({
+                "failure": "template missing or unreadable",
+                "path": args.template,
+                "error": str(e),
+            }) + "\n")
             sys.exit(2)
 
         # Read JSON placeholders
-        if args.placeholders_json == "-":
-            json_text = sys.stdin.read()
-        else:
-            with open(args.placeholders_json, 'r') as f:
-                json_text = f.read()
+        try:
+            if args.placeholders_json == "-":
+                json_text = sys.stdin.read()
+            else:
+                with open(args.placeholders_json, 'r') as f:
+                    json_text = f.read()
+        except OSError as e:
+            sys.stderr.write(json.dumps({
+                "failure": "placeholders-json missing or unreadable",
+                "path": args.placeholders_json,
+                "error": str(e),
+            }) + "\n")
+            sys.exit(2)
 
-        placeholders = json.loads(json_text)
+        try:
+            placeholders = json.loads(json_text)
+        except json.JSONDecodeError as e:
+            sys.stderr.write(json.dumps({
+                "failure": "placeholders-json malformed",
+                "path": args.placeholders_json,
+                "error": str(e),
+            }) + "\n")
+            sys.exit(2)
 
         # Replace placeholders in template
         output_content = template_content
@@ -122,6 +143,11 @@ Placeholder Semantics:
         sys.exit(0)
 
     except Exception as e:
+        sys.stderr.write(json.dumps({
+            "failure": "unexpected error",
+            "error": str(e),
+            "type": type(e).__name__,
+        }) + "\n")
         sys.exit(2)
 
 

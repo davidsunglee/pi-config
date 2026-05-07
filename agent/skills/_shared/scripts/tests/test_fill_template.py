@@ -246,7 +246,7 @@ class TestFillTemplate(unittest.TestCase):
             os.unlink(output_file)
 
     def test_missing_template_file(self):
-        """Test that missing --template file exits non-zero with structured error."""
+        """Test that missing --template file exits non-zero with structured JSON error."""
         missing_template = "/nonexistent/path/to/template.md"
         with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
             json.dump({"NAME": "world"}, f)
@@ -261,10 +261,51 @@ class TestFillTemplate(unittest.TestCase):
                 "--placeholders-json", json_file,
                 "--output", output_file
             ])
-            # Should exit non-zero
             self.assertNotEqual(code, 0, "Script should exit non-zero for missing template")
+            stderr_json = json.loads(stderr)
+            self.assertEqual(stderr_json["failure"], "template missing or unreadable")
         finally:
             os.unlink(json_file)
+            os.unlink(output_file)
+
+    def test_malformed_placeholders_json(self):
+        """Test that malformed --placeholders-json exits non-zero with structured JSON error."""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            f.write("{not valid json")
+            json_file = f.name
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.md', delete=False) as f:
+            output_file = f.name
+
+        try:
+            stdout, stderr, code = self.run_script([
+                "--template", str(self.simple_template),
+                "--placeholders-json", json_file,
+                "--output", output_file
+            ])
+            self.assertNotEqual(code, 0, "Script should exit non-zero for malformed JSON")
+            stderr_json = json.loads(stderr)
+            self.assertEqual(stderr_json["failure"], "placeholders-json malformed")
+        finally:
+            os.unlink(json_file)
+            os.unlink(output_file)
+
+    def test_missing_placeholders_json_file(self):
+        """Test that missing --placeholders-json file exits non-zero with structured JSON error."""
+        missing_json = "/nonexistent/path/to/placeholders.json"
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.md', delete=False) as f:
+            output_file = f.name
+
+        try:
+            stdout, stderr, code = self.run_script([
+                "--template", str(self.simple_template),
+                "--placeholders-json", missing_json,
+                "--output", output_file
+            ])
+            self.assertNotEqual(code, 0, "Script should exit non-zero for missing JSON")
+            stderr_json = json.loads(stderr)
+            self.assertEqual(stderr_json["failure"], "placeholders-json missing or unreadable")
+        finally:
             os.unlink(output_file)
 
     def test_help_flag(self):
