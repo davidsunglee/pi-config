@@ -2,15 +2,15 @@
 
 ### Outcome
 
-**Verdict:** Not approved
+**Verdict:** Approved
 
-**Reasoning:** The implementation covers the main workflow/source drift shape, but the documented reachability check does not actually verify that the brief SHA is reachable from HEAD. That gap can let stale briefs from another local branch be classified and auto-continued instead of surfacing the required checkpoint.
+**Reasoning:** The updated `generate-plan` skill satisfies the requested classifier behavior and shared allowlist extraction, including workflow-only auto-continue, non-workflow/uninspectable `(c)/(x)` checkpoints, ancestry checking, and NUL-separated path enumeration. The change is documentation/procedure-only, so no automated test gap blocks production readiness.
 
 ### Strengths
 
-- Adds a shared workflow-artifact allowlist document with clear directory-boundary matching examples.
-- Preserves path-based handoff and bounded preamble reads while adding explicit NUL-separated diff enumeration guidance.
-- Defines clear `(c)`/`(x)` menu handling with no auto-default for source/config drift and uninspectable cases.
+- `agent/skills/_shared/workflow-artifact-paths.md:9-20` defines the exact four allowed workflow prefixes and documents the directory-boundary matching rule with concrete positive/negative examples.
+- `agent/skills/generate-plan/SKILL.md:38-46` explicitly requires NUL-separated `git diff --name-only -z` parsing and preserves non-workflow path ordering for the mixed-changes menu.
+- `agent/skills/generate-plan/SKILL.md:59-80` covers malformed/missing SHA, non-ancestor SHA, git failures, and menu response handling without auto-defaulting.
 
 ### Issues
 
@@ -20,13 +20,12 @@ _None._
 
 #### Important (Should Fix)
 
-- `agent/skills/generate-plan/SKILL.md:74` describes the “brief SHA not reachable from HEAD” case, but the proposed detection (`git rev-list --quiet <brief-sha>` or unknown-revision failures from `git diff`) only verifies that the SHA exists as a revision; it does not prove it is an ancestor/reachable from `HEAD`. If the brief SHA exists on another local branch, `git diff <brief-sha>..HEAD` can succeed and the classifier may treat unrelated changes as workflow-only drift, bypassing the required uninspectable `(c)`/`(x)` checkpoint. Add an explicit ancestry check such as `git merge-base --is-ancestor <brief-sha> HEAD` before enumeration and route non-ancestors to sub-case B.
+_None._
 
 #### Minor (Nice to Have)
 
-- `agent/skills/generate-plan/SKILL.md:36` says the shared allowlist is the single source of truth and not to inline the four entries, but the workflow-drift message at `agent/skills/generate-plan/SKILL.md:50` hard-codes the four prefixes. Consider wording the message generically or instructing consumers to render the current shared allowlist so future allowlist changes cannot make the user-facing text stale.
+_None._
 
 ### Recommendations
 
-- Validate SHA format and commit existence first, then explicitly verify ancestry from the brief SHA to `HEAD` before running `git diff --name-only -z`.
-- Keep the workflow-drift message tied to the shared allowlist rather than duplicating the prefix list in `generate-plan/SKILL.md`.
+- Consider a future readability cleanup that orders the malformed-SHA and ancestry-check bullets before the enumeration bullet, matching the intended runtime control flow more linearly.
