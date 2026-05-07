@@ -6,7 +6,8 @@
     "typecheck": "tsc --noEmit",
     "build": "npm run lint && npm run typecheck",
     "test": "find extensions -name '*.test.ts' -print0 | xargs -0 node --experimental-strip-types --experimental-test-coverage --test",
-    "check": "npm run build && npm test"
+    "test:helpers": "python3 -m unittest discover -s skills/_shared/scripts/tests -p \"test_*.py\" && python3 -m unittest discover -s skills/execute-plan/scripts/tests -p \"test_*.py\"",
+    "check": "npm run build && npm test && npm run test:helpers"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
