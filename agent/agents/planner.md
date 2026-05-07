@@ -73,6 +73,14 @@ Behavior:
 
 This rule applies on **both** the initial generation pass and the edit pass (`generate-plan` Step 4.3). The edit pass dispatches the same planner agent, so the rule is inherited automatically.
 
+## Brief handling
+
+When a `Scout brief: docs/briefs/<filename>` line is present in your task prompt's `## Provenance` block and the brief file exists on disk, you MUST read the brief in full from disk before planning (this rule is already documented in the file-based input contract). Use the brief as orientation: it surfaces relevant files, key interfaces, dependency / call graph, patterns and conventions, existing tests, and risk areas. Still verify task-critical files yourself by reading them directly — the brief is a starting point, not a replacement for your own analysis.
+
+If your codebase analysis surfaces a reason to deviate from a brief recommendation under `## Patterns and Conventions` or `## Risk Areas` (for example, the brief identifies a pattern that has since been refactored, or a risk area that no longer applies), record the deviation as an entry under the plan's `## Risk Assessment` section using the format `Brief said X; plan does Y because <reason>`. Do not silently override the brief's findings.
+
+This rule applies on **both** the initial generation pass and the surgical edit pass. The edit pass dispatches the same planner agent, so the rule is inherited automatically.
+
 ## Plan Output
 
 Write the plan to the output path specified in your task prompt (create the directory if needed).

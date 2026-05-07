@@ -71,60 +71,62 @@ Cross-provider reviews (e.g., OpenAI reviewing Anthropic-generated code) are use
 Skills, extensions, subagents, and artifacts in this repo combine into a repeatable cycle:
 
 ```text
-┌─────────────┐   ┌──────────────┐   ┌──────────────┐   ┌──────────────┐   ┌──────────────┐
-│ Create todo │──▶│ Refine todo  │──▶│ Define spec  │──▶│ Generate plan│──▶│ Refine plan  │
-└─────────────┘   └──────────────┘   │  (optional)  │   └──────┬───────┘   │ (review-edit)│
-                                     └──────────────┘          │           └──────┬───────┘
-                                                               └──────────────────┘
-                                                                        │
-                                                                        ▼
-                                                              ┌──────────────────┐
-                                                              │  Execute plan    │
-                                                              │  wave by wave    │
-                                                              └─────────┬────────┘
-                                                                        │
-                                              ┌─────────────────────────┼─────────────────────────┐
-                                              ▼                         ▼                         ▼
-                                        ┌──────────┐               ┌──────────┐              ┌──────────┐
-                                        │ Task A   │               │ Task B   │              │ Task C   │  ← parallel coders
-                                        └────┬─────┘               └────┬─────┘              └────┬─────┘
-                                             └─────────────────────────┼─────────────────────────┘
-                                                                       ▼
-                                                              ┌────────────────┐
-                                                              │ Verify wave    │  ← fresh-context verifier
-                                                              └────────┬───────┘
-                                                                       ▼
-                                                              ┌────────────────┐
-                                                              │ Commit + tests │  ← three-set regression model
-                                                              └────────┬───────┘
-                                                                       ▼
-                                                              ┌────────────────┐
-                                                              │ Refine code    │  ← review-remediate loop
-                                                              └────────┬───────┘
-                                                                       ▼
-                                                              ┌────────────────┐
-                                                              │ Close todo /   │
-                                                              │ Finish branch  │
-                                                              └────────────────┘
+┌─────────────┐   ┌──────────────┐   ┌──────────────┐   ┌──────────────┐   ┌──────────────┐   ┌──────────────┐
+│ Create todo │──▶│ Refine todo  │──▶│ Scout        │──▶│ Define spec  │──▶│ Generate plan│──▶│ Refine plan  │
+└─────────────┘   └──────────────┘   │  (optional)  │   │  (optional)  │   └──────┬───────┘   │ (review-edit)│
+                                     └──────────────┘   └──────────────┘          │           └──────┬───────┘
+                                                                                  └──────────────────┘
+                                                                                           │
+                                                                                           ▼
+                                                                                 ┌──────────────────┐
+                                                                                 │  Execute plan    │
+                                                                                 │  wave by wave    │
+                                                                                 └─────────┬────────┘
+                                                                                           │
+                                                             ┌─────────────────────────────┼─────────────────────────┐
+                                                             ▼                             ▼                         ▼
+                                                       ┌──────────┐               ┌──────────┐              ┌──────────┐
+                                                       │ Task A   │               │ Task B   │              │ Task C   │  ← parallel coders
+                                                       └────┬─────┘               └────┬─────┘              └────┬─────┘
+                                                            └─────────────────────────┼─────────────────────────┘
+                                                                                      ▼
+                                                                             ┌────────────────┐
+                                                                             │ Verify wave    │  ← fresh-context verifier
+                                                                             └────────┬───────┘
+                                                                                      ▼
+                                                                             ┌────────────────┐
+                                                                             │ Commit + tests │  ← three-set regression model
+                                                                             └────────┬───────┘
+                                                                                      ▼
+                                                                             ┌────────────────┐
+                                                                             │ Refine code    │  ← review-remediate loop
+                                                                             └────────┬───────┘
+                                                                                      ▼
+                                                                             ┌────────────────┐
+                                                                             │ Close todo /   │
+                                                                             │ Finish branch  │
+                                                                             └────────────────┘
 ```
 
 ### How it works in practice
 
 1. **Create & refine a todo.** Todos live as markdown files in `docs/todos/` and are tracked in git. Refinement is collaborative — the agent asks clarifying questions before writing a structured description.
 
-2. **Define a spec (optional).** The `define-spec` skill takes a todo, an existing spec under `docs/specs/`, or freeform text. It probes the environment for a multiplexer (cmux, tmux, zellij, wezterm) and either dispatches a `spec-designer` subagent into its own pane for direct user Q&A, or runs the procedure inline if no mux is available. The spec is written to `docs/specs/` and gated on user review before commit.
+2. **Run scout (optional).** The `scout` skill takes a todo or freeform task and dispatches a non-interactive `scout` subagent into a fresh context. The agent performs a broad orientation pass, a task-focused deep dive, and a disconfirmation pass, then writes a structured brief to `docs/briefs/TODO-<id>-brief.md` (todo branch) or `docs/briefs/<YYYY-MM-DD>-<slug>-brief.md` (freeform branch). The orchestrator never reads the brief into its own context — the user reviews it directly between dispatch and commit. Downstream consumers (`define-spec`, `generate-plan`, `planner`, `plan-reviewer`) read the brief from disk through the existing `Scout brief: docs/briefs/<filename>` provenance line, skipping broad exploratory reads. **When scout has produced a brief, the next stage in the pipeline is `define-spec` — it is mandatory in this scout-to-planning path because there is no direct brief→plan dispatch.** The existing `(optional)` label on the next item (`Define a spec`) covers only the no-scout path, where you may go directly from todo to `generate-plan`; the brief never reaches the planner without flowing through `define-spec`'s auto-discovery and the resulting `Scout brief:` provenance line on the spec.
 
-3. **Generate a plan.** The `generate-plan` skill dispatches the `planner` subagent with a fully assembled prompt (from `generate-plan-prompt.md`). The planner deeply reads the codebase and writes a structured plan to `docs/plans/` containing numbered tasks, file lists, acceptance criteria, dependencies, and per-task model tier recommendations. When a spec exists, it is used as the primary input via path-based handoff (the orchestrator does not embed the full spec into its own context).
+3. **Define a spec (optional).** The `define-spec` skill takes a todo, an existing spec under `docs/specs/`, or freeform text. It probes the environment for a multiplexer (cmux, tmux, zellij, wezterm) and either dispatches a `spec-designer` subagent into its own pane for direct user Q&A, or runs the procedure inline if no mux is available. The spec is written to `docs/specs/` and gated on user review before commit.
 
-4. **Refine the plan.** After generation, `generate-plan` invokes the `refine-plan` skill (also usable standalone), which dispatches a `plan-refiner` subagent. The refiner runs an iterative review-edit loop: dispatch `plan-reviewer`, persist the era-versioned review file under `docs/plans/reviews/`, and dispatch `planner` in surgical-edit mode while the reviewer outcome is `Not approved` due to blocking Critical or Important findings. The skill itself owns the commit gate and writes versioned review artifacts each era.
+4. **Generate a plan.** The `generate-plan` skill dispatches the `planner` subagent with a fully assembled prompt (from `generate-plan-prompt.md`). The planner deeply reads the codebase and writes a structured plan to `docs/plans/` containing numbered tasks, file lists, acceptance criteria, dependencies, and per-task model tier recommendations. When a spec exists, it is used as the primary input via path-based handoff (the orchestrator does not embed the full spec into its own context).
 
-5. **Execute in waves.** The `execute-plan` skill decomposes tasks into dependency-ordered waves and dispatches `coder` subagents **in parallel**. Each worker receives a self-contained prompt (from `execute-task-prompt.md`) with task spec, plan context, and TDD instructions, and reports a typed status (`DONE`, `DONE_WITH_CONCERNS`, `NEEDS_CONTEXT`, `BLOCKED`). After each wave the orchestrator presents a combined wave-level concerns checkpoint so the user can continue, remediate selected tasks, or stop.
+5. **Refine the plan.** After generation, `generate-plan` invokes the `refine-plan` skill (also usable standalone), which dispatches a `plan-refiner` subagent. The refiner runs an iterative review-edit loop: dispatch `plan-reviewer`, persist the era-versioned review file under `docs/plans/reviews/`, and dispatch `planner` in surgical-edit mode while the reviewer outcome is `Not approved` due to blocking Critical or Important findings. The skill itself owns the commit gate and writes versioned review artifacts each era.
 
-6. **Verify and commit each wave.** A fresh-context `verifier` subagent re-reads task outputs and judges them per-criterion against each task's acceptance criteria — independent of the worker's self-assessment, with no shell access of its own. The orchestrator assembles the verifier-visible file set from the union of the task's declared `**Files:**` scope, the worker's self-report, and the observed diff state so a worker cannot narrow its own verification surface. Tasks that fail verification cannot be skipped. A checkpoint commit is then made and integration tests are classified into three sets: *baseline failures* (pre-existing, ignored), *deferred regressions* (plan-introduced, user-deferred), and *new regressions in the current wave* (block the wave). On the final wave the defer option is removed and completion is blocked until every deferred regression is resolved.
+6. **Execute in waves.** The `execute-plan` skill decomposes tasks into dependency-ordered waves and dispatches `coder` subagents **in parallel**. Each worker receives a self-contained prompt (from `execute-task-prompt.md`) with task spec, plan context, and TDD instructions, and reports a typed status (`DONE`, `DONE_WITH_CONCERNS`, `NEEDS_CONTEXT`, `BLOCKED`). After each wave the orchestrator presents a combined wave-level concerns checkpoint so the user can continue, remediate selected tasks, or stop.
 
-7. **Refine code.** After all waves pass, the `refine-code` skill dispatches a `code-refiner` subagent that drives an iterative review-remediate loop: cross-provider `code-reviewer` passes, batched remediation by `coder` subagents, and remediation commits. The loop iterates until the reviewer outcome is `Approved`/`Approved with concerns`, or the iteration budget (default 3) is exhausted with `Not approved` still standing. Versioned review files are written to `docs/reviews/`.
+7. **Verify and commit each wave.** A fresh-context `verifier` subagent re-reads task outputs and judges them per-criterion against each task's acceptance criteria — independent of the worker's self-assessment, with no shell access of its own. The orchestrator assembles the verifier-visible file set from the union of the task's declared `**Files:**` scope, the worker's self-report, and the observed diff state so a worker cannot narrow its own verification surface. Tasks that fail verification cannot be skipped. A checkpoint commit is then made and integration tests are classified into three sets: *baseline failures* (pre-existing, ignored), *deferred regressions* (plan-introduced, user-deferred), and *new regressions in the current wave* (block the wave). On the final wave the defer option is removed and completion is blocked until every deferred regression is resolved.
 
-8. **Close out.** The plan moves to `docs/plans/done/`, the linked todo is closed, and the `finishing-a-development-branch` skill offers merge, PR, keep, or discard options.
+8. **Refine code.** After all waves pass, the `refine-code` skill dispatches a `code-refiner` subagent that drives an iterative review-remediate loop: cross-provider `code-reviewer` passes, batched remediation by `coder` subagents, and remediation commits. The loop iterates until the reviewer outcome is `Approved`/`Approved with concerns`, or the iteration budget (default 3) is exhausted with `Not approved` still standing. Versioned review files are written to `docs/reviews/`.
+
+9. **Close out.** The plan moves to `docs/plans/done/`, the linked todo is closed, and the `finishing-a-development-branch` skill offers merge, PR, keep, or discard options.
 
 ### Subagent architecture
 
@@ -132,6 +134,7 @@ The workflow uses eight specialized subagents, each starting with **fresh contex
 
 - **Todos** (`docs/todos/`) track lifecycle state.
 - **Specs** (`docs/specs/`) carry structured requirements from define-spec to generate-plan.
+- **Briefs** (`docs/briefs/`) carry task-scoped scout reconnaissance from the optional `scout` skill into `define-spec`, `generate-plan`, `planner`, and `plan-reviewer` via the `Scout brief:` provenance line.
 - **Plans** (`docs/plans/`) carry the task breakdown from generation through execution; `docs/plans/reviews/` carries era-versioned plan-review artifacts.
 - **Prompt templates** (`generate-plan-prompt.md`, `review-plan-prompt.md`, `edit-plan-prompt.md`, `refine-plan-prompt.md`, `execute-task-prompt.md`, `verify-task-prompt.md`, `review-code-prompt.md`, `refine-code-prompt.md`, etc.) are filled per-dispatch with exactly the context each worker needs.
 - **Reviews** (`docs/reviews/`) carry versioned code-review findings and remediation logs.
@@ -155,6 +158,7 @@ Skills live in `agent/skills/` and encode reusable operating procedures. Each sk
 
 | Skill | Summary |
 | --- | --- |
+| [`scout`](agent/skills/scout/README.md) | Optional non-interactive task-scoped reconnaissance. Dispatches the `scout` subagent and writes a structured brief to `docs/briefs/` that downstream stages read via the `Scout brief:` provenance line. |
 | [`define-spec`](agent/skills/define-spec/README.md) | Interactive spec writing from a todo, existing spec, or freeform request. Uses a mux-backed `spec-designer` pane when available, otherwise runs inline, then gates the resulting `docs/specs/` file on user review and commit. |
 | [`generate-plan`](agent/skills/generate-plan/README.md) | Produces an implementation plan in `docs/plans/` from a todo, spec/design document, or freeform text. Dispatches `planner`, uses path-based handoff for large artifacts, then hands off to `refine-plan`. |
 | [`refine-plan`](agent/skills/refine-plan/README.md) | Iterative plan review/edit loop. Dispatches `plan-refiner`, writes era-versioned reviews under `docs/plans/reviews/`, validates coverage sources, and owns the plan commit gate. |
