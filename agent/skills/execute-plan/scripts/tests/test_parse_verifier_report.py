@@ -1,0 +1,328 @@
+"""Tests for parse-verifier-report.py"""
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import unittest
+
+SCRIPT = os.path.join(
+    os.path.dirname(__file__), "..", "parse-verifier-report.py"
+)
+FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures")
+
+
+def run_script(*args):
+    """Run the script with given args; return (returncode, parsed_json)."""
+    result = subprocess.run(
+        [sys.executable, SCRIPT] + list(args),
+        capture_output=True,
+        text=True,
+    )
+    try:
+        data = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        data = None
+    return result.returncode, data, result.stdout, result.stderr
+
+
+def fixture(name):
+    return os.path.join(FIXTURES, name)
+
+
+def write_temp_report(content):
+    f = tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False)
+    f.write(content)
+    f.close()
+    return f.name
+
+
+class TestPassReport(unittest.TestCase):
+    def test_pass_report_exit_0(self):
+        rc, data, _, _ = run_script(
+            "--report", fixture("verifier-report-pass.md"),
+            "--criteria-count", "2",
+        )
+        self.assertEqual(rc, 0)
+
+    def test_pass_report_verdict_pass(self):
+        _, data, _, _ = run_script(
+            "--report", fixture("verifier-report-pass.md"),
+            "--criteria-count", "2",
+        )
+        self.assertIsNotNone(data)
+        self.assertEqual(data["verdict"], "PASS")
+
+    def test_pass_report_two_criteria(self):
+        _, data, _, _ = run_script(
+            "--report", fixture("verifier-report-pass.md"),
+            "--criteria-count", "2",
+        )
+        self.assertIsNotNone(data)
+        self.assertEqual(len(data["per_criterion"]), 2)
+
+
+class TestFailReport(unittest.TestCase):
+    def test_fail_report_exit_nonzero(self):
+        rc, _, _, _ = run_script(
+            "--report", fixture("verifier-report-fail.md"),
+            "--criteria-count", "2",
+        )
+        self.assertNotEqual(rc, 0)
+
+    def test_fail_report_verdict_fail(self):
+        _, data, _, _ = run_script(
+            "--report", fixture("verifier-report-fail.md"),
+            "--criteria-count", "2",
+        )
+        self.assertIsNotNone(data)
+        self.assertEqual(data["verdict"], "FAIL")
+
+    def test_fail_report_criterion_2_fail(self):
+        _, data, _, _ = run_script(
+            "--report", fixture("verifier-report-fail.md"),
+            "--criteria-count", "2",
+        )
+        self.assertIsNotNone(data)
+        # per_criterion is a list sorted by criterion number (0-indexed)
+        self.assertEqual(data["per_criterion"][1]["verdict"], "FAIL")
+
+
+class TestMalformedHeader(unittest.TestCase):
+    def test_malformed_header_exit_nonzero(self):
+        rc, _, _, _ = run_script(
+            "--report", fixture("verifier-report-malformed.md"),
+            "--criteria-count", "1",
+        )
+        self.assertNotEqual(rc, 0)
+
+    def test_malformed_header_verdict_fail(self):
+        _, data, _, _ = run_script(
+            "--report", fixture("verifier-report-malformed.md"),
+            "--criteria-count", "1",
+        )
+        self.assertIsNotNone(data)
+        self.assertEqual(data["verdict"], "FAIL")
+
+    def test_malformed_header_protocol_errors_nonempty(self):
+        _, data, _, _ = run_script(
+            "--report", fixture("verifier-report-malformed.md"),
+            "--criteria-count", "1",
+        )
+        self.assertIsNotNone(data)
+        self.assertTrue(len(data["protocol_errors"]) > 0)
+
+
+class TestLowercaseVerdict(unittest.TestCase):
+    def test_lowercase_pass_is_protocol_error(self):
+        content = """## Phase 1 Evidence
+
+## Per-Criterion Verdicts
+
+[Criterion 1] pass
+reason: lowercase verdict
+
+## Overall Verdict
+
+VERDICT: PASS
+"""
+        path = write_temp_report(content)
+        try:
+            rc, data, _, _ = run_script(
+                "--report", path, "--criteria-count", "1"
+            )
+            self.assertNotEqual(rc, 0)
+            self.assertIsNotNone(data)
+            self.assertTrue(len(data["protocol_errors"]) > 0)
+        finally:
+            os.unlink(path)
+
+
+class TestDuplicateCriterion(unittest.TestCase):
+    def test_duplicate_criterion_protocol_error(self):
+        content = """## Phase 1 Evidence
+
+## Per-Criterion Verdicts
+
+[Criterion 1] PASS
+reason: first
+
+[Criterion 1] PASS
+reason: duplicate
+
+## Overall Verdict
+
+VERDICT: PASS
+"""
+        path = write_temp_report(content)
+        try:
+            rc, data, _, _ = run_script(
+                "--report", path, "--criteria-count", "1"
+            )
+            self.assertNotEqual(rc, 0)
+            self.assertIsNotNone(data)
+            errors = data["protocol_errors"]
+            self.assertTrue(
+                any("duplicate" in e.lower() or "criterion 1" in e.lower() for e in errors),
+                f"Expected duplicate error in protocol_errors: {errors}",
+            )
+        finally:
+            os.unlink(path)
+
+
+class TestMissingCriterion(unittest.TestCase):
+    def test_missing_criterion_protocol_error(self):
+        content = """## Phase 1 Evidence
+
+## Per-Criterion Verdicts
+
+[Criterion 1] PASS
+reason: ok
+
+[Criterion 3] PASS
+reason: ok
+
+## Overall Verdict
+
+VERDICT: PASS
+"""
+        path = write_temp_report(content)
+        try:
+            rc, data, _, _ = run_script(
+                "--report", path, "--criteria-count", "3"
+            )
+            self.assertNotEqual(rc, 0)
+            self.assertIsNotNone(data)
+            errors = data["protocol_errors"]
+            self.assertTrue(
+                any("2" in e for e in errors),
+                f"Expected mention of criterion 2 missing in protocol_errors: {errors}",
+            )
+        finally:
+            os.unlink(path)
+
+
+class TestOutOfRangeCriterion(unittest.TestCase):
+    def test_out_of_range_criterion_protocol_error(self):
+        content = """## Phase 1 Evidence
+
+## Per-Criterion Verdicts
+
+[Criterion 1] PASS
+reason: ok
+
+[Criterion 2] PASS
+reason: ok
+
+[Criterion 3] PASS
+reason: ok
+
+[Criterion 4] PASS
+reason: out of range
+
+## Overall Verdict
+
+VERDICT: PASS
+"""
+        path = write_temp_report(content)
+        try:
+            rc, data, _, _ = run_script(
+                "--report", path, "--criteria-count", "3"
+            )
+            self.assertNotEqual(rc, 0)
+            self.assertIsNotNone(data)
+            errors = data["protocol_errors"]
+            self.assertTrue(
+                any("4" in e for e in errors),
+                f"Expected mention of out-of-range criterion 4 in protocol_errors: {errors}",
+            )
+        finally:
+            os.unlink(path)
+
+
+class TestEvidenceBlockMissingField(unittest.TestCase):
+    def test_missing_stderr_field_protocol_error(self):
+        rc, data, _, _ = run_script(
+            "--report", fixture("verifier-report-evidence-malformed.md"),
+            "--criteria-count", "1",
+            "--phase1-recipes-json", json.dumps({"1": "python3 myscript.py --help"}),
+        )
+        self.assertNotEqual(rc, 0)
+        self.assertIsNotNone(data)
+        errors = data["protocol_errors"]
+        self.assertIn(
+            "verifier phase-1 evidence block malformed at criterion 1: stderr field missing",
+            errors,
+        )
+
+
+class TestMissingEvidenceBlock(unittest.TestCase):
+    def test_missing_evidence_block_for_command_criterion(self):
+        content = """## Phase 1 Evidence
+
+## Per-Criterion Verdicts
+
+[Criterion 1] PASS
+reason: ok
+
+## Overall Verdict
+
+VERDICT: PASS
+"""
+        path = write_temp_report(content)
+        try:
+            rc, data, _, _ = run_script(
+                "--report", path,
+                "--criteria-count", "1",
+                "--phase1-recipes-json", json.dumps({"1": "python3 myscript.py --help"}),
+            )
+            self.assertNotEqual(rc, 0)
+            self.assertIsNotNone(data)
+            errors = data["protocol_errors"]
+            self.assertIn(
+                "verifier missing evidence block for command-style criterion 1",
+                errors,
+            )
+        finally:
+            os.unlink(path)
+
+
+class TestCommandNotMatchingRecipe(unittest.TestCase):
+    def test_command_not_matching_recipe_protocol_error(self):
+        content = """## Phase 1 Evidence
+
+[Evidence for Criterion 1]
+command: python3 myscript.py --wrong-flag
+exit_code: 0
+stdout: usage
+stderr:
+
+## Per-Criterion Verdicts
+
+[Criterion 1] PASS
+reason: ok
+
+## Overall Verdict
+
+VERDICT: PASS
+"""
+        path = write_temp_report(content)
+        try:
+            rc, data, _, _ = run_script(
+                "--report", path,
+                "--criteria-count", "1",
+                "--phase1-recipes-json", json.dumps({"1": "python3 myscript.py --help"}),
+            )
+            self.assertNotEqual(rc, 0)
+            self.assertIsNotNone(data)
+            errors = data["protocol_errors"]
+            self.assertTrue(
+                any("verifier ran command not matching any phase-1 recipe:" in e for e in errors),
+                f"Expected recipe-mismatch error in protocol_errors: {errors}",
+            )
+        finally:
+            os.unlink(path)
+
+
+if __name__ == "__main__":
+    unittest.main()
