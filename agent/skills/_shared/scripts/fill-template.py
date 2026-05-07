@@ -110,11 +110,20 @@ Placeholder Semantics:
             }) + "\n")
             sys.exit(2)
 
-        # Replace placeholders in template
-        output_content = template_content
-        for key, value in placeholders.items():
-            placeholder = "{" + key + "}"
-            output_content = output_content.replace(placeholder, str(value))
+        # Replace placeholders in template in a single pass over the original
+        # template, so values that happen to contain {OTHER_KEY} are NOT
+        # re-expanded (literal, non-recursive substitution).
+        str_placeholders = {k: str(v) for k, v in placeholders.items()}
+
+        def _sub(match):
+            key = match.group(1)
+            if key in str_placeholders:
+                return str_placeholders[key]
+            return match.group(0)
+
+        output_content = re.sub(
+            r'\{([A-Z_][A-Z0-9_]*)\}', _sub, template_content
+        )
 
         # Check for unreplaced placeholders if required
         if args.require_all_replaced:

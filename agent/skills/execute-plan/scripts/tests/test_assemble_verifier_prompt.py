@@ -212,6 +212,45 @@ class TestAssembleVerifierPrompt(unittest.TestCase):
             msg="Expected error output on malformed criteria",
         )
 
+    # ── Regression: no recursive substitution across replacements ────────────
+
+    def test_no_recursive_substitution_between_placeholders(self):
+        """
+        Placeholder values must be inserted literally; if a task spec contains
+        {WORKING_DIR} as a literal string, it must NOT be substituted with the
+        --working-dir value during the same fill.
+        """
+        custom_template = self._write_file(
+            "custom_template.md",
+            "TASK: {TASK_SPEC}\nDIR: {WORKING_DIR}\n",
+        )
+        # task_spec contains a literal {WORKING_DIR} which must not be expanded
+        task_spec_file = self._write_file("task_spec.txt", "see {WORKING_DIR} ref")
+        criteria_file = self._write_file("criteria.json", "[]")
+        recipes_file = self._write_file("recipes.json", "[]")
+        modified_file = self._write_file("modified.txt", "")
+        diff_file = self._write_file("diff.txt", "")
+        output_file = self._output_path()
+
+        result = run_script([
+            "--template", custom_template,
+            "--task-spec", task_spec_file,
+            "--criteria-json", criteria_file,
+            "--phase1-recipes-json", recipes_file,
+            "--modified-files", modified_file,
+            "--diff-context", diff_file,
+            "--working-dir", "/tmp/REAL_WORKING_DIR",
+            "--output", output_file,
+        ])
+
+        self.assertEqual(result.returncode, 0, msg=f"stderr: {result.stderr}")
+        with open(output_file) as f:
+            output = f.read()
+        # The literal {WORKING_DIR} inside TASK_SPEC value must remain literal.
+        self.assertIn("TASK: see {WORKING_DIR} ref", output)
+        # The actual template placeholder still resolves.
+        self.assertIn("DIR: /tmp/REAL_WORKING_DIR", output)
+
     # ── Test (e): unreplaced placeholders fail closed ─────────────────────────
 
     def test_unreplaced_placeholders_fail_closed(self):

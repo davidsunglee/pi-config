@@ -43,14 +43,26 @@ def deduplicate_lines(text):
 
 
 def fill_template(template, replacements):
-    result = template
-    for key, value in replacements.items():
-        result = result.replace("{" + key + "}", value)
-    return result
+    # Single-pass literal substitution: a placeholder that appears in a
+    # replacement value is NOT re-expanded.
+    def _sub(match):
+        key = match.group(1)
+        if key in replacements:
+            return replacements[key]
+        return match.group(0)
+
+    return re.sub(r'\{([A-Z_][A-Z0-9_]*)\}', _sub, template)
 
 
-def check_unreplaced(text):
-    return re.findall(r'\{[A-Z_][A-Z0-9_]*\}', text)
+def find_unreplaced_template_placeholders(template, replacements):
+    """Return placeholders present in the template that have no replacement.
+
+    Scans the template (not the filled output) so that literal `{...}` text
+    inside replacement values is not mistaken for an unfilled placeholder.
+    """
+    keys_in_template = re.findall(r'\{([A-Z_][A-Z0-9_]*)\}', template)
+    missing = [k for k in keys_in_template if k not in replacements]
+    return ["{" + k + "}" for k in missing]
 
 
 def main():
@@ -155,11 +167,13 @@ def main():
         "WORKING_DIR": args.working_dir,
     }
 
-    # Fill template
+    # Check for unreplaced placeholders in the template before filling, so
+    # literal `{KEY}` text inside replacement values isn't flagged.
+    remaining = find_unreplaced_template_placeholders(template, replacements)
+
+    # Fill template (single-pass, non-recursive)
     filled = fill_template(template, replacements)
 
-    # Check for unreplaced placeholders
-    remaining = check_unreplaced(filled)
     if remaining:
         print(
             json.dumps({

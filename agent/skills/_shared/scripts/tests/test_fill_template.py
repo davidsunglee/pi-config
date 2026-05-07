@@ -136,6 +136,39 @@ class TestFillTemplate(unittest.TestCase):
             os.unlink(json_file)
             os.unlink(output_file)
 
+    def test_no_recursive_expansion_with_present_key(self):
+        """A value containing {OTHER} must stay literal even when OTHER is also a key in the JSON map."""
+        # Use the multi-template which has {PLAN_PATH}, {TASK_NUMBER}, {GOAL}.
+        placeholders = {
+            "PLAN_PATH": "see {GOAL}",
+            "TASK_NUMBER": "1",
+            "GOAL": "REAL_GOAL_VALUE",
+        }
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            json.dump(placeholders, f)
+            json_file = f.name
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.md', delete=False) as f:
+            output_file = f.name
+
+        try:
+            stdout, stderr, code = self.run_script([
+                "--template", str(self.multi_template),
+                "--placeholders-json", json_file,
+                "--output", output_file
+            ])
+            self.assertEqual(code, 0, f"Script failed: {stderr}")
+            with open(output_file) as f:
+                content = f.read()
+            # The value of {PLAN_PATH} contains literal "{GOAL}", which must
+            # NOT be re-expanded into REAL_GOAL_VALUE.
+            self.assertIn("Plan: see {GOAL}", content)
+            # The actual {GOAL} placeholder in the template should still resolve.
+            self.assertIn("Goal: REAL_GOAL_VALUE", content)
+        finally:
+            os.unlink(json_file)
+            os.unlink(output_file)
+
     def test_extra_json_keys_ignored(self):
         """Test that extra JSON keys whose {KEY} does not appear in template are silently ignored."""
         placeholders = {

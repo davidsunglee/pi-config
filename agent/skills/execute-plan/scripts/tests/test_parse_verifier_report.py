@@ -506,6 +506,38 @@ def write_temp_recipes_raw(text):
     return f.name
 
 
+class TestPerCriterionFailOverridesOverallPass(unittest.TestCase):
+    def test_per_criterion_fail_with_overall_pass_yields_fail(self):
+        """A single per-criterion FAIL must force final FAIL even if VERDICT: PASS."""
+        content = """## Phase 1 Evidence
+
+## Per-Criterion Verdicts
+
+[Criterion 1] PASS
+reason: ok
+
+[Criterion 2] FAIL
+reason: actually broken
+
+## Overall Verdict
+
+VERDICT: PASS
+"""
+        path = write_temp_report(content)
+        try:
+            rc, data, _, _ = run_script(
+                "--report", path, "--criteria-count", "2"
+            )
+            self.assertNotEqual(rc, 0, "Per-criterion FAIL must produce non-zero exit")
+            self.assertIsNotNone(data)
+            self.assertEqual(
+                data["verdict"], "FAIL",
+                "Final verdict must be FAIL when any per-criterion is FAIL",
+            )
+        finally:
+            os.unlink(path)
+
+
 class TestPerCriterionReason(unittest.TestCase):
     def test_fail_report_includes_reason_text(self):
         _, data, _, _ = run_script(

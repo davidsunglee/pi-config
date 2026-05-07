@@ -367,8 +367,11 @@ Protocol-error labels:
         recipe_errors = validate_phase1_recipes(evidence_blocks, recipes, k)
         protocol_errors.extend(recipe_errors)
 
-    # Determine final verdict
-    if protocol_errors:
+    # Determine final verdict.
+    # Any per-criterion FAIL forces FAIL regardless of the overall line, so a
+    # malformed/inconsistent report cannot let a failed criterion through.
+    any_criterion_fail = any(c["verdict"] == "FAIL" for c in per_criterion)
+    if protocol_errors or any_criterion_fail:
         final_verdict = "FAIL"
     else:
         final_verdict = overall_verdict if overall_verdict else "FAIL"
