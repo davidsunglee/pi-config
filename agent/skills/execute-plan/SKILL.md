@@ -222,12 +222,6 @@ If a wave has more than 8 tasks, split it into sequential sub-waves of ≤8 task
 
 ## Step 6: Resolve model tiers
 
-Read the model matrix from `~/.pi/agent/model-tiers.json`:
-
-```bash
-cat ~/.pi/agent/model-tiers.json | python3 -c "import sys,json; print(json.dumps(json.load(sys.stdin), indent=2))"
-```
-
 Map each task's model recommendation to the tier map:
 
 | Task recommendation | Model to use |
@@ -241,11 +235,7 @@ If a task has no tier specified, apply this rubric:
 - Touches multiple files with integration concerns → `standard`
 - Requires design judgment or broad codebase understanding → `capable`
 
-Always pass an explicit `model` override per task in the subagent dispatch using the resolved value from the tier map. Do not parse, guess, or derive model name strings — use the exact strings from `model-tiers.json`.
-
-### Dispatch resolution
-
-Follow the canonical procedure in [`agent/skills/_shared/model-tier-resolution.md`](../_shared/model-tier-resolution.md) to resolve the dispatch `cli` for each task's model. `<agent> = coder`; `<tier>` is the per-task tier resolved from the table above (`capable`, `standard`, or `cheap`).
+Resolve `(model, cli)` per task by invoking `agent/skills/_shared/scripts/resolve-model-dispatch.py --tier <task-tier> --agent coder`. The full procedure is documented in [`agent/skills/_shared/model-tier-resolution.md`](../_shared/model-tier-resolution.md). Surface byte-equal canonical Template (1)–(4) on non-zero exit and stop the call site.
 
 Always pass `cli` explicitly on every orchestration call, even when it resolves to `"pi"`.
 
@@ -303,15 +293,13 @@ Step 7, Step 12.2, the Step 12 Debugger-first flow's success re-test, and Step 1
 
 **Dispatch.** Read `agent/skills/execute-plan/test-runner-prompt.md` once and fill `{TEST_COMMAND}` from Step 3 settings, `{WORKING_DIR}` with the absolute working directory, `{ARTIFACT_PATH}` with the absolute path above, and `{PHASE_LABEL}` with `baseline`, `wave-<N>-attempt-<K>`, or `final-gate-<seq>`.
 
-Resolve `(model, cli)` for this dispatch per the canonical procedure in [`agent/skills/_shared/model-tier-resolution.md`](../_shared/model-tier-resolution.md): `<agent> = test-runner`, `<tier> = crossProvider.cheap`. On any of the four documented failure conditions, emit the corresponding canonical template byte-equal with the parameter values above and stop the call site that triggered the dispatch — do NOT silently fall back to `cheap`, `standard`, or a CLI default.
+Resolve `(model, cli)` for this dispatch by invoking `agent/skills/_shared/scripts/resolve-model-dispatch.py --tier crossProvider.cheap --agent test-runner` (canonical procedure documented in [`agent/skills/_shared/model-tier-resolution.md`](../_shared/model-tier-resolution.md)). Surface byte-equal canonical Template (1)–(4) on non-zero exit and stop the call site that triggered the dispatch — do NOT silently fall back to `cheap`, `standard`, or a CLI default.
 
 Dispatch via `subagent_run_serial { tasks: [{ name: "test-runner: <phase label>", agent: "test-runner", task: "<filled test-runner-prompt.md>", model: "<resolved crossProvider.cheap model>", cli: "<dispatch[<provider>] for that model>" }] }`.
 
 **Artifact readback.** After dispatch, read `results[0].finalMessage`; on any failure below, stop the call site that triggered dispatch (do NOT fall back to running the test command in-orchestrator):
-1. **Marker extraction.** Find the LAST line in `finalMessage` matching `^TEST_RESULT_ARTIFACT: (.+)$`; if absent, stop with reason `test-runner response missing TEST_RESULT_ARTIFACT marker`.
-2. **Path-equality check.** Compare the marker path to `{ARTIFACT_PATH}`; if they differ, stop with reason `test-runner artifact path mismatch: expected <X>, got <Y>`.
-3. **Existence-and-non-empty check.** Read the marker path from disk; if missing or empty (zero bytes, or only whitespace), stop with reason `test-runner artifact missing or empty at <path>`.
-4. **Header-parse check.** Confirm the structured header has `PHASE`, `COMMAND`, `WORKING_DIRECTORY`, `EXIT_CODE`, `TIMESTAMP`, `FAILING_IDENTIFIERS_COUNT`, `FAILING_IDENTIFIERS:`, `END_FAILING_IDENTIFIERS`, `NON_RECONCILABLE_COUNT`, `NON_RECONCILABLE_FAILURES:`, and `END_NON_RECONCILABLE_FAILURES` in this exact order, followed by `--- RAW RUN OUTPUT BELOW ---`; if not, stop with reason `test-runner artifact header malformed at <path>: <specific check>`.
+1. **Marker / path / existence checks.** Run `agent/skills/_shared/scripts/parse-artifact-handoff.py --marker TEST_RESULT_ARTIFACT --final-message <path-to-finalMessage> --expected-path <{ARTIFACT_PATH}> --check-existence --check-non-empty`. On non-zero exit, surface the script's failure label verbatim (`missing TEST_RESULT_ARTIFACT marker`, `path mismatch: expected <X> got <Y>`, or `missing or empty at <path>`) and stop the call site.
+2. **Header-parse check.** Confirm the structured header has `PHASE`, `COMMAND`, `WORKING_DIRECTORY`, `EXIT_CODE`, `TIMESTAMP`, `FAILING_IDENTIFIERS_COUNT`, `FAILING_IDENTIFIERS:`, `END_FAILING_IDENTIFIERS`, `NON_RECONCILABLE_COUNT`, `NON_RECONCILABLE_FAILURES:`, and `END_NON_RECONCILABLE_FAILURES` in this exact order, followed by `--- RAW RUN OUTPUT BELOW ---`; if not, stop with reason `test-runner artifact header malformed at <path>: <specific check>`.
 
 **Dispatch-failure reasons.** If `subagent_run_serial` is unavailable, stop with reason `test-runner dispatch unavailable`. If dispatch returns an error result, stop with reason `test-runner dispatch failed`.
 
@@ -482,52 +470,49 @@ This gate exits when `BLOCKED_TASKS` is empty and `CONCERNED_TASKS` is either em
 
 ### Step 11.2: Dispatch the verifier
 
-For each task in the wave (regardless of its Step 9 status, except `BLOCKED` which is already handled in Step 10), dispatch a fresh `verifier` subagent using the template at `agent/skills/execute-plan/verify-task-prompt.md`. The verifier executes command-style `Verify:` recipes in Phase 1 and judges every criterion in Phase 2, then returns per-criterion verdicts under `## Per-Criterion Verdicts` and an overall `VERDICT:` line under `## Overall Verdict`. The orchestrator does not pre-collect command evidence — that work moved into the verifier itself per `agent/agents/verifier.md`.
+For each task in the wave (regardless of its Step 9 status, except `BLOCKED` which is already handled in Step 10), dispatch a fresh `verifier` subagent using the template at `agent/skills/execute-plan/verify-task-prompt.md`. The verifier executes command-style `Verify:` recipes in Phase 1 and judges every criterion in Phase 2, then returns per-criterion verdicts under `## Per-Criterion Verdicts` and an overall `VERDICT:` line under `## Overall Verdict`. The orchestrator dispatches and routes the verdict.
 
 Verifier dispatches for the wave run in parallel, bounded by the pi-interactive-subagent `MAX_PARALLEL_HARD_CAP` cap (see Step 5). Issue all verifier subagents concurrently up to the cap and wait for all of them to return before parsing in Step 11.3.
 
-Fill the template's placeholders as follows:
+**Template placeholders:**
 
 - `{TASK_SPEC}` — the task block from the plan, verbatim.
 - `{ACCEPTANCE_CRITERIA_WITH_VERIFY}` — the acceptance criteria list for the task, each paired with its `Verify:` recipe, numbered starting at 1.
-- `{PHASE_1_RECIPES}` — the orchestrator-extracted, command-style `Verify:` recipes for this task, numbered to match the criterion index in `{ACCEPTANCE_CRITERIA_WITH_VERIFY}`. Format each entry as `[Recipe for Criterion N] <recipe text>` on its own line. A criterion whose `Verify:` recipe is file-inspection or prose-inspection produces no entry — gaps in numbering are expected and correct. If the task has no command-style recipes, leave this section empty.
-- `{MODIFIED_FILES}` — the orchestrator-assembled verifier-visible file set, as a newline-separated, deduplicated list of paths. The orchestrator MUST compute this set as the union of three inputs so that the worker being judged cannot narrow its own verification surface:
+- `{PHASE_1_RECIPES}` — the orchestrator-extracted, command-style `Verify:` recipes for this task, numbered to match the criterion index. Inspection-style criteria produce no entry; gaps in numbering are expected.
+- `{MODIFIED_FILES}` — the orchestrator-assembled verifier-visible file set as a deduplicated, newline-separated path list (computed via the union rule below).
+- `{DIFF_CONTEXT}` — the uncommitted wave diff against `HEAD` for those files (produced by the diff helper below).
+- `{WORKING_DIR}` — the plan's working directory.
+
+**Union rule for `{MODIFIED_FILES}`.** The orchestrator MUST compute the verifier-visible file set as the union of three inputs so that the worker being judged cannot narrow its own verification surface:
+
   1. **Task-declared scope.** Every path listed in the plan task's `**Files:**` section, verbatim. A task that declares a file is on the hook for that file regardless of whether the worker reported touching it.
   2. **Worker-reported changes.** The paths listed in the worker's `## Files Changed` section. These are informative but NOT authoritative on their own — a worker that omits a file it actually modified cannot hide that file from the verifier.
   3. **Orchestrator-observed diff state.** The paths surfaced by `git status --porcelain` (working tree and index, relative to the last commit) for the wave, plus any files present in the wave's `git diff HEAD` output. In parallel-wave dispatch where multiple tasks share the working tree, scope this to files that plausibly belong to this task — at minimum include every path from inputs 1 and 2 that also appears in the orchestrator-observed set, and include any additional orchestrator-observed paths that fall under the task's declared `**Files:**` directories. Include all orchestrator-observed paths when the wave contains only this task.
-  Deduplicate the union and present it as the verifier-visible file set. Explicitly record in the prompt that this set is orchestrator-assembled so the verifier knows it is not simply the worker's self-report.
-- `{DIFF_CONTEXT}` — the uncommitted wave diff against `HEAD`, produced as follows. For tracked files modified in this wave, use `git diff HEAD -- <modified files>`. For newly created (untracked) files, `git diff HEAD` does not produce output; instead, generate a diff for each new file via `git diff --no-index /dev/null -- <file>` (which produces a unified diff showing the entire file as added). Concatenate both outputs into a single diff block. To identify which files are new vs. modified, check `git status --porcelain -- <modified files>`: entries prefixed with `??` are untracked/new; all others are tracked modifications. This reflects the working tree vs. the last commit, which is where wave changes live before Step 12's commit. Do NOT substitute a committed-range diff (e.g. a diff between `HEAD` and a prior commit) or a `--staged` diff; wave changes have not been committed yet. **Diff truncation rule.** If the combined diff output exceeds 500 lines or 40 KB, truncate it by keeping the first 300 lines and the last 100 lines, separated by a single marker line that records the pre-truncation line count and byte count (e.g., `[diff truncated — <N> lines, <B> bytes total; verifier should note this and fall back to reading the named files for file-inspection criteria whose relevant code may lie in the truncated window]`). Never silently drop diff output. If a file-inspection criterion cannot be judged because the relevant hunk is inside the truncated window, the verifier should read the named file(s) directly from `## Verifier-Visible Files` rather than guessing. **Sub-task dispatch carve-out:** Sub-task dispatches from the Blocked handling phase of Step 10 (split-into-sub-tasks) MUST occur pre-commit — their changes must remain in the working tree at Step 11 time so `git diff HEAD` captures them alongside the rest of the wave. Step 12's commit is the only sanctioned transition from working tree to committed state for wave changes, and it runs after Step 11. If for any reason a sub-task's changes were committed before Step 11 runs for this wave (a protocol violation that should not normally occur), substitute `git diff <pre-subtask-commit>..HEAD -- <modified files>` for those criteria so the verifier still sees the sub-task's changes; otherwise file-inspection criteria will fail for insufficient evidence even though the work was done.
-- `{WORKING_DIR}` — the plan's working directory.
 
-**Verifier model tier:** Every verifier dispatch in execute-plan uses the model resolved from `crossProvider.standard` per the canonical procedure in [`agent/skills/_shared/model-tier-resolution.md`](../_shared/model-tier-resolution.md): `<agent> = verifier`, `<tier> = crossProvider.standard`. Verifier model selection is no longer based on the model tier used by the task under review (the prior `standard` default plus `capable` upgrade rule is removed). On any of the four documented failure conditions, emit the corresponding canonical template byte-equal and stop — do not silently fall back to a non-cross-provider tier.
+Deduplicate the union and present it as the verifier-visible file set. The prompt records that this set is orchestrator-assembled so the verifier knows it is not simply the worker's self-report.
 
-Dispatch the verifier wave as `subagent_run_parallel { tasks: [{ name: "<task-N>: <task-title>", agent: "verifier", task: "<filled verify-task-prompt.md>", model: "<resolved crossProvider.standard model>", cli: "<dispatch[<provider>] for that model>" }, ...] }`.
+**Sub-task dispatch carve-out:** Sub-task dispatches from the Blocked handling phase of Step 10 (split-into-sub-tasks) MUST occur pre-commit — their changes must remain in the working tree at Step 11 time so `git diff HEAD` captures them alongside the rest of the wave. Step 12's commit is the only sanctioned transition from working tree to committed state for wave changes, and it runs after Step 11. If for any reason a sub-task's changes were committed before Step 11 runs for this wave (a protocol violation that should not normally occur), substitute `git diff <pre-subtask-commit>..HEAD -- <modified files>` for those criteria so the verifier still sees the sub-task's changes; otherwise file-inspection criteria will fail for insufficient evidence even though the work was done.
+
+**Orchestration sequence (per wave):**
+
+1. Run `agent/skills/execute-plan/scripts/extract-plan-tasks.py --plan <plan-path>` to obtain the JSON task manifest (task spec, files, criteria with `Verify:` recipes, model recommendation). Use the per-task entry below for each task in the wave.
+2. **Classify each criterion's `Verify:` recipe** as command-style or inspection-style. Each command-style recipe becomes a `{criterion_n, recipe}` entry feeding `{PHASE_1_RECIPES}`; inspection-style criteria produce no entry.
+3. **Compute `{MODIFIED_FILES}`** by applying the union rule above (Task-declared scope ∪ Worker-reported changes ∪ Orchestrator-observed diff state, deduplicated).
+4. Run `agent/skills/execute-plan/scripts/collect-diff-context.py --working-dir <working-dir> --files-json <modified-files-json>` to produce `{DIFF_CONTEXT}`. The helper handles tracked + untracked files and applies the standard diff truncation rule (500 lines / 40 KB, keeping the first 300 + last 100 lines with a marker line recording the pre-truncation totals).
+5. Run `agent/skills/execute-plan/scripts/assemble-verifier-prompt.py --task-spec <…> --criteria-json <…> --phase1-recipes-json <…> --modified-files <…> --diff-context <…> --working-dir <working-dir>` to fill the template and produce the verifier prompt.
+6. Resolve `(model, cli)` for the verifier dispatch by invoking `agent/skills/_shared/scripts/resolve-model-dispatch.py --tier crossProvider.standard --agent verifier` (canonical procedure documented in [`agent/skills/_shared/model-tier-resolution.md`](../_shared/model-tier-resolution.md)). Surface byte-equal canonical Template (1)–(4) on non-zero exit and stop. Verifier model selection is not based on the model tier used by the task under review.
+7. Dispatch the verifier wave as `subagent_run_parallel { tasks: [{ name: "<task-N>: <task-title>", agent: "verifier", task: "<filled verify-task-prompt.md>", model: "<resolved crossProvider.standard model>", cli: "<resolved cli>" }, ...] }`.
 
 ### Step 11.3: Parse verifier output and gate the wave
 
-The verifier returns a report with two sections: `## Per-Criterion Verdicts` and `## Overall Verdict`. Parse as follows:
+After all verifier dispatches return, run `agent/skills/execute-plan/scripts/parse-verifier-report.py --report <path-to-verifier-finalMessage> --criteria-count <K> --phase1-recipes-json <path-to-phase1-recipes-json>` for each task, where `<K>` is the total number of acceptance criteria for the task (numbered `1..K` in plan order). The script enforces the protocol: per-criterion header shape `[Criterion N] <PASS|FAIL>` (no `verdict:` prefix, no lowercase, no extra tokens), overall `VERDICT: <PASS|FAIL>`, full coverage `S == {1..K}` (exactly one header per criterion number, no gaps, no duplicates, no out-of-range numbers), and the three Phase 1 evidence-block protocol errors (`verifier phase-1 evidence block malformed at criterion N: <specific check>`, `verifier missing evidence block for command-style criterion N`, `verifier ran command not matching any phase-1 recipe: <command>`).
 
-- Each per-criterion header MUST match the exact shape `[Criterion N] <PASS | FAIL>` where `N` is the criterion number and the verdict token is either the literal `PASS` or the literal `FAIL`. There is no `verdict:` prefix, no lowercase form, and no additional tokens on that line.
-- The overall verdict line MUST match `VERDICT: <PASS | FAIL>`.
-
-Acceptance criteria are binary: each criterion is either `PASS` or `FAIL`. No "partial pass", no "pass with concerns", no soft verdicts. A single `[Criterion N] FAIL` causes `VERDICT: FAIL` for the task.
-
-**Full-coverage requirement.** Let `K` be the total number of acceptance criteria for the task (numbered `1..K` in plan order, the same numbering passed in via `{ACCEPTANCE_CRITERIA_WITH_VERIFY}`). The verifier output MUST contain exactly one `[Criterion N]` header for every `N ∈ {1..K}` — no more, no less. Parse the set of criterion numbers `S := { N : the output contains a header "[Criterion N] <PASS|FAIL>" }` (S is a deduplicated set — duplicate headers for the same N do not expand it) and check:
-
-The verifier output MUST satisfy `S == {1..K}` — exactly one header per criterion number, no gaps and no out-of-range numbers. In addition, no criterion number may appear in two or more `[Criterion N]` headers; duplicates are a protocol error even when both duplicates agree on `PASS`/`FAIL`.
+Acceptance criteria are binary: each criterion is either `PASS` or `FAIL`. A single `[Criterion N] FAIL` causes `VERDICT: FAIL` for the task.
 
 Route the parsed result:
 
 - `VERDICT: PASS` — the task passes wave verification.
-- `VERDICT: FAIL` — route the task into Step 13's retry loop, including the per-criterion `FAIL` entries and their `reason:` text so the retry has concrete remediation targets.
-
-**Protocol-error routing.** Any malformed verifier output — missing or extra criterion blocks, duplicate criterion numbers, out-of-range numbers, a `verdict:` prefix, lowercase verdict tokens, or an unparseable overall verdict line — is treated exactly as `VERDICT: FAIL` for the task. Three additional protocol errors apply specifically to the two-phase verifier introduced for the Phase 1 evidence-collection path:
-
-- **`verifier phase-1 evidence block malformed at criterion N: <specific check>`** — a `[Evidence for Criterion N]` block is present in the verifier's `## Phase 1 Evidence` section but does not contain all four labelled fields (`command:`, `exit_code:`, `stdout:`, `stderr:`) in that order, or a labelled field is unparseable. `<specific check>` names the missing or malformed field.
-- **`verifier missing evidence block for command-style criterion N`** — the orchestrator supplied a recipe for criterion N in `{PHASE_1_RECIPES}` but the verifier's `## Phase 1 Evidence` section contains no `[Evidence for Criterion N]` block.
-- **`verifier ran command not matching any phase-1 recipe: <command>`** — a `[Evidence for Criterion N]` block's `command:` line is not BYTE-EQUAL to any recipe text supplied in `{PHASE_1_RECIPES}` (recipe-verbatim discipline violation).
-
-All protocol errors — including these three — route into Step 13's retry loop with a concrete description so the re-dispatched verifier has a concrete target to fix. Protocol errors never pass the wave gate and are never silently interpreted as `PASS`.
+- `VERDICT: FAIL` (including any malformed-output or Phase 1 protocol error surfaced by the script) — route the task into Step 13's retry loop, including the per-criterion `FAIL` entries and their `reason:` text so the retry has concrete remediation targets. Protocol errors never pass the wave gate and are never silently interpreted as `PASS`.
 
 **Wave gate exit:** The wave exits Step 11 successfully only when every task in the wave has `VERDICT: PASS`. If any task has `VERDICT: FAIL`, the wave is not verified and Step 12 MUST NOT run until Step 13's retry loop produces a `VERDICT: PASS` for every failed task.
 
