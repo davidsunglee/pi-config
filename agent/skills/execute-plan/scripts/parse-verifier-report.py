@@ -127,18 +127,42 @@ def parse_evidence_fields(n, lines):
     return found, errors
 
 
+def _extract_reason(block_lines):
+    """Extract the `reason:` field text (possibly multi-line) from a criterion block."""
+    reason_parts = []
+    in_reason = False
+    for line in block_lines:
+        stripped = line.strip()
+        if not in_reason:
+            m = re.match(r"^reason:\s*(.*)$", stripped, re.IGNORECASE)
+            if m:
+                in_reason = True
+                first = m.group(1)
+                if first:
+                    reason_parts.append(first)
+                continue
+        else:
+            if not stripped:
+                break
+            if re.match(r"^\[Criterion \d+\]", stripped):
+                break
+            reason_parts.append(stripped)
+    return " ".join(reason_parts).strip()
+
+
 def parse_per_criterion_verdicts(section_text, k):
     """
-    Parse [Criterion N] PASS|FAIL headers.
+    Parse [Criterion N] PASS|FAIL headers and trailing `reason:` text.
     Returns (list of per-criterion dicts sorted by N, list of protocol errors).
     """
     errors = []
     seen = {}
     lines = section_text.splitlines()
 
-    for line in lines:
+    # First pass: collect header positions so we can scope each block.
+    header_positions = []  # list of (line_idx, n, token)
+    for idx, line in enumerate(lines):
         stripped = line.strip()
-        # Check for the forbidden verdict: prefix form
         m_bad = re.match(r"^\[Criterion (\d+)\]\s+verdict:\s*(.+)$", stripped)
         if m_bad:
             n = int(m_bad.group(1))
@@ -146,28 +170,31 @@ def parse_per_criterion_verdicts(section_text, k):
                 f"verifier malformed criterion header: [Criterion {n}] uses forbidden 'verdict:' prefix"
             )
             continue
-        # Match the correct form: [Criterion N] PASS|FAIL
         m = re.match(r"^\[Criterion (\d+)\]\s+(\S+)(.*)$", stripped)
         if m:
-            n = int(m.group(1))
-            token = m.group(2)
-            if token not in ("PASS", "FAIL"):
-                errors.append(
-                    f"verifier malformed criterion header: [Criterion {n}] has invalid verdict token '{token}' (must be PASS or FAIL)"
-                )
-                continue
-            if n in seen:
-                errors.append(
-                    f"verifier duplicate criterion header: [Criterion {n}] appears more than once"
-                )
-                continue
-            if n < 1 or n > k:
-                errors.append(
-                    f"verifier out-of-range criterion header: [Criterion {n}] is outside 1..{k}"
-                )
-                continue
-            # Collect rest of block as reason
-            seen[n] = {"criterion": n, "verdict": token}
+            header_positions.append((idx, int(m.group(1)), m.group(2)))
+
+    for hi, (idx, n, token) in enumerate(header_positions):
+        end = header_positions[hi + 1][0] if hi + 1 < len(header_positions) else len(lines)
+        block_lines = lines[idx + 1:end]
+        reason = _extract_reason(block_lines)
+
+        if token not in ("PASS", "FAIL"):
+            errors.append(
+                f"verifier malformed criterion header: [Criterion {n}] has invalid verdict token '{token}' (must be PASS or FAIL)"
+            )
+            continue
+        if n in seen:
+            errors.append(
+                f"verifier duplicate criterion header: [Criterion {n}] appears more than once"
+            )
+            continue
+        if n < 1 or n > k:
+            errors.append(
+                f"verifier out-of-range criterion header: [Criterion {n}] is outside 1..{k}"
+            )
+            continue
+        seen[n] = {"criterion": n, "verdict": token, "reason": reason}
 
     # Check for missing criteria
     for i in range(1, k + 1):
@@ -207,8 +234,7 @@ def validate_phase1_recipes(evidence_blocks, recipes, k):
     Returns list of protocol errors.
     """
     errors = []
-    for n_str, recipe in recipes.items():
-        n = int(n_str)
+    for n, recipe in recipes.items():
         if n not in evidence_blocks:
             errors.append(
                 f"verifier missing evidence block for command-style criterion {n}"
@@ -220,6 +246,42 @@ def validate_phase1_recipes(evidence_blocks, recipes, k):
                     f"verifier ran command not matching any phase-1 recipe: {actual_command}"
                 )
     return errors
+
+
+def _load_phase1_recipes(path):
+    """
+    Load phase-1 recipes from a JSON file.
+
+    Required shape: a JSON array of objects, each with integer "criterion_n"
+    and string "recipe". Returns ({n: recipe} dict, list_of_protocol_errors).
+    """
+    try:
+        with open(path, "r") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError) as e:
+        return {}, [f"phase1-recipes-json invalid: {e}"]
+
+    if not isinstance(data, list):
+        return {}, [
+            "phase1-recipes-json invalid: expected a JSON array of "
+            '{"criterion_n", "recipe"} entries'
+        ]
+
+    recipes = {}
+    for i, entry in enumerate(data):
+        if (
+            not isinstance(entry, dict)
+            or "criterion_n" not in entry
+            or "recipe" not in entry
+            or not isinstance(entry["criterion_n"], int)
+            or not isinstance(entry["recipe"], str)
+        ):
+            return {}, [
+                f"phase1-recipes-json invalid: entry {i} must be an object "
+                'with integer "criterion_n" and string "recipe"'
+            ]
+        recipes[entry["criterion_n"]] = entry["recipe"]
+    return recipes, []
 
 
 def main():
@@ -243,7 +305,10 @@ Protocol-error labels:
     parser.add_argument(
         "--phase1-recipes-json",
         default=None,
-        help='JSON object mapping criterion number (string) to recipe text, e.g. {"1": "cmd"}',
+        help=(
+            "Path to a JSON file containing an array of "
+            '{"criterion_n": <int>, "recipe": <str>} entries.'
+        ),
     )
     args = parser.parse_args()
 
@@ -252,8 +317,18 @@ Protocol-error labels:
 
     k = args.criteria_count
     recipes = {}
+    recipes_load_errors = []
     if args.phase1_recipes_json:
-        recipes = json.loads(args.phase1_recipes_json)
+        recipes, recipes_load_errors = _load_phase1_recipes(args.phase1_recipes_json)
+        if recipes_load_errors:
+            result = {
+                "verdict": "FAIL",
+                "per_criterion": [],
+                "phase1_evidence": {},
+                "protocol_errors": recipes_load_errors,
+            }
+            print(json.dumps(result, indent=2))
+            sys.exit(1)
 
     sections = parse_sections(text)
 

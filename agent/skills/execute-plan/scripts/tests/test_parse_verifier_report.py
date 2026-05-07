@@ -37,6 +37,14 @@ def write_temp_report(content):
     return f.name
 
 
+def write_temp_recipes(recipes_array):
+    """Write a phase1-recipes JSON file (array shape)."""
+    f = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False)
+    json.dump(recipes_array, f)
+    f.close()
+    return f.name
+
+
 class TestPassReport(unittest.TestCase):
     def test_pass_report_exit_0(self):
         rc, data, _, _ = run_script(
@@ -242,18 +250,24 @@ VERDICT: PASS
 
 class TestEvidenceBlockMissingField(unittest.TestCase):
     def test_missing_stderr_field_protocol_error(self):
-        rc, data, _, _ = run_script(
-            "--report", fixture("verifier-report-evidence-malformed.md"),
-            "--criteria-count", "1",
-            "--phase1-recipes-json", json.dumps({"1": "python3 myscript.py --help"}),
+        recipes_path = write_temp_recipes(
+            [{"criterion_n": 1, "recipe": "python3 myscript.py --help"}]
         )
-        self.assertNotEqual(rc, 0)
-        self.assertIsNotNone(data)
-        errors = data["protocol_errors"]
-        self.assertIn(
-            "verifier phase-1 evidence block malformed at criterion 1: stderr field missing",
-            errors,
-        )
+        try:
+            rc, data, _, _ = run_script(
+                "--report", fixture("verifier-report-evidence-malformed.md"),
+                "--criteria-count", "1",
+                "--phase1-recipes-json", recipes_path,
+            )
+            self.assertNotEqual(rc, 0)
+            self.assertIsNotNone(data)
+            errors = data["protocol_errors"]
+            self.assertIn(
+                "verifier phase-1 evidence block malformed at criterion 1: stderr field missing",
+                errors,
+            )
+        finally:
+            os.unlink(recipes_path)
 
 
 class TestMissingEvidenceBlock(unittest.TestCase):
@@ -270,11 +284,14 @@ reason: ok
 VERDICT: PASS
 """
         path = write_temp_report(content)
+        recipes_path = write_temp_recipes(
+            [{"criterion_n": 1, "recipe": "python3 myscript.py --help"}]
+        )
         try:
             rc, data, _, _ = run_script(
                 "--report", path,
                 "--criteria-count", "1",
-                "--phase1-recipes-json", json.dumps({"1": "python3 myscript.py --help"}),
+                "--phase1-recipes-json", recipes_path,
             )
             self.assertNotEqual(rc, 0)
             self.assertIsNotNone(data)
@@ -285,6 +302,7 @@ VERDICT: PASS
             )
         finally:
             os.unlink(path)
+            os.unlink(recipes_path)
 
 
 class TestCommandNotMatchingRecipe(unittest.TestCase):
@@ -307,11 +325,14 @@ reason: ok
 VERDICT: PASS
 """
         path = write_temp_report(content)
+        recipes_path = write_temp_recipes(
+            [{"criterion_n": 1, "recipe": "python3 myscript.py --help"}]
+        )
         try:
             rc, data, _, _ = run_script(
                 "--report", path,
                 "--criteria-count", "1",
-                "--phase1-recipes-json", json.dumps({"1": "python3 myscript.py --help"}),
+                "--phase1-recipes-json", recipes_path,
             )
             self.assertNotEqual(rc, 0)
             self.assertIsNotNone(data)
@@ -322,6 +343,89 @@ VERDICT: PASS
             )
         finally:
             os.unlink(path)
+            os.unlink(recipes_path)
+
+
+class TestPhase1RecipesPathInvalid(unittest.TestCase):
+    def test_phase1_recipes_missing_file_protocol_error(self):
+        rc, data, _, _ = run_script(
+            "--report", fixture("verifier-report-pass.md"),
+            "--criteria-count", "2",
+            "--phase1-recipes-json", "/nonexistent/path/recipes.json",
+        )
+        self.assertNotEqual(rc, 0)
+        self.assertIsNotNone(data)
+        errors = data["protocol_errors"]
+        self.assertTrue(
+            any("phase1-recipes-json invalid" in e for e in errors),
+            f"Expected phase1-recipes-json invalid error: {errors}",
+        )
+
+    def test_phase1_recipes_object_shape_protocol_error(self):
+        # Old object shape {"1": "cmd"} must be rejected; only array shape is accepted.
+        recipes_path = write_temp_recipes_raw(json.dumps({"1": "python3 myscript.py --help"}))
+        try:
+            rc, data, _, _ = run_script(
+                "--report", fixture("verifier-report-pass.md"),
+                "--criteria-count", "2",
+                "--phase1-recipes-json", recipes_path,
+            )
+            self.assertNotEqual(rc, 0)
+            self.assertIsNotNone(data)
+            errors = data["protocol_errors"]
+            self.assertTrue(
+                any("phase1-recipes-json invalid" in e for e in errors),
+                f"Expected phase1-recipes-json invalid error: {errors}",
+            )
+        finally:
+            os.unlink(recipes_path)
+
+    def test_phase1_recipes_array_shape_accepted(self):
+        recipes_path = write_temp_recipes(
+            [{"criterion_n": 1, "recipe": "python3 myscript.py --help"}]
+        )
+        try:
+            rc, data, _, _ = run_script(
+                "--report", fixture("verifier-report-evidence-malformed.md"),
+                "--criteria-count", "1",
+                "--phase1-recipes-json", recipes_path,
+            )
+            # Recipe matches the command in the report; failure here comes only
+            # from the missing stderr field, not from a recipes-shape error.
+            self.assertNotEqual(rc, 0)
+            self.assertIsNotNone(data)
+            errors = data["protocol_errors"]
+            self.assertFalse(
+                any("phase1-recipes-json invalid" in e for e in errors),
+                f"Array-shape recipes file must not be rejected: {errors}",
+            )
+        finally:
+            os.unlink(recipes_path)
+
+
+def write_temp_recipes_raw(text):
+    f = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False)
+    f.write(text)
+    f.close()
+    return f.name
+
+
+class TestPerCriterionReason(unittest.TestCase):
+    def test_fail_report_includes_reason_text(self):
+        _, data, _, _ = run_script(
+            "--report", fixture("verifier-report-fail.md"),
+            "--criteria-count", "2",
+        )
+        self.assertIsNotNone(data)
+        # Each per_criterion entry must include 'reason'.
+        c1 = data["per_criterion"][0]
+        c2 = data["per_criterion"][1]
+        self.assertIn("reason", c1)
+        self.assertIn("reason", c2)
+        self.assertEqual(c1["criterion"], 1)
+        self.assertEqual(c2["criterion"], 2)
+        self.assertIn("--help flag", c1["reason"])
+        self.assertIn("non-zero exit", c2["reason"])
 
 
 if __name__ == "__main__":

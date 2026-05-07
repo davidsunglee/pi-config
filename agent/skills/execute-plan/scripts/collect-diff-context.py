@@ -130,7 +130,8 @@ def main():
     )
     parser.add_argument(
         "--files-json",
-        help="JSON array of file paths (alternative to --files)",
+        help="Path to a JSON file containing an array of file paths "
+             "(alternative to --files)",
     )
     parser.add_argument(
         "--limit-lines",
@@ -152,7 +153,28 @@ def main():
     args = parser.parse_args()
 
     if args.files_json:
-        files = json.loads(args.files_json)
+        try:
+            with open(args.files_json, "r") as f:
+                data = json.load(f)
+        except (OSError, json.JSONDecodeError) as e:
+            error = {
+                "error": "files_json_invalid",
+                "path": args.files_json,
+                "detail": str(e),
+            }
+            print(json.dumps(error), file=sys.stderr)
+            sys.exit(1)
+        if not isinstance(data, list) or not all(
+            isinstance(x, str) for x in data
+        ):
+            error = {
+                "error": "files_json_invalid",
+                "path": args.files_json,
+                "detail": "expected JSON array of file path strings",
+            }
+            print(json.dumps(error), file=sys.stderr)
+            sys.exit(1)
+        files = data
     elif args.files:
         files = [f.strip() for f in args.files.split(",") if f.strip()]
     else:

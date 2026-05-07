@@ -188,6 +188,57 @@ class TestOutsideGitRepo(unittest.TestCase):
             )
 
 
+class TestFilesJsonPath(unittest.TestCase):
+    def test_files_json_path_reads_file(self):
+        repo = make_temp_repo()
+        commit_file(repo, "a.txt", "a\n")
+        with open(os.path.join(repo, "a.txt"), "w") as f:
+            f.write("a modified\n")
+        files_path = os.path.join(repo, "files.json")
+        with open(files_path, "w") as f:
+            json.dump(["a.txt"], f)
+        result = run_script(
+            ["--working-dir", repo, "--files-json", files_path]
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("a modified", result.stdout)
+        stderr_json = json.loads(result.stderr.strip())
+        self.assertEqual(stderr_json["files_observed"], ["a.txt"])
+
+    def test_files_json_missing_file_structured_error(self):
+        repo = make_temp_repo()
+        result = run_script(
+            ["--working-dir", repo, "--files-json", os.path.join(repo, "nope.json")]
+        )
+        self.assertNotEqual(result.returncode, 0)
+        err = json.loads(result.stderr.strip())
+        self.assertEqual(err.get("error"), "files_json_invalid")
+
+    def test_files_json_malformed_json_structured_error(self):
+        repo = make_temp_repo()
+        files_path = os.path.join(repo, "bad.json")
+        with open(files_path, "w") as f:
+            f.write("{not json")
+        result = run_script(
+            ["--working-dir", repo, "--files-json", files_path]
+        )
+        self.assertNotEqual(result.returncode, 0)
+        err = json.loads(result.stderr.strip())
+        self.assertEqual(err.get("error"), "files_json_invalid")
+
+    def test_files_json_not_array_structured_error(self):
+        repo = make_temp_repo()
+        files_path = os.path.join(repo, "obj.json")
+        with open(files_path, "w") as f:
+            json.dump({"a": "b"}, f)
+        result = run_script(
+            ["--working-dir", repo, "--files-json", files_path]
+        )
+        self.assertNotEqual(result.returncode, 0)
+        err = json.loads(result.stderr.strip())
+        self.assertEqual(err.get("error"), "files_json_invalid")
+
+
 class TestCleanTrackedFileTakesTrackedBranch(unittest.TestCase):
     def test_clean_tracked_file_takes_tracked_branch(self):
         """Clean committed file (no working-tree changes) must not produce added-content diff."""
