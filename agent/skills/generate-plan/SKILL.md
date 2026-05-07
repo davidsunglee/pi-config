@@ -32,10 +32,52 @@ From that bounded preamble, extract provenance using strict exact-match rules:
   - `Scout brief: docs/briefs/<filename>` → set `{SCOUT_BRIEF}` to `Scout brief: docs/briefs/<filename>`, **then verify the referenced file exists on disk**:
     - If the brief file does not exist, warn the user (`Scout brief referenced in spec not found at <path> — proceeding without it.`), leave `{SCOUT_BRIEF}` empty, and continue without failing.
     - **Do NOT read the brief contents into the orchestrator prompt.** The planner reads the brief from disk itself — this is the whole point of path-based handoff.
-    - Staleness check (informational only):
-      - When the brief file exists, perform a bounded preamble read of its first ~8 lines (e.g., `head -n 8 <path>`) and extract its `Git SHA: <sha>` line.
-      - If the brief SHA differs from the current repo HEAD SHA (`git rev-parse HEAD`), emit one warning to the user verbatim: `Scout brief at <path> was generated at SHA <brief-sha>; HEAD is now <head-sha>. Treating as potentially stale; planning will continue. Re-run /scout TODO-<id> if you want a fresh brief.` Continue planning with the brief — do NOT block.
-      - If the SHA line is missing, malformed, or unreadable, emit a softer warning verbatim: `Scout brief at <path> has unreadable Git SHA preamble — continuing without staleness signal.` Continue planning.
+    - Staleness classifier (gates planning when source/config drift is detected):
+      - Workflow-artifact path matching uses the allowlist defined in [`agent/skills/_shared/workflow-artifact-paths.md`](../_shared/workflow-artifact-paths.md) — that doc is the single source of truth. Do NOT inline the four allowlist entries here.
+      - When the brief file exists, perform a bounded preamble read of its first ~8 lines (e.g., `head -n 8 <path>`) and extract its `Git SHA: <sha>` line. Compute the current repo HEAD SHA via `git rev-parse HEAD`. If the brief SHA equals current HEAD SHA, continue silently and proceed to the next preamble rule (the `Source: TODO-<id>` line) — emit no message. This is the silent-continue path; today's SHA-equal behavior is preserved unchanged.
+      - If the brief SHA differs from HEAD, enumerate the set of files changed in the range `<brief-sha>..HEAD` using NUL-separated git output: `git diff --name-only -z <brief-sha>..HEAD`. Parse the output by NUL-separated path bytes, NOT by whitespace tokens. NUL separation is load-bearing: paths may contain spaces, deletions are listed as their pre-deletion path (default), renames are listed as their post-rename path (default). Both behaviors are required by the spec's enumeration contract.
+      - Classify each enumerated path against the workflow-artifact allowlist (loaded by reference from `agent/skills/_shared/workflow-artifact-paths.md`). Match by prefix-as-directory-boundary semantics: a path is 'under' a prefix when it begins with that prefix and the prefix ends with `/`. Apply the matching rule's directory-boundary semantics — `docs/specs/foo.md` matches `docs/specs/`; `docs/specs-archive/foo.md` does NOT match. Two outcomes follow: (a) all enumerated paths under the allowlist → workflow-drift path (Step 7); (b) at least one path outside the allowlist → mixed-changes menu (Step 8).
+      - `Workflow-drift outcome (all paths under the allowlist):` Emit the following informational message to the user:
+
+        > Scout brief at `<path>` was generated at SHA `<brief-sha>`; HEAD is now `<head-sha>`. Intervening commits modified only workflow artifacts (`docs/briefs/`, `docs/specs/`, `docs/todos/`, `docs/plans/`). Treating as expected workflow drift and continuing.
+
+        Plan generation continues without prompting. The brief stays load-bearing for the planner dispatch (`{SCOUT_BRIEF}` is populated as before).
+
+      - `Mixed-changes outcome (at least one path outside the allowlist):` Surface the following menu to the user. List ONLY the non-workflow paths (paths that failed the allowlist match), in the order returned by the enumeration (do not re-sort). Wait for user input. The orchestrator does NOT auto-default to `(c)` or `(x)`.
+
+        > Scout brief at `<path>` was generated at SHA `<brief-sha>`; HEAD is now `<head-sha>`. Non-workflow files changed since the brief SHA:
+        >
+        >   - `<path1>`
+        >   - `<path2>`
+        >   - …
+        >
+        > The brief may be stale relative to source/config/agent changes.
+        >
+        > **(c) Continue with plan generation** — proceed despite the scout brief / HEAD difference.
+        > **(x) Stop plan generation** — resolve manually before planning.
+
+      - `Uninspectable sub-case A (missing or malformed brief SHA):` Fires when the `Git SHA:` line is missing from the brief preamble OR the captured SHA is not a 40-character lowercase hex string. No file list is rendered (no enumeration was attempted). Surface the following menu to the user:
+
+        > Scout brief at `<path>` has no readable `Git SHA:` preamble line; cannot classify intervening changes against current HEAD `<head-sha>`. The brief may be stale.
+        >
+        > **(c) Continue with plan generation** — proceed despite the scout brief / HEAD difference.
+        > **(x) Stop plan generation** — resolve manually before planning.
+
+      - `Uninspectable sub-case B (brief SHA not reachable from HEAD):` Fires when the brief SHA is well-formed (40-char hex) but `git diff --name-only -z <brief-sha>..HEAD` reports the SHA as unknown — for example because it was rewritten out of the local history, or the brief was generated against a different repo. Detect by `git rev-list --quiet <brief-sha>` returning a non-zero exit, or equivalently by `git diff` failing with the unknown-revision error class. No file list is rendered (the range cannot be enumerated). Surface the following menu to the user:
+
+        > Scout brief at `<path>` was generated at SHA `<brief-sha>`; HEAD is now `<head-sha>`. Brief SHA is not reachable from HEAD; cannot classify intervening changes. The brief may be stale.
+        >
+        > **(c) Continue with plan generation** — proceed despite the scout brief / HEAD difference.
+        > **(x) Stop plan generation** — resolve manually before planning.
+
+      - `Uninspectable sub-case C (git command failure for any other reason):` Fires when any other failure prevents enumeration — e.g., `git` not on PATH, repo corruption, transient I/O error. Detect by a non-zero exit from `git diff --name-only -z <brief-sha>..HEAD` that is NOT the unknown-revision class handled by sub-case B. Capture the failing command's stderr verbatim (or trim leading/trailing whitespace WITHOUT paraphrasing — preserve the literal git error text) and include it as `<error>` in the menu body. No file list is rendered (enumeration failed). Do NOT auto-retry the `git diff` enumeration; a single failure surfaces the menu. Surface the following menu to the user:
+
+        > Scout brief at `<path>` was generated at SHA `<brief-sha>`; HEAD is now `<head-sha>`. Could not enumerate intervening changes: `<error>`. The brief may be stale.
+        >
+        > **(c) Continue with plan generation** — proceed despite the scout brief / HEAD difference.
+        > **(x) Stop plan generation** — resolve manually before planning.
+
+      - `Menu response handling (applies to all four menu variants):` Recognize on letter shortcut and word alias. **(c) Continue / continue / yes** → continue Step 1b's remaining preamble work — populate `{SCOUT_BRIEF}` with `Scout brief: docs/briefs/<filename>` if not already populated, then proceed to the next preamble rule and on to Step 2 of the skill. The brief stays load-bearing for the planner dispatch. **(x) Stop / stop / no** → stop `generate-plan` immediately before Step 2. Do not dispatch the planner. Do not invoke `refine-plan`. Emit the verbatim terminal status message: `Plan generation stopped — scout brief / HEAD difference unresolved.` Then halt the skill — do not fall through to Step 2. Unrecognized responses re-prompt with the same menu body. Do not auto-default to either `(c)` or `(x)`.
 - Lines that don't match one of the supported forms exactly are ignored.
 - Matching lines that appear later in the document (outside the preamble, including inside fenced code blocks or examples) are ignored.
 
