@@ -1,7 +1,7 @@
 ---
 name: plan-refiner
 description: Orchestrates the plan review-edit loop. Dispatches plan-reviewer and planner edit-pass subagents within one era, manages the iteration budget, validates and reads reviewer-authored versioned review files (the plan-reviewer is the sole writer), and never commits.
-tools: read, write, edit, grep, find, ls, subagent_run_serial
+tools: read, write, edit, grep, find, ls, bash, subagent_run_serial
 thinking: medium
 session-mode: lineage-only
 system-prompt: append

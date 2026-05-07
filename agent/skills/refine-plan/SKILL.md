@@ -156,19 +156,13 @@ Validate every parsed path with `test -s <path>` (non-empty regular file). On an
 
 Run this validation only on `STATUS: approved`, `STATUS: approved_with_concerns`, or `STATUS: not_approved_within_budget`; skip on `STATUS: failed` (no review file is guaranteed to exist on failure).
 
-For each review file path in the `## Review Files` list parsed in Step 9, read the file and validate the first non-empty line:
-
-1. The line MUST match the regex `^\*\*Reviewer:\*\* [^/]+/[^ ]+ via [a-zA-Z0-9_-]+$` — i.e. the literal markdown `**Reviewer:**`, a single space, a `<provider>/<model>` token (provider has no `/`, model has no whitespace), the literal ` via `, then a `<cli>` token (alphanumerics / `_` / `-`).
-2. Extract `<provider>/<model>` and `<cli>` from the matched line.
-3. The extracted value MUST NOT contain the substring `inline` (case-insensitive).
-4. Read `~/.pi/agent/model-tiers.json` (re-read; do not assume Step 5's snapshot is still current). Resolve `crossProvider.capable` and `capable` to their concrete model strings, and resolve `dispatch[<provider>]` for each, using the primitive operations defined in [`agent/skills/_shared/model-tier-resolution.md`](../_shared/model-tier-resolution.md) (tier-path resolution, provider-prefix extraction, dispatch lookup).
-5. `<provider>/<model>` MUST equal either the model string `crossProvider.capable` resolves to OR the model string `capable` resolves to (the two documented reviewer tiers in `refine-plan-prompt.md`'s `plan-reviewer` primary + fallback chain). `<cli>` MUST equal `dispatch[<provider>]` for that model's provider prefix.
-
-On any validation failure (missing first line, malformed format, `inline` value, or model/cli mismatch), set `STATUS = failed` with reason `review provenance validation failed at <path>: <specific check>` and skip to Step 11. Do NOT proceed to Step 10's commit gate after a validation failure.
+For each review file path in the `## Review Files` list parsed in Step 9, invoke `python3 agent/skills/_shared/scripts/validate-review-provenance.py --review-file <path> --allowed-tiers crossProvider.capable,capable`. On non-zero exit, set `STATUS = failed` with reason `review provenance validation failed at <path>: <specific check>` (where `<specific check>` is the `failure` field from the script's stderr JSON) and skip to Step 11. Do NOT proceed to Step 10's commit gate after a validation failure.
 
 When all paths pass validation, proceed to Step 10.
 
-## Step 10: Handle STATUS
+## Step 10
+
+Handle `STATUS` as follows.
 
 ### `STATUS: approved`
 

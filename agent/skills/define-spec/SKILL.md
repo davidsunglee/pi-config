@@ -61,13 +61,7 @@ Stop. Do not dispatch with an empty or truncated procedure.
 
 ### 3a. Mux branch — dispatch `spec-designer`
 
-Resolve both `model` and `cli` from `~/.pi/agent/model-tiers.json` per the canonical procedure in [`agent/skills/_shared/model-tier-resolution.md`](../_shared/model-tier-resolution.md).
-
-Parameters for this dispatch:
-- `<agent>` = `spec-designer`
-- `<tier>` = `capable` (no fallback)
-
-On any of the four documented failure conditions, emit the corresponding canonical template byte-equal with the parameter values above and stop. Do not dispatch. Do not fall back to a CLI default.
+Run `agent/skills/_shared/scripts/resolve-model-dispatch.py --tier capable --agent spec-designer`. On non-zero exit, surface the stderr message byte-equal per [`agent/skills/_shared/model-tier-resolution.md`](../_shared/model-tier-resolution.md) and stop. Do not dispatch. Do not fall back to a CLI default.
 
 Then dispatch (note: `wait` is a top-level orchestration option, not a per-task field):
 
@@ -106,7 +100,7 @@ Skip Step 4 of this orchestrator (it parses the subagent's `finalMessage`) and j
 
 Evaluate the subagent's `finalMessage`, `exitCode`, `state`, `error`, and `transcriptPath` from `results[0]` in the order below. The first matching case wins, except case (2) may perform conservative transcript-backed recovery and proceed to Step 5. Do not retry. Do not surface the Step 5 review choices during validation — they are only for the user review gate.
 
-A `SPEC_WRITTEN: <absolute path>` line in `finalMessage` is the primary completion signal. Parse it as a single line on its own, no surrounding backticks or commentary on the same line.
+With `exitCode == 0`, write `results[0].finalMessage` to a temp file and run `agent/skills/_shared/scripts/parse-artifact-handoff.py --marker SPEC_WRITTEN --final-message <temp-file> --check-existence`. Exit 0: read `.path` from stdout JSON and proceed to Step 5. `missing SPEC_WRITTEN marker` → case (2). `missing or empty at <path>` → report `Spec design reported SPEC_WRITTEN: <path> but <path> does not exist on disk. Transcript: <transcriptPath>. No commit attempted.` and stop.
 
 Transcript-backed recovery is a narrow salvage path for the known failure mode where the subagent successfully wrote the spec but ended its session on the write/edit tool call instead of sending the final `SPEC_WRITTEN:` text message. It must never scan for the newest file in `docs/specs/` or guess from filesystem state alone. It may recover only from successful write/edit evidence in `transcriptPath`, and it still proceeds through the normal user review gate before any commit.
 
@@ -142,13 +136,6 @@ Cases (evaluated in this order):
      > Spec design did not complete: `spec-designer` exited without emitting `SPEC_WRITTEN: <path>`, and transcript-backed recovery did not find exactly one valid written spec path. Transcript: `<transcriptPath>`. No validated spec path, no commit attempted.
 
      Stop.
-
-- **(3) Path reported but file missing on disk.** Report:
-  > Spec design reported `SPEC_WRITTEN: <path>` but `<path>` does not exist on disk. Transcript: `<transcriptPath>`. No commit attempted.
-
-  Stop.
-
-- **(success)** `exitCode == 0`, `SPEC_WRITTEN: <path>` is present, and `<path>` exists on disk. Proceed to Step 5 with `<path>` captured.
 
 ## Step 5: Pause for user review
 

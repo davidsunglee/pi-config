@@ -33,21 +33,7 @@ If `--tier` is present with a value not in the recognized set, the resolution st
 
 ## Step 2: Resolve model and CLI
 
-Follow the canonical procedure in [`agent/skills/_shared/model-tier-resolution.md`](../_shared/model-tier-resolution.md) with:
-
-- `<agent>` = `scout`
-- `<tier>` = the tier selected in Step 1 (default `standard`)
-
-Apply all three primitive operations in order: tier-path resolution, provider-prefix extraction, and dispatch lookup.
-
-On any of the four documented failure conditions, emit the corresponding canonical template byte-equal after parameter substitution and stop:
-
-- **Template (1)** — `~/.pi/agent/model-tiers.json` missing or unreadable.
-- **Template (2)** — the selected tier key is missing or empty in the JSON.
-- **Template (3)** — the `dispatch` map is missing from the JSON.
-- **Template (4)** — `dispatch.<provider>` is missing or empty for the resolved model.
-
-Do **not** silently fall back to `pi` or any other CLI default. The strict-by-default policy from `_shared/model-tier-resolution.md` applies without exception.
+Run `agent/skills/_shared/scripts/resolve-model-dispatch.py --tier <tier> --agent scout` (where `<tier>` is the value parsed in Step 1, defaulting to `standard`). The full resolution procedure is documented in [`agent/skills/_shared/model-tier-resolution.md`](../_shared/model-tier-resolution.md). On any failure the script exits non-zero and prints the appropriate byte-equal canonical failure message; surface that output verbatim and stop. Do **not** silently fall back to `pi` or any other CLI default.
 
 ## Step 3: Pre-existing-brief check
 
@@ -116,9 +102,7 @@ Evaluate `results[0]` from the dispatch in this exact order. The first matching 
 
 **(a) `exitCode != 0`:** surface the failure verbatim, include `transcriptPath` when available, and stop. Do not retry.
 
-**(b) `finalMessage` does not end with an anchored `BRIEF_WRITTEN:` line:** the final assistant message must end with a line of the exact form `BRIEF_WRITTEN: <absolute path>` — no surrounding backticks, no trailing commentary on that line — where `<absolute path>` is character-for-character identical to the `{OUTPUT_PATH}` supplied in Step 4. If this line is absent or the path does not match exactly, surface the failure verbatim with `transcriptPath` and stop. Do not retry. Path normalization is not performed — any divergence is a validation failure.
-
-**(c) The file at that path does not exist on disk or is empty:** report this as a validation failure, include `transcriptPath` when available, and stop. Do not retry.
+**(b)–(c) Marker / path / existence check:** run `agent/skills/_shared/scripts/parse-artifact-handoff.py --marker BRIEF_WRITTEN --final-message <path-to-finalMessage> --expected-path <{OUTPUT_PATH}> --check-existence --check-non-empty`. If the script exits non-zero, surface its output verbatim with `transcriptPath` when available and stop. Do not retry.
 
 **(success):** all three checks pass — proceed to Step 7.
 

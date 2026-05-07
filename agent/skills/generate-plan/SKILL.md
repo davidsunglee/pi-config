@@ -97,29 +97,13 @@ Use the text as-is.
 
 ## Step 2: Resolve model tiers
 
-Read the model matrix from `~/.pi/agent/model-tiers.json`:
+Tier-role assignment: plan generation uses `capable`. Run the model-dispatch helper:
 
 ```bash
-cat ~/.pi/agent/model-tiers.json | python3 -c "import sys,json; print(json.dumps(json.load(sys.stdin), indent=2))"
+python3 agent/skills/_shared/scripts/resolve-model-dispatch.py --tier capable --agent planner
 ```
 
-Model assignments:
-
-| Role | Tier |
-|------|------|
-| Plan generation | `capable` from model-tiers.json |
-
-Review and edit tier roles now live inside the `refine-plan` skill and the `plan-refiner` coordinator — `generate-plan` no longer dispatches the reviewer or editor itself.
-
-### Dispatch resolution
-
-Follow the canonical procedure in [`agent/skills/_shared/model-tier-resolution.md`](../_shared/model-tier-resolution.md) to resolve `(model, cli)` for the planner dispatch.
-
-Parameters: `<agent> = planner`, `<tier> = capable`.
-
-If a downstream consumer of this skill's resolution (such as a worker that re-resolves on `crossProvider.capable`) needs to fall back, the documented fallback target is `capable`; this skill's own planner dispatch uses `capable` directly and does not perform the re-resolution itself.
-
-If `~/.pi/agent/model-tiers.json` is missing or unreadable, stop with the canonical Template (1) message from `_shared/model-tier-resolution.md` substituting `<agent> = planner`.
+On non-zero exit, surface its stderr output byte-equal (canonical Templates (1)–(4) from `_shared/model-tier-resolution.md`) and stop.
 
 ## Step 3: Generate the plan
 
@@ -138,7 +122,7 @@ If `~/.pi/agent/model-tiers.json` is missing or unreadable, stop with the canoni
 3. Dispatch `planner` agent synchronously:
    ```
    subagent_run_serial { tasks: [
-     { name: "planner", agent: "planner", task: "<filled template>", model: "<capable from model-tiers.json>", cli: "<dispatch for capable>" }
+     { name: "planner", agent: "planner", task: "<filled template>", model: "<model from Step 2>", cli: "<cli from Step 2>" }
    ]}
    ```
    Read the planner's output from results[0].finalMessage — the planner writes the plan to disk; this result is the return message.

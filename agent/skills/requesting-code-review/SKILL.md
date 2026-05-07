@@ -45,7 +45,7 @@ Fill these placeholders:
 
 ### 2b. Resolve model and dispatch
 
-Resolve `(model, cli)` for the `code-reviewer` dispatch per the canonical procedure in [`agent/skills/_shared/model-tier-resolution.md`](../_shared/model-tier-resolution.md): `<agent> = code-reviewer`, `<tier> = capable`. On any of the four documented failure conditions, emit the corresponding canonical template byte-equal and stop. Do not fall back to a CLI default.
+Invoke agent/skills/_shared/scripts/resolve-model-dispatch.py --tier capable --agent code-reviewer. On non-zero exit, surface the helper's stderr (byte-equal canonical failure message) and stop.
 
 ### 3. Dispatch the subagent
 
