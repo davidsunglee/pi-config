@@ -149,6 +149,46 @@ class TestParseArtifactHandoff(unittest.TestCase):
             os.unlink(artifact_path)
             os.unlink(msg_path)
 
+    # (h) Trailing whitespace must cause path mismatch (no normalization)
+    def test_expected_path_trailing_whitespace_mismatch(self):
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+            f.write("REVIEW_ARTIFACT: /expected/path \n")
+            tmp_path = f.name
+        try:
+            result = run_script(
+                "--marker", "REVIEW_ARTIFACT",
+                "--final-message", tmp_path,
+                "--expected-path", "/expected/path",
+            )
+            self.assertNotEqual(result.returncode, 0)
+            data = json.loads(result.stderr)
+            self.assertTrue(
+                data["failure"].startswith("path mismatch: expected /expected/path got"),
+                msg=f"Unexpected failure: {data['failure']}",
+            )
+        finally:
+            os.unlink(tmp_path)
+
+    # (i) Leading whitespace must cause path mismatch (no normalization)
+    def test_expected_path_leading_whitespace_mismatch(self):
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+            f.write("REVIEW_ARTIFACT:  /expected/path\n")
+            tmp_path = f.name
+        try:
+            result = run_script(
+                "--marker", "REVIEW_ARTIFACT",
+                "--final-message", tmp_path,
+                "--expected-path", "/expected/path",
+            )
+            self.assertNotEqual(result.returncode, 0)
+            data = json.loads(result.stderr)
+            self.assertTrue(
+                data["failure"].startswith("path mismatch: expected /expected/path got"),
+                msg=f"Unexpected failure: {data['failure']}",
+            )
+        finally:
+            os.unlink(tmp_path)
+
     # (g) Multiple markers → last one wins
     def test_multiple_markers_last_wins(self):
         fixture = os.path.join(FIXTURES, "final-message-multiple-markers.txt")

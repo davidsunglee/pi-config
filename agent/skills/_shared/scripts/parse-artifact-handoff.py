@@ -81,7 +81,7 @@ def main() -> None:
     if not matches:
         fail(f"missing {args.marker} marker")
 
-    path = matches[-1].strip()
+    path = matches[-1]
 
     if args.expected_path is not None and path != args.expected_path:
         fail(f"path mismatch: expected {args.expected_path} got {path}")

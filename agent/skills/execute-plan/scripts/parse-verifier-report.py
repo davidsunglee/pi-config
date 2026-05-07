@@ -245,6 +245,17 @@ def validate_phase1_recipes(evidence_blocks, recipes, k):
                 errors.append(
                     f"verifier ran command not matching any phase-1 recipe: {actual_command}"
                 )
+
+    allowed_commands = set(recipes.values())
+    recipe_criteria = set(recipes.keys())
+    for n, block in evidence_blocks.items():
+        if n in recipe_criteria:
+            continue
+        actual_command = block.get("command", "")
+        if actual_command not in allowed_commands:
+            errors.append(
+                f"verifier ran command not matching any phase-1 recipe: {actual_command}"
+            )
     return errors
 
 
@@ -350,8 +361,9 @@ Protocol-error labels:
     overall_verdict, verdict_errors = parse_overall_verdict(overall_section)
     protocol_errors.extend(verdict_errors)
 
-    # Validate phase-1 recipes if provided
-    if recipes:
+    # Validate phase-1 recipes if the flag was provided (even with [] recipes,
+    # so extra evidence commands are still rejected).
+    if args.phase1_recipes_json:
         recipe_errors = validate_phase1_recipes(evidence_blocks, recipes, k)
         protocol_errors.extend(recipe_errors)
 

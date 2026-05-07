@@ -346,6 +346,102 @@ VERDICT: PASS
             os.unlink(recipes_path)
 
 
+class TestExtraEvidenceCommand(unittest.TestCase):
+    def test_extra_evidence_command_with_empty_recipes_protocol_error(self):
+        # phase1-recipes-json is [] but report has a Phase 1 evidence command.
+        content = """## Phase 1 Evidence
+
+[Evidence for Criterion 1]
+command: echo unexpected
+exit_code: 0
+stdout: unexpected
+stderr:
+
+## Per-Criterion Verdicts
+
+[Criterion 1] PASS
+reason: ok
+
+## Overall Verdict
+
+VERDICT: PASS
+"""
+        path = write_temp_report(content)
+        recipes_path = write_temp_recipes([])
+        try:
+            rc, data, _, _ = run_script(
+                "--report", path,
+                "--criteria-count", "1",
+                "--phase1-recipes-json", recipes_path,
+            )
+            self.assertNotEqual(rc, 0)
+            self.assertIsNotNone(data)
+            errors = data["protocol_errors"]
+            self.assertTrue(
+                any(
+                    "verifier ran command not matching any phase-1 recipe: echo unexpected" in e
+                    for e in errors
+                ),
+                f"Expected extra-command protocol error: {errors}",
+            )
+        finally:
+            os.unlink(path)
+            os.unlink(recipes_path)
+
+    def test_extra_evidence_command_for_inspection_criterion_protocol_error(self):
+        # Recipe only for criterion 1; criterion 2 is inspection-only but report
+        # has an evidence block with command for it.
+        content = """## Phase 1 Evidence
+
+[Evidence for Criterion 1]
+command: python3 myscript.py --help
+exit_code: 0
+stdout: usage
+stderr:
+
+[Evidence for Criterion 2]
+command: echo unexpected
+exit_code: 0
+stdout: unexpected
+stderr:
+
+## Per-Criterion Verdicts
+
+[Criterion 1] PASS
+reason: ok
+
+[Criterion 2] PASS
+reason: ok
+
+## Overall Verdict
+
+VERDICT: PASS
+"""
+        path = write_temp_report(content)
+        recipes_path = write_temp_recipes(
+            [{"criterion_n": 1, "recipe": "python3 myscript.py --help"}]
+        )
+        try:
+            rc, data, _, _ = run_script(
+                "--report", path,
+                "--criteria-count", "2",
+                "--phase1-recipes-json", recipes_path,
+            )
+            self.assertNotEqual(rc, 0)
+            self.assertIsNotNone(data)
+            errors = data["protocol_errors"]
+            self.assertTrue(
+                any(
+                    "verifier ran command not matching any phase-1 recipe: echo unexpected" in e
+                    for e in errors
+                ),
+                f"Expected extra-command protocol error: {errors}",
+            )
+        finally:
+            os.unlink(path)
+            os.unlink(recipes_path)
+
+
 class TestPhase1RecipesPathInvalid(unittest.TestCase):
     def test_phase1_recipes_missing_file_protocol_error(self):
         rc, data, _, _ = run_script(
