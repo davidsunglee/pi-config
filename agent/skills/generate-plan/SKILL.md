@@ -32,6 +32,10 @@ From that bounded preamble, extract provenance using strict exact-match rules:
   - `Scout brief: docs/briefs/<filename>` → set `{SCOUT_BRIEF}` to `Scout brief: docs/briefs/<filename>`, **then verify the referenced file exists on disk**:
     - If the brief file does not exist, warn the user (`Scout brief referenced in spec not found at <path> — proceeding without it.`), leave `{SCOUT_BRIEF}` empty, and continue without failing.
     - **Do NOT read the brief contents into the orchestrator prompt.** The planner reads the brief from disk itself — this is the whole point of path-based handoff.
+    - Staleness check (informational only):
+      - When the brief file exists, perform a bounded preamble read of its first ~8 lines (e.g., `head -n 8 <path>`) and extract its `Git SHA: <sha>` line.
+      - If the brief SHA differs from the current repo HEAD SHA (`git rev-parse HEAD`), emit one warning to the user verbatim: `Scout brief at <path> was generated at SHA <brief-sha>; HEAD is now <head-sha>. Treating as potentially stale; planning will continue. Re-run /scout TODO-<id> if you want a fresh brief.` Continue planning with the brief — do NOT block.
+      - If the SHA line is missing, malformed, or unreadable, emit a softer warning verbatim: `Scout brief at <path> has unreadable Git SHA preamble — continuing without staleness signal.` Continue planning.
 - Lines that don't match one of the supported forms exactly are ignored.
 - Matching lines that appear later in the document (outside the preamble, including inside fenced code blocks or examples) are ignored.
 

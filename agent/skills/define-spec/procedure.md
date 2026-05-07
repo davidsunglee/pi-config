@@ -34,7 +34,7 @@ The orchestrator passes the user's raw input as your task body. Detect the shape
 Always perform a general survey before asking questions: project structure and key skill / agent definitions in scope. Read `agent/AGENTS.md` and any obviously-relevant `SKILL.md` or `*.md` files near the input topic. (You do not have `bash`, so git history is out of reach — work from file contents only.)
 
 Targeted survey:
-- On the **todo** branch, use the scout brief (if loaded) as foundation. Read additional files only where the brief points at something worth examining more closely.
+- On the **todo** branch, use the scout brief (if loaded) as foundation. Read additional files only where the brief points at something worth examining more closely. When the loaded scout brief contains entries under `## Open Questions / Ambiguities`, treat each entry as a candidate question to resolve with the user during the Step 4 intent Q&A. The spec-designer judges which questions remain load-bearing and asks them under the existing Interaction conventions (recommend with each, one question per turn). Questions the brief surfaces but the spec-designer judges off-scope or already-resolved by the codebase survey may be dropped without asking.
 - On the **existing-spec** branch, follow references the existing draft makes (file paths, agent names, skill names) and read those.
 - On the **freeform** branch, identify likely files and modules from the seed text and read enough to ground questions in code reality.
 

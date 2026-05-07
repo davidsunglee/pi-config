@@ -60,6 +60,18 @@ When the spec artifact contains a `## Approach` section (between `## Constraints
 
 When the spec lacks a `## Approach` section, this rule does not apply — preserve current review behavior.
 
+## Brief coverage
+
+When a `Scout brief: docs/briefs/<filename>` line is in the plan provenance AND the brief file exists on disk, read the brief in full and check the plan against three brief sections: `## Risk Areas`, `## Existing Tests and Test Patterns`, and `## Patterns and Conventions`. When a `Scout brief:` line is absent OR the brief file is missing on disk, the brief-coverage check is skipped entirely — preserve all existing review behavior.
+
+Severity calibration for brief-coverage findings:
+
+- **Critical** — the plan ignores a brief-surfaced constraint that would cause execution to break (e.g., the brief flags a registration site the plan does not touch but must).
+- **Important** — the plan does not acknowledge or mitigate a significant brief-surfaced risk area; the plan's testing approach contradicts patterns observed in the brief; the plan's structural choices contradict naming or organization conventions surfaced by the brief.
+- **Minor** — low-impact polish gaps relative to brief findings.
+
+Brief-coverage findings are reported in the same Critical / Important / Minor finding format under the existing `### Issues` H4 sub-headings, using the unchanged verdict semantics (`Approved` / `Approved with concerns` / `Not approved`) and the unchanged `### Outcome` / `### Strengths` / `### Issues` / `### Recommendations` body shape. Cite the task number and the brief section that surfaced the gap (e.g., "Task 4 ignores Risk Areas bullet 2").
+
 ## Output Artifact Contract
 
 Your task prompt may include a designated output artifact path and a verbatim provenance first line. The contract is conditional on those values:

@@ -83,6 +83,14 @@ If the `## Structural-Only Mode` section is non-empty, skip this Spec/Todo Cover
 - For tasks with format-sensitive outputs (YAML frontmatter, specific file structures, templated content): does the plan state both the required format AND constraints/footguns that would break it?
 - Example: if a file requires YAML frontmatter, the plan should state "frontmatter must be the very first content in the file — nothing before the opening `---`."
 
+**Brief Coverage:**
+- If a `Scout brief: docs/briefs/<filename>` line is in `## Provenance` AND the brief file exists on disk, read the brief in full and check the plan against the brief's `## Risk Areas`, `## Existing Tests and Test Patterns`, and `## Patterns and Conventions` sections.
+- If neither condition holds (no `Scout brief:` line, or the file is missing on disk), skip this check entirely. Do NOT report a finding for the absence of a brief — preserve current review behavior when no brief is present.
+- Cite the task number and the brief section when flagging a gap (e.g., `Task 4 ignores Risk Areas bullet 2`).
+- **Critical** — the plan ignores a brief-surfaced constraint that would cause execution to break (e.g., a registration site the brief flags but the plan does not touch).
+- **Important** — the plan does not acknowledge or mitigate a significant brief-surfaced risk area; the plan's testing approach contradicts patterns observed in the brief; the plan's structural choices contradict naming or organization conventions surfaced by the brief.
+- **Minor** — low-impact polish gaps relative to brief findings.
+
 **Placeholder Content:**
 - Search for: "TBD", "TODO", "implement later", "similar to Task N", or steps that describe what to do without showing how.
 - Every step must contain actual actionable content.
