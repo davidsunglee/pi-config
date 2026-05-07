@@ -92,6 +92,7 @@ A consumer references this document, supplies the values of `<agent>` and `<tier
 
 Current consumers:
 
+- `agent/skills/scout/SKILL.md` Step 2
 - `agent/skills/define-spec/SKILL.md` Step 3a
 - `agent/skills/generate-plan/SKILL.md` Step 2
 - `agent/skills/execute-plan/SKILL.md` Step 6 (including the test-runner subsection and Step 11.2 verifier dispatch)

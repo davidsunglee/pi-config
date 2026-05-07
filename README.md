@@ -19,7 +19,7 @@ Repository layout:
 
 ```text
 agent/
-  agents/           Local subagent definitions (8 agents)
+  agents/           Local subagent definitions (9 agents)
   extensions/       Custom pi extensions (TypeScript, with tests)
   skills/           Workflow and discipline skills (15 skills)
   themes/           Custom themes
@@ -130,7 +130,7 @@ Skills, extensions, subagents, and artifacts in this repo combine into a repeata
 
 ### Subagent architecture
 
-The workflow uses eight specialized subagents, each starting with **fresh context** — no session forking, no shared conversational history. Information flows through **file artifacts**:
+The workflow uses nine specialized subagents, each starting with **fresh context** — no session forking, no shared conversational history. Information flows through **file artifacts**:
 
 - **Todos** (`docs/todos/`) track lifecycle state.
 - **Specs** (`docs/specs/`) carry structured requirements from define-spec to generate-plan.
@@ -248,7 +248,11 @@ Working-message and indicator extension (split into `indicator.ts` + `message.ts
 
 ## Local subagents
 
-Eight local agent definitions live in `agent/agents/`. All run with fresh context, no shared conversational history, with `session-mode: lineage-only`.
+Nine local agent definitions live in `agent/agents/`. All run with fresh context, no shared conversational history, with `session-mode: lineage-only`.
+
+### `scout.md`
+
+Non-interactive task-scoped reconnaissance agent dispatched by the `scout` skill. Performs broad orientation, task-focused deep dive, and disconfirmation passes, then writes a single structured brief to the orchestrator-supplied path under `docs/briefs/` — its only allowed write. No shell access. Ends its turn with an anchored `BRIEF_WRITTEN: <absolute path>` line that the orchestrator validates byte-equal against the requested output path. Tools: `read, write, grep, find, ls`. Thinking: `high`.
 
 ### `planner.md`
 

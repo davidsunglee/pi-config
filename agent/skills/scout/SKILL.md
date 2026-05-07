@@ -17,7 +17,7 @@ Examine the user's slash-command input (excluding any `--tier` argument) and cla
 
 - Extract `<raw-id>` from the captured group (e.g., `TODO-bbe89373` → `bbe89373`).
 - Set the brief output path to `docs/briefs/TODO-<raw-id>-brief.md`.
-- Read `docs/todos/<raw-id>.md` to extract the todo title (first `# ` heading) and full body.
+- Read `docs/todos/<raw-id>.md` and extract the todo title and full body. Todo files in this repo begin with a JSON metadata block (an opening `{` on line 1 through its matching closing `}`); parse that block and use its `title` field as the todo title. If the JSON block is absent or has no usable `title`, fall back to the first `# ` heading that is **outside any fenced code block** (skip lines between matching ` ``` ` fences so headings inside examples cannot be selected). If neither source yields a non-empty title, stop with `docs/todos/<raw-id>.md has no usable title — cannot dispatch scout.` The todo body is the full file contents (metadata block included) and is passed through to the prompt as `{TODO_BODY_OR_FREEFORM_TEXT}`.
 
 **Freeform branch** — any input that does not match the todo regex.
 
@@ -87,7 +87,7 @@ Read `agent/skills/scout/scout-prompt.md` from disk and substitute every placeho
 | `{GIT_HEAD_SHA}` | Output of `git rev-parse HEAD` (40-character SHA) |
 | `{MODEL_PROVIDER_AND_NAME}` | The `<provider>/<model>` string resolved in Step 2 |
 | `{SOURCE_PROVENANCE}` | `Source: TODO-<raw-id>` on the todo branch; empty string on the freeform branch |
-| `{TASK_TITLE}` | The todo title (first `# ` heading) on the todo branch; a short title derived from the seed text on the freeform branch |
+| `{TASK_TITLE}` | The todo title resolved in Step 1 (JSON metadata `title`, with the fenced-code-aware first-`# ` fallback) on the todo branch; a short title derived from the seed text on the freeform branch |
 
 ## Step 5: Dispatch via subagent_run_serial
 
