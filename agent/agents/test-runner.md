@@ -60,11 +60,38 @@ The resulting collection is a deduplicated set.
 
 ## Artifact Format
 
-Write the artifact file with this exact structure, byte-for-byte:
+Write the artifact file with this exact structure, byte-for-byte. The `PHASE:` line is included only when the orchestrator supplied a `## Phase Label` section in the prompt; otherwise omit that line entirely and start the artifact with `COMMAND:`.
+
+With phase label:
 
 ~~~
-<!-- PHASE: line is included only when the orchestrator supplied a ## Phase Label section in the prompt -->
 PHASE: <phase label, e.g. baseline | wave-2-attempt-1 | final-gate-3>
+COMMAND: <exact test command string supplied in ## Test Command>
+WORKING_DIRECTORY: <absolute working directory supplied in ## Working Directory>
+EXIT_CODE: <integer exit code>
+TIMESTAMP: <ISO-8601 UTC timestamp captured at run start, e.g. 2026-04-30T18:42:11Z>
+FAILING_IDENTIFIERS_COUNT: <integer N>
+FAILING_IDENTIFIERS:
+<stable identifier 1>
+<stable identifier 2>
+...
+<stable identifier N>
+END_FAILING_IDENTIFIERS
+NON_RECONCILABLE_COUNT: <integer M>
+NON_RECONCILABLE_FAILURES:
+<evidence entry 1 — verbatim excerpt; may span multiple lines>
+<evidence entry 2 — verbatim excerpt; may span multiple lines>
+...
+<evidence entry M>
+END_NON_RECONCILABLE_FAILURES
+
+--- RAW RUN OUTPUT BELOW ---
+<full combined stdout+stderr captured from the run, byte-for-byte, no truncation>
+~~~
+
+Without phase label:
+
+~~~
 COMMAND: <exact test command string supplied in ## Test Command>
 WORKING_DIRECTORY: <absolute working directory supplied in ## Working Directory>
 EXIT_CODE: <integer exit code>

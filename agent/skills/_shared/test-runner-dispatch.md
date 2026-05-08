@@ -30,13 +30,14 @@ The parser script returns a structured result with:
 - **`exit_code`** (int) — Exit code from the test command.
 - **`failing_identifiers`** (list) — Stable suite-native identifiers, parsed verbatim from the artifact.
 - **`non_reconcilable_failures`** (list) — Evidence entries, parsed verbatim from the artifact.
-- **`artifact_path`** (string) — Echoed input.
-- **`phase`** (string) — Phase label as recorded in the artifact (absent when `phase_label` was omitted).
+- **`phase`** (string or null) — Phase label as recorded in the artifact; `null` when `phase_label` was omitted (the field is always present).
 - **`command`** (string) — The test command as recorded in the artifact.
 - **`working_directory`** (string) — Working directory as recorded in the artifact.
 - **`timestamp`** (string) — Timestamp as recorded in the artifact.
 - **`failing_identifiers_count`** (int) — Reconciled count.
 - **`non_reconcilable_count`** (int) — Reconciled count.
+
+The parser does not echo `artifact_path` in its output; the caller already knows that path from the dispatch inputs.
 
 A non-zero `exit_code` from the test command is **NOT** a protocol failure. It flows through to the caller as a successful protocol output for caller-side classification: the protocol succeeded; the test suite reported failures.
 

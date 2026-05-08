@@ -14,7 +14,7 @@ Interactively turn a todo, existing spec, or freeform request into a structured 
 
 ## Execution modes
 
-The skill is a thin orchestrator around `procedure.md`, which is the shared spec-design procedure for both modes.
+The skill is a thin orchestrator around `spec-design-procedure.md`, which is the shared spec-design procedure for both modes.
 
 ### Multiplexer mode
 
@@ -29,7 +29,7 @@ The mux probe mirrors `pi-interactive-subagent` backend selection, including:
 
 ### Inline mode
 
-If no mux is available, or if the user asks for `--no-subagent` / `inline`, the current session follows `procedure.md` directly.
+If no mux is available, or if the user asks for `--no-subagent` / `inline`, the current session follows `spec-design-procedure.md` directly.
 
 ## Completion and validation
 
@@ -54,4 +54,4 @@ Mux mode resolves the capable model and CLI from `~/.pi/agent/model-tiers.json`;
 ## Files
 
 - `SKILL.md` — orchestrator: mode detection, dispatch, validation, commit gate, continuation offer.
-- `procedure.md` — single source of truth for the actual spec-design conversation and file-writing procedure.
+- `spec-design-procedure.md` — single source of truth for the actual spec-design conversation and file-writing procedure.
