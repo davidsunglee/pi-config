@@ -22,64 +22,11 @@ Use the `todo` tool to read the todo and extract its full body. The planner suba
 
 Pass the file by path. **Do NOT load the full file contents into `{TASK_DESCRIPTION}`.** The planner will read the file from disk.
 
-Do a **bounded preamble read** of the file for provenance extraction only — for example `head -n 40 <path>`, or the `read` tool with a small line limit. Do not read the entire file into the orchestrator context.
+Run `agent/skills/_shared/scripts/extract-provenance-preamble.py --file <input-path> --mode spec` to extract `Source:` and `Scout brief:` lines from the preamble. Use `source_todo` from the JSON output to set `{SOURCE_TODO}` to `Source todo: <source_todo>` (else empty). Use `scout_brief` to set `{SCOUT_BRIEF}` to `Scout brief: <scout_brief>` ONLY after verifying the referenced file exists on disk; if the file does not exist, warn the user (`Scout brief referenced in spec not found at <path> — proceeding without it.`) and leave `{SCOUT_BRIEF}` empty. The three supported line shapes and the bounded-read rule are documented in the helper's `--help`.
 
-From that bounded preamble, extract provenance using strict exact-match rules:
+Run `agent/skills/_shared/scripts/classify-workflow-drift.py --brief-path <brief-path> --working-dir <cwd>`. Parse the JSON output. The helper classifies workflow-only paths using the allowlist in [`agent/skills/_shared/workflow-artifact-paths.md`](../_shared/workflow-artifact-paths.md); keep this cross-reference in the skill so future maintainers know the allowlist's source of truth. On `outcome: silent_continue`, proceed silently to the next preamble rule. On any other outcome, print the helper's `message_body` field verbatim to the user. For `workflow_only`, this is informational — continue plan generation. For `mixed_changes`, `uninspectable_a`, `uninspectable_b`, and `uninspectable_c`, the message is a `(c)`/`(x)` menu — wait for the user's reply and route per the menu response handling preserved below.
 
-- Inspect only the preamble area at the top of the file (everything above the first `## ` heading, or the bounded first ~40 lines, whichever comes first).
-- Only exact supported lines count:
-  - `Source: TODO-<id>` → set `{SOURCE_TODO}` to `Source todo: TODO-<id>`.
-  - `Scout brief: docs/briefs/<filename>` → set `{SCOUT_BRIEF}` to `Scout brief: docs/briefs/<filename>`, **then verify the referenced file exists on disk**:
-    - If the brief file does not exist, warn the user (`Scout brief referenced in spec not found at <path> — proceeding without it.`), leave `{SCOUT_BRIEF}` empty, and continue without failing.
-    - **Do NOT read the brief contents into the orchestrator prompt.** The planner reads the brief from disk itself — this is the whole point of path-based handoff.
-    - Staleness classifier (gates planning when source/config drift is detected):
-      - Workflow-artifact path matching uses the allowlist defined in [`agent/skills/_shared/workflow-artifact-paths.md`](../_shared/workflow-artifact-paths.md) — that doc is the single source of truth. Do NOT inline the four allowlist entries here.
-      - When the brief file exists, perform a bounded preamble read of its first ~8 lines (e.g., `head -n 8 <path>`) and extract its `Git SHA: <sha>` line. Compute the current repo HEAD SHA via `git rev-parse HEAD`. If `git rev-parse HEAD` fails, route to `Uninspectable sub-case C` below with `<head-sha>` rendered as `<unknown>` and `<error>` set to the failing command's stderr. If the brief SHA equals current HEAD SHA, continue silently and proceed to the next preamble rule (the `Source: TODO-<id>` line) — emit no message. This is the silent-continue path; today's SHA-equal behavior is preserved unchanged.
-      - If the brief SHA differs from HEAD, enumerate the set of files changed in the range `<brief-sha>..HEAD` using NUL-separated git output: `git diff --name-only -z <brief-sha>..HEAD`. Parse the output by NUL-separated path bytes, NOT by whitespace tokens. NUL separation is load-bearing: paths may contain spaces, deletions are listed as their pre-deletion path (default), renames are listed as their post-rename path (default). Both behaviors are required by the spec's enumeration contract.
-      - Classify each enumerated path against the workflow-artifact allowlist (loaded by reference from `agent/skills/_shared/workflow-artifact-paths.md`). Match by prefix-as-directory-boundary semantics: a path is 'under' a prefix when it begins with that prefix and the prefix ends with `/`. Apply the matching rule's directory-boundary semantics — `docs/specs/foo.md` matches `docs/specs/`; `docs/specs-archive/foo.md` does NOT match. Two outcomes follow: (a) all enumerated paths under the allowlist → workflow-drift outcome below; (b) at least one path outside the allowlist → mixed-changes menu below.
-      - `Workflow-drift outcome (all paths under the allowlist):` Emit the following informational message to the user:
-
-        > Scout brief at `<path>` was generated at SHA `<brief-sha>`; HEAD is now `<head-sha>`. Intervening commits modified only workflow artifacts (`docs/briefs/`, `docs/specs/`, `docs/todos/`, `docs/plans/`). Treating as expected workflow drift and continuing.
-
-        Plan generation continues without prompting. The brief stays load-bearing for the planner dispatch (`{SCOUT_BRIEF}` is populated as before).
-
-      - `Mixed-changes outcome (at least one path outside the allowlist):` Surface the following menu to the user. List ONLY the non-workflow paths (paths that failed the allowlist match), in the order returned by the enumeration (do not re-sort). Wait for user input. The orchestrator does NOT auto-default to `(c)` or `(x)`.
-
-        > Scout brief at `<path>` was generated at SHA `<brief-sha>`; HEAD is now `<head-sha>`. Non-workflow files changed since the brief SHA:
-        >
-        >   - `<path1>`
-        >   - `<path2>`
-        >   - …
-        >
-        > The brief may be stale relative to source/config/agent changes.
-        >
-        > **(c) Continue with plan generation** — proceed despite the scout brief / HEAD difference.
-        > **(x) Stop plan generation** — resolve manually before planning.
-
-      - `Uninspectable sub-case A (missing or malformed brief SHA):` Fires when the `Git SHA:` line is missing from the brief preamble OR the captured SHA is not a 40-character lowercase hex string. No file list is rendered (no enumeration was attempted). Surface the following menu to the user:
-
-        > Scout brief at `<path>` has no readable `Git SHA:` preamble line; cannot classify intervening changes against current HEAD `<head-sha>`. The brief may be stale.
-        >
-        > **(c) Continue with plan generation** — proceed despite the scout brief / HEAD difference.
-        > **(x) Stop plan generation** — resolve manually before planning.
-
-      - `Uninspectable sub-case B (brief SHA not reachable from HEAD):` Fires when the brief SHA is well-formed (40-char hex) but is not an ancestor of `HEAD` — for example because the SHA is unknown to this repo (rewritten out of local history, or generated against a different repo), OR because the SHA exists only on an unrelated branch and is therefore not reachable from `HEAD`. Before attempting enumeration, run `git merge-base --is-ancestor <brief-sha> HEAD`; a non-zero exit (including the unknown-revision error class, which also exits non-zero) means the SHA is not reachable from `HEAD` and this sub-case fires. Do NOT rely on `git rev-list --quiet <brief-sha>` or on `git diff <brief-sha>..HEAD` succeeding, because both can pass for SHAs that exist on other local branches but are not ancestors of `HEAD` — that would let unrelated changes be misclassified as workflow-only drift and bypass this checkpoint. No file list is rendered (the range is not enumerated). Surface the following menu to the user:
-
-        > Scout brief at `<path>` was generated at SHA `<brief-sha>`; HEAD is now `<head-sha>`. Brief SHA is not reachable from HEAD; cannot classify intervening changes. The brief may be stale.
-        >
-        > **(c) Continue with plan generation** — proceed despite the scout brief / HEAD difference.
-        > **(x) Stop plan generation** — resolve manually before planning.
-
-      - `Uninspectable sub-case C (git command failure for any other reason):` Fires when any git failure not covered by sub-case B prevents HEAD computation or enumeration — e.g., `git rev-parse HEAD` fails, the ancestry check passed (sub-case B did not fire) but `git diff --name-only -z <brief-sha>..HEAD` still fails, `git` is not on PATH, repo corruption, or transient I/O error. For a HEAD-computation failure, render `<head-sha>` as `<unknown>` in the menu body. For an enumeration failure, use the current HEAD SHA. Capture the failing command's stderr verbatim (or trim leading/trailing whitespace WITHOUT paraphrasing — preserve the literal git error text) and include it as `<error>` in the menu body. No file list is rendered (enumeration failed or could not be attempted). Do NOT auto-retry the failing git command; a single failure surfaces the menu. Surface the following menu to the user:
-
-        > Scout brief at `<path>` was generated at SHA `<brief-sha>`; HEAD is now `<head-sha>`. Could not enumerate intervening changes: `<error>`. The brief may be stale.
-        >
-        > **(c) Continue with plan generation** — proceed despite the scout brief / HEAD difference.
-        > **(x) Stop plan generation** — resolve manually before planning.
-
-      - `Menu response handling (applies to all four menu variants):` Recognize on letter shortcut and word alias. **(c) Continue / continue / yes** → continue Step 1b's remaining preamble work — populate `{SCOUT_BRIEF}` with `Scout brief: docs/briefs/<filename>` if not already populated, then proceed to the next preamble rule and on to Step 2 of the skill. The brief stays load-bearing for the planner dispatch. **(x) Stop / stop / no** → stop `generate-plan` immediately before Step 2. Do not dispatch the planner. Do not invoke `refine-plan`. Emit the verbatim terminal status message: `Plan generation stopped — scout brief / HEAD difference unresolved.` Then halt the skill — do not fall through to Step 2. Unrecognized responses re-prompt with the same menu body. Do not auto-default to either `(c)` or `(x)`.
-- Lines that don't match one of the supported forms exactly are ignored.
-- Matching lines that appear later in the document (outside the preamble, including inside fenced code blocks or examples) are ignored.
+`Menu response handling (applies to all four menu variants):` Recognize on letter shortcut and word alias. **(c) Continue / continue / yes** → continue Step 1b's remaining preamble work — populate `{SCOUT_BRIEF}` with `Scout brief: docs/briefs/<filename>` if not already populated, then proceed to the next preamble rule and on to Step 2 of the skill. The brief stays load-bearing for the planner dispatch. **(x) Stop / stop / no** → stop `generate-plan` immediately before Step 2. Do not dispatch the planner. Do not invoke `refine-plan`. Emit the verbatim terminal status message: `Plan generation stopped — scout brief / HEAD difference unresolved.` Then halt the skill — do not fall through to Step 2. Unrecognized responses re-prompt with the same menu body. Do not auto-default to either `(c)` or `(x)`.
 
 Then populate the remaining fields:
 
@@ -148,13 +95,7 @@ Invoke `refine-plan` with these arguments:
 
 ## Step 5: Report result
 
-Read the compact summary returned by `refine-plan` in Step 4. Show the user:
-
-- `STATUS`
-- `COMMIT`
-- `PLAN_PATH`
-- `REVIEW_PATHS`
-- `STRUCTURAL_ONLY: yes` (only when present in the summary)
+Run `agent/skills/refine-plan/scripts/parse-refine-plan-summary.py --summary <path-to-finalMessage-or--for-stdin>` against the `refine-plan` summary returned in Step 4. Display the parsed `status`, `commit`, `plan_path`, and `review_paths` fields to the user. When `structural_only == true`, also display the `STRUCTURAL_ONLY: yes` line.
 
 Then offer execute-plan:
 

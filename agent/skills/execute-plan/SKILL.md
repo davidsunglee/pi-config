@@ -297,13 +297,9 @@ Resolve `(model, cli)` for this dispatch by invoking `agent/skills/_shared/scrip
 
 Dispatch via `subagent_run_serial { tasks: [{ name: "test-runner: <phase label>", agent: "test-runner", task: "<filled test-runner-prompt.md>", model: "<resolved crossProvider.cheap model>", cli: "<dispatch[<provider>] for that model>" }] }`.
 
-**Artifact readback.** After dispatch, read `results[0].finalMessage`; on any failure below, stop the call site that triggered dispatch (do NOT fall back to running the test command in-orchestrator):
-1. **Marker / path / existence checks.** Run `agent/skills/_shared/scripts/parse-artifact-handoff.py --marker TEST_RESULT_ARTIFACT --final-message <path-to-finalMessage> --expected-path <{ARTIFACT_PATH}> --check-existence --check-non-empty`. On non-zero exit, surface the script's failure label verbatim (`missing TEST_RESULT_ARTIFACT marker`, `path mismatch: expected <X> got <Y>`, or `missing or empty at <path>`) and stop the call site.
-2. **Header-parse check.** Confirm the structured header has `PHASE`, `COMMAND`, `WORKING_DIRECTORY`, `EXIT_CODE`, `TIMESTAMP`, `FAILING_IDENTIFIERS_COUNT`, `FAILING_IDENTIFIERS:`, `END_FAILING_IDENTIFIERS`, `NON_RECONCILABLE_COUNT`, `NON_RECONCILABLE_FAILURES:`, and `END_NON_RECONCILABLE_FAILURES` in this exact order, followed by `--- RAW RUN OUTPUT BELOW ---`; if not, stop with reason `test-runner artifact header malformed at <path>: <specific check>`.
+Run `agent/skills/execute-plan/scripts/parse-test-runner-artifact.py --artifact <{ARTIFACT_PATH}> --final-message <path-to-finalMessage-or--for-stdin> --expected-path <{ARTIFACT_PATH}>` to perform the artifact handoff checks and parse the test-runner artifact. On non-zero exit, surface the helper's structured failure verbatim and stop the call site. Otherwise consume the returned `exit_code`, `failing_identifiers`, and `non_reconcilable_failures` fields for Step 7 baseline classification, Step 12 post-wave reconciliation, the Debugger-first re-test, and Step 16 final-gate reconciliation per `integration-regression-model.md`. The helper's `--help`, tests, and README own the exact header-order, count-validation, handoff, and raw-output-exclusion contract.
 
 **Dispatch-failure reasons.** If `subagent_run_serial` is unavailable, stop with reason `test-runner dispatch unavailable`. If dispatch returns an error result, stop with reason `test-runner dispatch failed`.
-
-**Reading run results.** On all checks passing, parse the lines between `FAILING_IDENTIFIERS:` and `END_FAILING_IDENTIFIERS` as the run's stable failing-identifier set; parse the entries between `NON_RECONCILABLE_FAILURES:` and `END_NON_RECONCILABLE_FAILURES` (separated by single blank lines, multi-line entries permitted) as the run's non-reconcilable failure list; and read `EXIT_CODE`. These are the inputs Step 7 baseline classification, Step 12 post-wave reconciliation, the Debugger-first re-test, and Step 16 final-gate reconciliation consume. The integration regression model in `integration-regression-model.md` defines how each consumer applies them.
 
 ## Step 8: Execute waves
 
@@ -342,16 +338,7 @@ Read `results[0].finalMessage` from the orchestration result to get the worker's
 
 ### Assembling worker prompts
 
-Read [execute-task-prompt.md](execute-task-prompt.md) in this directory once (before the first wave). For each task, fill the placeholders:
-
-- `{TASK_SPEC}` — the full text of the task from the plan: task name, Files section, all checkbox steps, and acceptance criteria. Paste the complete text, do not summarize.
-- `{CONTEXT}` — where this task fits in the plan. Include:
-  - The plan's Goal (one line)
-  - Which wave this task is in and what other tasks are in the same wave
-  - What was completed in prior waves (task names and key outputs, not full details)
-  - Any dependencies this task has and what those tasks produced
-- `{WORKING_DIR}` — the absolute path to the working directory (the worktree path if using a worktree, otherwise the project root)
-- `{TDD_BLOCK}` — if TDD is enabled (Step 3 settings), read `agent/skills/execute-plan/tdd-block.md` and substitute its full contents verbatim. If TDD is disabled, substitute the empty string.
+For each task in the wave, fill `agent/skills/execute-plan/execute-task-prompt.md` by invoking `agent/skills/execute-plan/scripts/assemble-coder-prompt.py --task-spec <path-to-task-spec-or--for-stdin> --context <path-to-context-or--for-stdin> --working-dir <absolute-working-directory> --tdd-block <enabled|disabled> --output <filled-prompt-path>` (where `--tdd-block enabled` includes the verbatim contents of `agent/skills/execute-plan/tdd-block.md` and `disabled` substitutes the empty string). The helper enforces single-pass literal substitution and fails closed on any unreplaced placeholder.
 
 The filled template becomes the task prompt for the `coder` subagent. The template already includes self-review instructions, escalation guidance, code organization guidance, and the report format — do not add these separately.
 
@@ -673,13 +660,9 @@ After all waves complete successfully (and if the user chose review in Step 3):
 
 3. **Handle the result:**
 
-   **`approved`:** Include the review summary (iteration count, review file path) in the Step 16 completion report. Proceed to Step 16.
+   Run `agent/skills/refine-code/scripts/parse-refine-code-summary.py --summary <path-to-refine-code-finalMessage-or--for-stdin>` to obtain `{status, iterations, issues_found_total, issues_found_critical, issues_found_important, issues_found_minor, issues_fixed, issues_remaining, review_file, remaining_issues, failure_reason}` as JSON. Route on `status`: `approved` → include the iteration count and review file path in the Step 16 completion report and proceed to Step 16; `approved_with_concerns` → include those plus a note pointing the user at the review file's `### Outcome` reasoning (which names the waived Important findings and the rationale for waiving each) and proceed to Step 16; `not_approved_within_budget` → present the parsed `remaining_issues` text plus the (a)/(b)/(c) menu preserved below; `failed` → surface the parsed `failure_reason` to the user and stop execution per Step 14.
 
-   **`approved_with_concerns`:** Include the review summary (iteration count, review file path, AND a note pointing the user at the review file's `### Outcome` reasoning — which names the waived Important findings and the rationale for waiving each) in the Step 16 completion report. Proceed to Step 16.
-
-   **`not_approved_within_budget`:** Present remaining findings to the user; offer: **(a)** keep iterating (budget resets), **(b)** proceed with issues noted, or **(c)** stop execution. The per-plan docs/test-runs/<plan-name>/ directory is preserved on this exit path so the user can inspect run artifacts after stop.
-
-   **`failed`:** Surface the `refine-code` failure reason to the user and stop execution. Report partial progress via Step 14. The per-plan docs/test-runs/<plan-name>/ directory is preserved on this exit path so the user can inspect run artifacts after stop.
+   **`not_approved_within_budget` menu:** offer (a) keep iterating (budget resets), (b) proceed with issues noted, or (c) stop execution. The per-plan docs/test-runs/<plan-name>/ directory is preserved on this exit path so the user can inspect run artifacts after stop.
 
    **Review disabled** (user chose to disable in Step 3): Skip directly to Step 16.
 

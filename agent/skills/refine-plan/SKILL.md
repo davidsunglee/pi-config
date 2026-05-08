@@ -106,20 +106,7 @@ Set `STARTING_ERA = max_existing + 1`. If no matches found, `STARTING_ERA = 1`.
 
 Read [refine-plan-prompt.md](refine-plan-prompt.md) in this directory.
 
-Fill placeholders:
-
-- `{PLAN_PATH}` — from Step 1.
-- `{TASK_ARTIFACT}` — `Task artifact: <path>` if set, else empty string.
-- `{SOURCE_TODO}` — `Source todo: TODO-<id>` if set, else empty string.
-- `{SOURCE_SPEC}` — `Source spec: docs/specs/<filename>` if set, else empty string.
-- `{SCOUT_BRIEF}` — `Scout brief: docs/briefs/<filename>` if set, else empty string.
-- `{ORIGINAL_SPEC_INLINE}` — the `TASK_DESCRIPTION` from Step 1. Populated for todo/freeform inputs forwarded by `generate-plan` via `--task-description`, populated when a standalone caller passes `--task-description <text>`, and empty for file-based inputs that supply `TASK_ARTIFACT` instead.
-- `{STRUCTURAL_ONLY_NOTE}` — non-empty paragraph if `STRUCTURAL_ONLY` is true; empty string otherwise (see Step 7.5).
-- `{MAX_ITERATIONS}` — from Step 1.
-- `{STARTING_ERA}` — from Step 6.
-- `{REVIEW_OUTPUT_PATH}` — from Step 6.
-- `{WORKING_DIR}` — from Step 1.
-- `{MODEL_MATRIX}` — full JSON output from Step 5.
+Fill `refine-plan-prompt.md` by invoking `agent/skills/refine-plan/scripts/fill-refine-plan-prompt.py --plan-path "<PLAN_PATH from Step 1>" --task-artifact "<Task artifact line or empty>" --source-todo "<Source todo line or empty>" --source-spec "<Source spec line or empty>" --scout-brief "<Scout brief line or empty>" --original-spec-inline <path-to-task-description-text-or--for-stdin> --structural-only-note <path-to-structural-only-note-text-or--for-stdin> --max-iterations <MAX_ITERATIONS> --starting-era <STARTING_ERA> --review-output-path <REVIEW_OUTPUT_PATH> --working-dir <WORKING_DIR> --model-matrix <path-to-model-matrix-json> --output <filled-prompt-path>`. The helper enforces single-pass literal substitution and fails closed on any unreplaced placeholder.
 
 ### Step 7.5: Compose structural-only note
 

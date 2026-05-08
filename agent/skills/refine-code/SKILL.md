@@ -45,17 +45,7 @@ If the file doesn't exist or is unreadable, stop with: "refine-code requires ~/.
 
 ## Step 3: Assemble coordinator prompt
 
-Read [refine-code-prompt.md](refine-code-prompt.md) in this directory.
-
-Fill placeholders:
-- `{PLAN_GOAL}` — description of what was implemented
-- `{PLAN_CONTENTS}` — full requirements/plan text (or empty string if none)
-- `{BASE_SHA}` — from Step 1
-- `{HEAD_SHA}` — from Step 1
-- `{REVIEW_OUTPUT_PATH}` — review output base path (without version suffix or `.md` — the code-refiner adds those)
-- `{MAX_ITERATIONS}` — from Step 1
-- `{MODEL_MATRIX}` — full JSON output from Step 2
-- `{WORKING_DIR}` — from Step 1
+Fill `refine-code-prompt.md` by invoking `agent/skills/refine-code/scripts/fill-refine-code-prompt.py --plan-goal <path-to-description-or--for-stdin> --plan-contents <path-to-plan-contents-or--for-stdin> --base-sha <BASE_SHA> --head-sha <HEAD_SHA> --review-output-path <REVIEW_OUTPUT_PATH> --max-iterations <MAX_ITERATIONS> --model-matrix <path-to-model-matrix-json> --working-dir <WORKING_DIR> --output <filled-prompt-path>`. The helper enforces single-pass literal substitution and fails closed on any unreplaced placeholder.
 
 ## Step 4: Dispatch code-refiner
 

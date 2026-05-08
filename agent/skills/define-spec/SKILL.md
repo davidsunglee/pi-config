@@ -11,41 +11,7 @@ This skill is a thin orchestrator. The full spec-design procedure lives in `agen
 
 Decide which branch to run **without** prompting the user.
 
-### 1a. Mux probe
-
-Mirror `pi-interactive-subagent`'s actual mux detection (`pi-extension/subagents/cmux.ts` + `backends/select.ts`) — pairing each multiplexer's signature env var with a command-availability check, and honoring the runtime's `PI_SUBAGENT_MUX` backend preference — so the orchestrator's branch decision and the runtime's `selectBackend()` / `getMuxBackend()` decisions agree. Apply rules in this order; the first match wins.
-
-1. `$PI_SUBAGENT_MODE == "headless"` (case-insensitive) → `inline` branch (runtime would force the headless backend regardless of mux).
-2. `$PI_SUBAGENT_MODE == "pane"` (case-insensitive) → `mux` branch (runtime would force the pane backend regardless).
-3. `$PI_SUBAGENT_MUX` is set (case-insensitive) to one of `cmux` / `tmux` / `zellij` / `wezterm` → evaluate **only** that backend's runtime check (the matching env-var + `command -v` pair from rules 4–7 below). If the check passes → `mux` branch with that backend. If it fails → `inline` branch (do **not** fall through to other backends — `getMuxBackend()` does not fall back when a preference is set, so the orchestrator must not either). If `$PI_SUBAGENT_MUX` is set to anything else (empty, unrecognized) → ignore the preference and fall through to rule 4.
-4. `$CMUX_SOCKET_PATH` is set and `command -v cmux` succeeds → `mux` branch (cmux).
-5. `$TMUX` is set and non-empty and `command -v tmux` succeeds → `mux` branch (tmux).
-6. (`$ZELLIJ` is set and non-empty **or** `$ZELLIJ_SESSION_NAME` is set and non-empty) and `command -v zellij` succeeds → `mux` branch (zellij).
-7. `$WEZTERM_UNIX_SOCKET` is set and non-empty and `command -v wezterm` succeeds → `mux` branch (wezterm).
-8. Otherwise → `inline` branch (no mux).
-
-The exact env-var names, the `command -v` gate, and rule 3's no-fallback-on-pinned-preference behavior all mirror the runtime's `pi-extension/subagents/cmux.ts` + `backends/select.ts`. Divergence would let the orchestrator pick `mux` while the runtime falls through to `headless`, silently misrouting `spec-designer` into a non-interactive session. Do **not** prompt the user during probing.
-
-### 1b. User-input override scan
-
-Scan the user's slash-command input for an explicit "no subagent" override. Recognize any of these substrings (case-insensitive):
-
-- `--no-subagent`
-- `without a subagent`
-- `without subagent`
-- `no subagent`
-- `skip subagent`
-- `inline`
-
-If any match, force the `inline` branch regardless of the mux probe outcome.
-
-### 1c. Status announcement
-
-Emit one status line to the user. This is informational — no input expected:
-
-- `mux` branch chosen: `Running spec design in subagent pane (mux detected, no override).`
-- `inline` branch via no-mux probe: `Running spec design in this session (no multiplexer detected).`
-- `inline` branch via override: `Running spec design in this session (per --no-subagent / inline override).`
+Run `agent/skills/define-spec/scripts/detect-mux-backend.py` (passing `--user-input <slash-command-text>` when the user invoked the skill with arguments). Parse the JSON output. Print the returned `status_message` to the user as the informational status line. Route on `branch`: `mux` → Step 3a; `inline` → Step 3b. The runtime probe rules (eight precedence rules byte-equal with `pi-extension/subagents/cmux.ts` + `backends/select.ts`) and the user-input override substring set are encoded in the helper; see its `--help` for the complete contract. Do NOT prompt the user during probing.
 
 ## Step 2: Read `procedure.md` fresh from disk
 
