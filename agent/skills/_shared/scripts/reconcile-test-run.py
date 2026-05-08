@@ -5,7 +5,8 @@ reconcile-test-run.py — Baseline capture and per-run reconciliation helper.
 Two modes:
 
   capture    (Step 7 baseline): Runs parse-test-runner-artifact.py against the
-             artifact and emits a baseline snapshot JSON. Classifies the run as
+             artifact and emits a baseline snapshot JSON. That JSON is itself a
+             valid baseline file for later reconcile mode. Classifies the run as
              clean, stable-failures-only, or contains-non-reconcilable-evidence.
 
   reconcile  (Steps 12.2/14/16): Compares current run against a saved baseline
@@ -59,14 +60,19 @@ def _load_baseline(path):
 
     if not isinstance(data, dict):
         _fail("baseline_failures_invalid", "baseline must be a JSON object")
-    if "failing_identifiers" not in data:
-        _fail("baseline_failures_invalid", "missing key: failing_identifiers")
-    if not isinstance(data["failing_identifiers"], list):
-        _fail("baseline_failures_invalid", "failing_identifiers must be a list")
-    if not all(isinstance(x, str) for x in data["failing_identifiers"]):
-        _fail("baseline_failures_invalid", "failing_identifiers must contain only strings")
+    if "failing_identifiers" in data:
+        baseline = data["failing_identifiers"]
+    elif "baseline_failures" in data:
+        baseline = data["baseline_failures"]
+    else:
+        _fail("baseline_failures_invalid", "missing key: failing_identifiers or baseline_failures")
 
-    return data["failing_identifiers"]
+    if not isinstance(baseline, list):
+        _fail("baseline_failures_invalid", "baseline failures must be a list")
+    if not all(isinstance(x, str) for x in baseline):
+        _fail("baseline_failures_invalid", "baseline failures must contain only strings")
+
+    return baseline
 
 
 def main():
@@ -112,6 +118,7 @@ Protocol error labels (in stderr JSON .failure):
 
         result = {
             "mode": "capture",
+            "failing_identifiers": failing_identifiers,
             "baseline_failures": failing_identifiers,
             "non_reconcilable_at_baseline": non_reconcilable_failures,
             "classification": classification,

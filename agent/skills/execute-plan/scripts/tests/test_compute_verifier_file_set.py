@@ -259,8 +259,29 @@ class TestObservedStatusFromStdin(unittest.TestCase):
         self.assertIn('src/c.ts', data['observed_paths'])
 
 
+class TestObservedStatusUnreadable(unittest.TestCase):
+    """Missing observed-status file should return structured JSON, not a traceback."""
+
+    def test_missing_observed_status_file(self):
+        task_file = create_temp_file('["src/a.ts"]')
+        worker_file = create_temp_file('[]')
+        diff_file = create_temp_file('[]')
+
+        returncode, stdout, stderr = run_script(
+            '--task-files', task_file,
+            '--worker-files', worker_file,
+            '--observed-status', '/no/such/status.txt',
+            '--observed-diff-paths', diff_file,
+            '--wave-shape', 'single-task'
+        )
+
+        self.assertNotEqual(returncode, 0)
+        error = json.loads(stderr)
+        self.assertEqual(error['failure'], 'observed_status_unreadable')
+
+
 class TestHelpContainsProtocolErrors(unittest.TestCase):
-    """Step 9: --help epilog lists both protocol-error labels."""
+    """Step 9: --help epilog lists protocol-error labels."""
 
     def test_help_contains_protocol_errors(self):
         returncode, stdout, stderr = run_script('--help')
@@ -268,6 +289,7 @@ class TestHelpContainsProtocolErrors(unittest.TestCase):
         self.assertEqual(returncode, 0)
         self.assertIn('input_json_invalid', stdout)
         self.assertIn('wave_shape_invalid', stdout)
+        self.assertIn('observed_status_unreadable', stdout)
 
 
 if __name__ == "__main__":

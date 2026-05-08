@@ -156,7 +156,7 @@ Before the first wave, run the integration suite via `test-runner` (see the shar
 
 #### Baseline recording
 
-After artifact readback, run `python3 agent/skills/_shared/scripts/reconcile-test-run.py --artifact <baseline-artifact-path> --mode capture`. Read `.classification` (`clean` | `stable-failures-only` | `contains-non-reconcilable-evidence`) and `.baseline_failures` from stdout JSON, then route to the per-classification user prompts below.
+After artifact readback, run `python3 agent/skills/_shared/scripts/reconcile-test-run.py --artifact <baseline-artifact-path> --mode capture > <working-dir>/docs/test-runs/<plan-name>/baseline-failures.json`. Treat that file as `<baseline-json-path>` for every later reconcile call. Read `.classification` (`clean` | `stable-failures-only` | `contains-non-reconcilable-evidence`) and `.baseline_failures` from the saved JSON, then route to the per-classification user prompts below.
 
 **`clean`:** record `baseline_failures := ∅` and proceed.
 

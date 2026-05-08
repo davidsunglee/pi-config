@@ -346,6 +346,26 @@ class TestDependencyValidation(unittest.TestCase):
         self.assertIn(2, cycle)
 
 
+class TestInlineGoalExtraction(unittest.TestCase):
+
+    def test_inline_goal_label_populates_goal_field(self):
+        import tempfile
+
+        plan_path = FIXTURES / "plan-clean.md"
+        text = plan_path.read_text()
+        inline = text.replace("## Goal\n\nExtract tasks from plan files for automated processing.", "**Goal**: Extract tasks from plan files for automated processing.")
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:
+            f.write(inline)
+            temp_plan = f.name
+        try:
+            result = run_script("--plan", temp_plan)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            data = json.loads(result.stdout)
+            self.assertEqual(data["goal"], "Extract tasks from plan files for automated processing.")
+        finally:
+            Path(temp_plan).unlink(missing_ok=True)
+
+
 class TestWaveGrouping(unittest.TestCase):
 
     def test_linear_deps_wave_assignment(self):

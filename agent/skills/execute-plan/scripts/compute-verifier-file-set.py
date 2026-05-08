@@ -16,8 +16,9 @@ Output shape (stdout, exit 0):
   }
 
 Protocol-error kinds (stderr JSON, exit non-zero):
-  input_json_invalid   — a JSON input is not a valid JSON array of strings
-  wave_shape_invalid   — the --wave-shape value is not recognized
+  input_json_invalid        — a JSON input is not a valid JSON array of strings
+  observed_status_unreadable — the --observed-status file could not be read
+  wave_shape_invalid        — the --wave-shape value is not recognized
 """
 
 import argparse
@@ -158,7 +159,7 @@ def main():
         prog="compute-verifier-file-set.py",
         description="Compute the set of files visible to the verifier.",
         epilog=(
-            "Protocol-error labels: input_json_invalid, wave_shape_invalid"
+            "Protocol-error labels: input_json_invalid, observed_status_unreadable, wave_shape_invalid"
         ),
     )
 
@@ -199,8 +200,13 @@ def main():
     if args.observed_status == '-':
         porcelain_text = sys.stdin.read()
     else:
-        with open(args.observed_status, 'r') as f:
-            porcelain_text = f.read()
+        try:
+            with open(args.observed_status, 'r') as f:
+                porcelain_text = f.read()
+        except OSError:
+            error = {"failure": "observed_status_unreadable", "field": "observed_status"}
+            print(json.dumps(error), file=sys.stderr)
+            sys.exit(1)
 
     porcelain_paths = _parse_porcelain(porcelain_text)
 

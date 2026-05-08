@@ -3,6 +3,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import unittest
 
 SCRIPT = os.path.join(
@@ -139,6 +140,29 @@ class TestReconcileMalformedBaseline(unittest.TestCase):
         self.assertNotEqual(rc, 0)
         self.assertIsNotNone(stderr_data)
         self.assertEqual(stderr_data["failure"], "baseline_failures_invalid")
+
+
+class TestCaptureOutputIsAcceptedAsBaseline(unittest.TestCase):
+    def test_capture_output_can_feed_reconcile(self):
+        rc, data, _, _, _ = run_script(
+            "--artifact", fixture("test-runner-artifact-stable-failures.txt"),
+            "--mode", "capture",
+        )
+        self.assertEqual(rc, 0)
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(data, f)
+            baseline_path = f.name
+        try:
+            rc, reconcile_data, _, _, _ = run_script(
+                "--artifact", fixture("test-runner-artifact-stable-failures.txt"),
+                "--mode", "reconcile",
+                "--baseline-failures", baseline_path,
+            )
+            self.assertEqual(rc, 0)
+            self.assertEqual(reconcile_data["classification"], "pass")
+            self.assertEqual(reconcile_data["current_non_baseline_stable"], [])
+        finally:
+            os.unlink(baseline_path)
 
 
 class TestPropagatesArtifactMissingOrEmpty(unittest.TestCase):

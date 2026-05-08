@@ -282,10 +282,11 @@ def parse_plan(text, max_parallel_hard_cap=MAX_PARALLEL_HARD_CAP):
             })
             break
 
-    # Parse goal: first paragraph of ## Goal
+    # Parse goal: first paragraph of ## Goal or inline **Goal**:
     i = 0
     while i < n:
-        if lines[i].rstrip("\n") == "## Goal":
+        stripped = lines[i].rstrip("\n").strip()
+        if stripped == "## Goal":
             i += 1
             while i < n and lines[i].strip() == "":
                 i += 1
@@ -294,6 +295,19 @@ def parse_plan(text, max_parallel_hard_cap=MAX_PARALLEL_HARD_CAP):
                 goal_lines.append(lines[i].rstrip("\n"))
                 i += 1
             goal = " ".join(goal_lines).strip()
+            break
+        inline_goal = re.match(r"^\*\*Goal\*\*:\s*(.*)$", stripped)
+        if inline_goal:
+            inline_text = inline_goal.group(1).strip()
+            if inline_text:
+                goal = inline_text
+            else:
+                i += 1
+                goal_lines = []
+                while i < n and lines[i].strip() != "" and not SECTION_HEADING_RE.match(lines[i]) and not TASK_HEADING_RE.match(lines[i].rstrip("\n")):
+                    goal_lines.append(lines[i].rstrip("\n"))
+                    i += 1
+                goal = " ".join(goal_lines).strip()
             break
         i += 1
 
