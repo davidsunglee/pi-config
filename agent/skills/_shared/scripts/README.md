@@ -16,7 +16,11 @@ The `_shared/scripts/` directory contains deterministic, testable Python helpers
 
 - **extract-provenance-preamble.py** — Extracts `Source: TODO-...`, `Scout brief: docs/briefs/...`, and `Git SHA: <40-hex>` lines from a bounded preamble region of a markdown file. Example: `python3 extract-provenance-preamble.py --file docs/specs/foo.md --mode spec`.
 
+- **cleanup-pycache.py** — Validated removal of every `__pycache__` directory under a target tree. Refuses `..` traversal, paths outside cwd, and paths matching protected segments (`.git`, `.ssh`, `node_modules`, `.venv`, `venv`). Example: `python3 cleanup-pycache.py agent`.
+
 - **classify-workflow-drift.py** — Classifies repository drift since a scout brief's `Git SHA:` against the workflow-artifact allowlist; returns one of six outcome tags plus a verbatim message body. Example: `python3 classify-workflow-drift.py --brief-path docs/briefs/foo.md --working-dir .`.
+
+- **cleanup-test-runs.py** — Validated cleanup of a per-plan `docs/test-runs/<plan-name>/` directory. Refuses `..` traversal, paths outside cwd, paths matching protected segments (`.git`, `.ssh`, `node_modules`, `.venv`, `venv`), and paths outside `<cwd>/docs/test-runs/`. Example: `python3 cleanup-test-runs.py docs/test-runs/my-plan`.
 
 ## Running tests
 
