@@ -14,6 +14,10 @@ The `_shared/scripts/` directory contains deterministic, testable Python helpers
 
 - **fill-template.py** — Renders a Jinja2 template with provided context, handling conditional blocks and escaping. Example: `python3 fill-template.py --template prompt.jinja --context context.json --output prompt.md`.
 
+- **extract-provenance-preamble.py** — Extracts `Source: TODO-...`, `Scout brief: docs/briefs/...`, and `Git SHA: <40-hex>` lines from a bounded preamble region of a markdown file. Example: `python3 extract-provenance-preamble.py --file docs/specs/foo.md --mode spec`.
+
+- **classify-workflow-drift.py** — Classifies repository drift since a scout brief's `Git SHA:` against the workflow-artifact allowlist; returns one of six outcome tags plus a verbatim message body. Example: `python3 classify-workflow-drift.py --brief-path docs/briefs/foo.md --working-dir .`.
+
 ## Running tests
 
 Tests live in the `tests/` subdirectory and use Python's unittest framework.

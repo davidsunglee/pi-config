@@ -14,6 +14,10 @@ The `execute-plan/scripts/` directory contains Python helpers that support the p
 
 - **parse-verifier-report.py** — Extracts structured results (pass/fail, findings, recommendations) from verifier output and validates against acceptance criteria. Example: `python3 parse-verifier-report.py --report verifier-output.md --criteria criteria.json --output results.json`.
 
+- **parse-test-runner-artifact.py** — Parses a `test-runner` artifact's structured header per `agent/agents/test-runner.md` `## Artifact Format`; returns `EXIT_CODE`, `FAILING_IDENTIFIERS`, `NON_RECONCILABLE_FAILURES`, and other header fields as JSON. Example: `python3 parse-test-runner-artifact.py --artifact docs/test-runs/sample.log`.
+
+- **assemble-coder-prompt.py** — Fills `agent/skills/execute-plan/execute-task-prompt.md` with task spec, context, working directory, and an optional TDD block. Example: `python3 assemble-coder-prompt.py --task-spec spec.md --context ctx.md --working-dir /tmp/work --tdd-block enabled --output prompt.md`.
+
 ## Running tests
 
 Tests live in the `tests/` subdirectory and use Python's unittest framework.
