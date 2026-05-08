@@ -241,5 +241,50 @@ class TestFailClosed(unittest.TestCase):
         self.assertEqual(err["failure"], "missing_failure_reason")
 
 
+class TestRemainingIssuesDocumentedHeading(unittest.TestCase):
+    """The coordinator prompt's documented heading is
+    '## Remaining Issues (only if not_approved_within_budget)'. The parser
+    must accept it as the remaining-issues block."""
+
+    def _run_temp(self, content):
+        path = write_temp_summary(content)
+        try:
+            rc, stdout, stderr = run_script("--summary", path)
+        finally:
+            os.unlink(path)
+        return rc, stdout, stderr
+
+    def test_documented_heading_parses_remaining_issues(self):
+        content = (
+            "STATUS: not_approved_within_budget\n\n"
+            "## Summary\nIterations: 3\nIssues found: 2 (1 Critical, 1 Important, 0 Minor)\n"
+            "Issues fixed: 0\nIssues remaining: 2\n\n"
+            "## Remaining Issues (only if not_approved_within_budget)\n"
+            "[Critical] tests/foo.py:42 — flaky test\n"
+            "[Important] tests/bar.py:13 — missing assertion\n\n"
+            "## Review File\ndocs/reviews/sample-code-review-v3.md\n"
+        )
+        rc, stdout, stderr = self._run_temp(content)
+        self.assertEqual(rc, 0, stderr)
+        data = parse_stdout(stdout)
+        self.assertIsNotNone(data["remaining_issues"])
+        self.assertIn("[Critical] tests/foo.py:42", data["remaining_issues"])
+        self.assertIn("[Important] tests/bar.py:13", data["remaining_issues"])
+
+    def test_documented_heading_unexpected_for_non_budget_status(self):
+        content = (
+            "STATUS: approved\n\n"
+            "## Summary\nIterations: 1\nIssues found: 0 (0 Critical, 0 Important, 0 Minor)\n"
+            "Issues fixed: 0\nIssues remaining: 0\n\n"
+            "## Remaining Issues (only if not_approved_within_budget)\n"
+            "[Critical] foo.py:1 — bad\n\n"
+            "## Review File\nsome/path.md\n"
+        )
+        rc, stdout, stderr = self._run_temp(content)
+        self.assertNotEqual(rc, 0)
+        err = parse_stderr(stderr)
+        self.assertEqual(err["failure"], "unexpected_remaining_issues")
+
+
 if __name__ == "__main__":
     unittest.main()

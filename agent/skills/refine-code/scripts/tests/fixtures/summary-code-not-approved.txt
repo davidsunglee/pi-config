@@ -6,7 +6,7 @@ Issues found: 8 (3 Critical, 4 Important, 1 Minor)
 Issues fixed: 5
 Issues remaining: 3
 
-## Remaining Issues
+## Remaining Issues (only if not_approved_within_budget)
 [Critical] tests/foo.py:42 — flaky test
 [Important] tests/bar.py:13 — missing assertion
 [Important] src/baz.py:99 — bad error handling

@@ -199,10 +199,14 @@ Failure labels (emitted as JSON to stderr on non-zero exit):
 
     review_file = parse_review_file_block(sections["Review File"])
 
-    # Parse optional blocks
+    # Parse optional blocks. The coordinator prompt documents the heading as
+    # "## Remaining Issues (only if not_approved_within_budget)"; accept either
+    # that exact heading or the bare "## Remaining Issues" form.
     remaining_issues = None
-    if "Remaining Issues" in sections:
-        remaining_issues = parse_remaining_issues_block(sections["Remaining Issues"])
+    for key in sections:
+        if key == "Remaining Issues" or key.startswith("Remaining Issues "):
+            remaining_issues = parse_remaining_issues_block(sections[key])
+            break
 
     failure_reason = None
     if "Failure Reason" in sections:
