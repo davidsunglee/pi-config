@@ -110,7 +110,14 @@ def parse_artifact(path):
     lines = content.splitlines()
     i = 0
 
-    phase, i = _expect_value("PHASE", lines, i, path)
+    # PHASE: is optional — absent means phase=None; malformed (no value) is an error
+    if i < len(lines) and lines[i].startswith("PHASE: "):
+        phase = lines[i][len("PHASE: "):]
+        i += 1
+    elif i < len(lines) and (lines[i] == "PHASE" or lines[i] == "PHASE:"):
+        _fail("header_missing", path, "PHASE header present but has no value")
+    else:
+        phase = None
     command, i = _expect_value("COMMAND", lines, i, path)
     working_directory, i = _expect_value("WORKING_DIRECTORY", lines, i, path)
     exit_code_raw, i = _expect_value("EXIT_CODE", lines, i, path)

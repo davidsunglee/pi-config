@@ -5,7 +5,7 @@ description: "Interactive spec writing from a todo, an existing spec under docs/
 
 # Define Spec
 
-This skill is a thin orchestrator. The full spec-design procedure lives in `agent/skills/define-spec/procedure.md` and is the single source of truth for both branches. This skill probes the environment, picks a branch, dispatches (or runs the procedure on the main agent), validates completion, and gates the commit on user review.
+This skill is a thin orchestrator. The full spec-design procedure lives in `agent/skills/define-spec/spec-design-procedure.md` and is the single source of truth for both branches. This skill probes the environment, picks a branch, dispatches (or runs the procedure on the main agent), validates completion, and gates the commit on user review.
 
 ## Step 1: Detect branch (mux vs inline)
 
@@ -13,13 +13,13 @@ Decide which branch to run **without** prompting the user.
 
 Run `agent/skills/define-spec/scripts/detect-mux-backend.py` (passing `--user-input <slash-command-text>` when the user invoked the skill with arguments). Parse the JSON output. Print the returned `status_message` to the user as the informational status line. Route on `branch`: `mux` → Step 3a; `inline` → Step 3b. The runtime probe rules (eight precedence rules byte-equal with `pi-extension/subagents/cmux.ts` + `backends/select.ts`) and the user-input override substring set are encoded in the helper; see its `--help` for the complete contract. Do NOT prompt the user during probing.
 
-## Step 2: Read `procedure.md` fresh from disk
+## Step 2: Read `spec-design-procedure.md` fresh from disk
 
-Read `agent/skills/define-spec/procedure.md` in full. This is the procedure body that drives the chosen branch.
+Read `agent/skills/define-spec/spec-design-procedure.md` in full. This is the procedure body that drives the chosen branch.
 
 If the file is missing or unreadable, fail with:
 
-> `agent/skills/define-spec/procedure.md` missing or unreadable — cannot run define-spec. Restore the file before retrying.
+> `agent/skills/define-spec/spec-design-procedure.md` missing or unreadable — cannot run define-spec. Restore the file before retrying.
 
 Stop. Do not dispatch with an empty or truncated procedure.
 
@@ -38,7 +38,7 @@ subagent_run_serial {
       name: "spec-designer",
       agent: "spec-designer",
       task: "<raw user input — todo ID, docs/specs/<path>.md, or freeform text>",
-      systemPrompt: "<full body of procedure.md from Step 2>",
+      systemPrompt: "<full body of spec-design-procedure.md from Step 2>",
       model: "<capable tier from model-tiers.json>",
       cli: "<resolved dispatch cli>"
     }
@@ -56,7 +56,7 @@ Read `results[0].finalMessage`, `results[0].exitCode`, `results[0].state`, `resu
 
 ### 3b. Inline branch — follow the procedure in this session
 
-Treat the body of `procedure.md` (read in Step 2) as if it were addressed to you, the orchestrator. Execute Steps 1 through 8 of the procedure in this session. The user's raw input is the seed for the procedure's Step 1 input-shape detection.
+Treat the body of `spec-design-procedure.md` (read in Step 2) as if it were addressed to you, the orchestrator. Execute Steps 1 through 8 of the procedure in this session. The user's raw input is the seed for the procedure's Step 1 input-shape detection.
 
 When you reach the procedure's Step 9, follow the **inline branch** subsection of that step: do **not** emit `SPEC_WRITTEN: <path>` and do **not** exit. Capture the absolute path of the spec file you just wrote and return here. The completion line and process exit at the end of Step 9 are for the subagent / mux branch only; on the inline branch you are the orchestrator, so emitting the line and exiting would skip the review-and-commit gate below.
 
@@ -144,7 +144,7 @@ If yes, invoke `generate-plan` with `<path>`. If no, stop.
 
 ## Edge cases
 
-- **`procedure.md` missing.** Fail at Step 2 with the message specified there.
+- **`spec-design-procedure.md` missing.** Fail at Step 2 with the message specified there.
 - **`model-tiers.json` missing / no `capable` model / no `dispatch.<provider>` mapping.** Fail at Step 3a per the canonical procedure in `agent/skills/_shared/model-tier-resolution.md` — emit the corresponding template (1)–(4) byte-equal with `<agent> = spec-designer`, `<tier> = capable` and stop. Do not fall back to a CLI default — the explicit resolution keeps dispatch on the Opus-tier / Claude-CLI route.
 - **Mux probe wrong (false positive / false negative).** The probe is aligned with the runtime's `selectBackend()` / `cmux.ts` checks (env var + command available), so divergence requires either (a) the env var being set without the matching CLI on PATH, or (b) the runtime's check changing in a future `pi-interactive-subagent` release. A false-negative probe (probe says no mux, mux actually available) drops the user into the inline branch — functionally correct but uses orchestrator context unnecessarily. A false-positive probe (probe says mux, runtime then disagrees) routes `subagent_run_serial` to the headless backend, which can't host an interactive session — `spec-designer` would receive its task without a user-driven Q&A surface. Mitigation: keep the probe rules in lockstep with `cmux.ts`; if a future change drifts, users can force the inline branch with `PI_SUBAGENT_MODE=headless` or one of the override phrases.
 - **User-input override false positive.** If the user's input contains "subagent" without meaning override (e.g. "build a subagent thing"), the substring match will trigger inline mode. Mitigation is the specific phrase set in Step 1b. Residual risk is documented; users wanting subagent dispatch can rephrase.

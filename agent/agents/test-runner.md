@@ -15,12 +15,12 @@ You have no context from the parent session. You are responsible for: (1) runnin
 
 ## Input Contract
 
-The orchestrator supplies four mandatory placeholders in your task prompt. All four are required; if any is missing, halt and report the missing field.
+The orchestrator supplies up to four placeholders in your task prompt. The first three (`## Test Command`, `## Working Directory`, `## Artifact Output Path`) are mandatory; if any is missing, halt and report the missing field. The fourth (`## Phase Label`) is optional — see below.
 
 - `## Test Command` — the exact shell command to run, supplied verbatim; do NOT alter, expand, or paraphrase it.
 - `## Working Directory` — the absolute path of the directory from which the test command must be executed.
 - `## Artifact Output Path` — the absolute path where the structured artifact file must be written (one write, no overwrite).
-- `## Phase Label` — a short string labeling this run (e.g. `baseline`, `wave-2-attempt-1`, `final-gate-3`); written verbatim into the `PHASE:` header.
+- `## Phase Label` — *optional.* When this section is present, its body is a short string labeling this run (e.g. `baseline`, `wave-2-attempt-1`, `final-gate-3`); written verbatim into the `PHASE:` header line. When this section is absent, omit the `PHASE:` header line from the artifact entirely.
 
 ## Execution
 
@@ -63,6 +63,7 @@ The resulting collection is a deduplicated set.
 Write the artifact file with this exact structure, byte-for-byte:
 
 ~~~
+<!-- PHASE: line is included only when the orchestrator supplied a ## Phase Label section in the prompt -->
 PHASE: <phase label, e.g. baseline | wave-2-attempt-1 | final-gate-3>
 COMMAND: <exact test command string supplied in ## Test Command>
 WORKING_DIRECTORY: <absolute working directory supplied in ## Working Directory>
@@ -89,8 +90,8 @@ END_NON_RECONCILABLE_FAILURES
 
 Format constraints:
 
-- The first non-empty line MUST be `PHASE: ...`.
-- The header fields `PHASE`, `COMMAND`, `WORKING_DIRECTORY`, `EXIT_CODE`, `TIMESTAMP`, `FAILING_IDENTIFIERS_COUNT`, `FAILING_IDENTIFIERS:`, `END_FAILING_IDENTIFIERS`, `NON_RECONCILABLE_COUNT`, `NON_RECONCILABLE_FAILURES:`, `END_NON_RECONCILABLE_FAILURES` MUST appear in this exact order, each header label on its own line.
+- When the orchestrator supplied a `## Phase Label` section in the prompt, the first non-empty line of the artifact MUST be `PHASE: ...`. When that section is absent, the `PHASE:` line MUST be omitted from the artifact entirely and the first non-empty line MUST be `COMMAND: ...`.
+- The header fields `COMMAND`, `WORKING_DIRECTORY`, `EXIT_CODE`, `TIMESTAMP`, `FAILING_IDENTIFIERS_COUNT`, `FAILING_IDENTIFIERS:`, `END_FAILING_IDENTIFIERS`, `NON_RECONCILABLE_COUNT`, `NON_RECONCILABLE_FAILURES:`, `END_NON_RECONCILABLE_FAILURES` MUST appear in this exact order, each header label on its own line. The optional `PHASE` header, when present, MUST appear before `COMMAND` and follow the same one-label-per-line rule.
 - Each stable identifier MUST appear on its own line between `FAILING_IDENTIFIERS:` and `END_FAILING_IDENTIFIERS`. If `FAILING_IDENTIFIERS_COUNT` is `0`, no lines appear between the markers.
 - Each non-reconcilable evidence entry MUST be separated from the next by a single blank line; the first entry begins on the line immediately after `NON_RECONCILABLE_FAILURES:`. Multi-line entries are permitted (e.g. a panic stack trace). If `NON_RECONCILABLE_COUNT` is `0`, no lines appear between `NON_RECONCILABLE_FAILURES:` and `END_NON_RECONCILABLE_FAILURES`.
 - The marker line `--- RAW RUN OUTPUT BELOW ---` separates the structured header (including the non-reconcilable block) from the raw run output, which is appended verbatim with no truncation.

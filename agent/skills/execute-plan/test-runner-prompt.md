@@ -14,9 +14,7 @@ Prompt template dispatched to `test-runner` subagents for executing a test suite
 
 {ARTIFACT_PATH}
 
-## Phase Label
-
-{PHASE_LABEL}
+{PHASE_SECTION}
 
 ## Task
 
@@ -24,7 +22,7 @@ Run the test command from `## Test Command` exactly as supplied, from the direct
 
 Apply the Step 7 identifier-extraction contract (per the verbatim documentation in your agent definition) to derive the set of failing-test identifiers. Your agent definition is the source of truth for what counts as a stable suite-native identifier, including any narrow per-runner exceptions documented there (e.g. the Go package-qualified `<package>.<TestName>` construction). Apply NO normalization (no lowercasing, no reordering, no whitespace fixups beyond stripping surrounding whitespace) and invent NO ad-hoc identifiers beyond what the contract explicitly permits. For any failure with no stable suite-native identifier under that contract (e.g. a crash before test names, a build / collection error), record the failure under `NON_RECONCILABLE_FAILURES:` per the contract in your agent definition rather than inventing an identifier.
 
-Write the artifact exactly once to the path in `## Artifact Output Path` using the format documented in your agent definition (`## Artifact Format`) — including BOTH the `FAILING_IDENTIFIERS:` block (stable identifiers) and the `NON_RECONCILABLE_FAILURES:` block (non-reconcilable evidence) in the documented order, with the value from `## Phase Label` filled into the `PHASE:` header line. Do NOT modify any other file. Do NOT run `git`, `mkdir`, or any other command beyond the supplied test command. The orchestrator has already created the parent directory for the artifact path.
+Write the artifact exactly once to the path in `## Artifact Output Path` using the format documented in your agent definition (`## Artifact Format`) — including BOTH the `FAILING_IDENTIFIERS:` block (stable identifiers) and the `NON_RECONCILABLE_FAILURES:` block (non-reconcilable evidence) in the documented order, with the value from `## Phase Label` filled into the `PHASE:` header line when that section is present; if the `## Phase Label` section is absent in this prompt, omit the `PHASE:` header line from the artifact entirely. Do NOT modify any other file. Do NOT run `git`, `mkdir`, or any other command beyond the supplied test command. The orchestrator has already created the parent directory for the artifact path.
 
 ## Output
 

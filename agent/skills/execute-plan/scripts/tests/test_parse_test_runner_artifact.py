@@ -403,5 +403,50 @@ class TestFinalMessageHandoffCheck(unittest.TestCase):
             os.unlink(message_path)
 
 
+class TestNoPhaseFixture(unittest.TestCase):
+    def test_no_phase_fixture_parses_with_phase_none(self):
+        rc, data, _, _ = run_script("--artifact", fixture("test-runner-artifact-no-phase.txt"))
+        self.assertEqual(rc, 0)
+        self.assertIsNotNone(data)
+        self.assertIsNone(data["phase"])
+        self.assertEqual(data["exit_code"], 0)
+
+
+class TestMalformedPhaseFixture(unittest.TestCase):
+    def test_malformed_phase_fixture_rejected(self):
+        rc, _, _, stderr = run_script("--artifact", fixture("test-runner-artifact-malformed-phase.txt"))
+        self.assertNotEqual(rc, 0)
+        err = json.loads(stderr)
+        self.assertEqual(err["failure"], "header_missing")
+
+
+class TestNoPhaseInlineContent(unittest.TestCase):
+    def test_no_phase_inline_produces_phase_null(self):
+        content = (
+            "COMMAND: npm test\n"
+            "WORKING_DIRECTORY: /tmp/project\n"
+            "EXIT_CODE: 0\n"
+            "TIMESTAMP: 2026-05-01T10:00:00Z\n"
+            "FAILING_IDENTIFIERS_COUNT: 0\n"
+            "FAILING_IDENTIFIERS:\n"
+            "END_FAILING_IDENTIFIERS\n"
+            "NON_RECONCILABLE_COUNT: 0\n"
+            "NON_RECONCILABLE_FAILURES:\n"
+            "END_NON_RECONCILABLE_FAILURES\n"
+            "\n"
+            "--- RAW RUN OUTPUT BELOW ---\n"
+            "output\n"
+        )
+        path = write_temp_artifact(content)
+        try:
+            rc, data, stdout, _ = run_script("--artifact", path)
+            self.assertEqual(rc, 0)
+            self.assertIsNotNone(data)
+            self.assertIsNone(data["phase"])
+            self.assertIn('"phase": null', stdout)
+        finally:
+            os.unlink(path)
+
+
 if __name__ == "__main__":
     unittest.main()
