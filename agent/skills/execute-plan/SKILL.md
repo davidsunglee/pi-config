@@ -114,7 +114,7 @@ If the user selects "current workspace" during customization, proceed without a 
 ## Step 1: Locate the plan file
 
 - If the user provides a path, use it directly.
-- If the user says "run the plan" or similar without a path, list `docs/plans/` (excluding `done/`) and let the user pick.
+- If the user says "run the plan" or similar without a path, list `docs/plans/` and let the user pick.
 - If only one plan exists, confirm with the user before proceeding.
 - Read the full contents of the plan file.
 
@@ -282,6 +282,17 @@ See [`integration-regression-model.md`](integration-regression-model.md) for the
 
 #### Test-runner dispatch (shared)
 
+### Boundary: orchestrator MUST NOT run the test command itself
+
+> The orchestrator MUST NOT run the configured test command itself or synthesize a `test-runner` artifact from locally-run output. All integration-test execution and artifact writing must be performed by the `test-runner` subagent. The orchestrator may only:
+> - Create the parent directory `docs/test-runs/<plan-name>/` (via `mkdir -p`).
+> - Dispatch `test-runner` via `subagent_run_serial` with the filled `test-runner-prompt.md` template.
+> - Parse the artifact handoff marker via `agent/skills/execute-plan/scripts/parse-test-runner-artifact.py`.
+> - Validate the artifact format via the same `agent/skills/execute-plan/scripts/parse-test-runner-artifact.py` helper, which performs both the handoff parse and the structural format checks (required-header presence and order, `EXIT_CODE` integer parse, `FAILING_IDENTIFIERS_COUNT` / `NON_RECONCILABLE_COUNT` integer parse and count reconciliation, raw-output marker presence).
+> - Reconcile the parsed `FAILING_IDENTIFIERS:` and `NON_RECONCILABLE_FAILURES:` against the frozen `baseline_failures` per `integration-regression-model.md`.
+>
+> This boundary applies identically at Step 7 (baseline), Step 12 (post-wave), the Step 12 Debugger-first re-test, and Step 16 (final-gate). See `agent/skills/_shared/orchestrator-verification-boundary.md` for the shared statement.
+
 Step 7, Step 12.2, the Step 12 Debugger-first flow's success re-test, and Step 16's final-gate gate use the same `test-runner` subagent to execute the integration suite. The orchestrator never runs the test command itself.
 
 **Per-plan runs directory.** Compute `<plan-name>` as the plan filename without the `.md` extension; before the first `test-runner` dispatch in the plan, create it with `mkdir -p docs/test-runs/<plan-name>`.
@@ -354,6 +365,30 @@ After each wave completes, process each worker response:
 After the wave drains (i.e., every dispatched worker in the wave has returned and been classified), Step 10 runs to handle any `BLOCKED` tasks first and then any `DONE_WITH_CONCERNS` tasks. Only after the wave gate exits does Step 11 (verification) run.
 
 **Never ignore an escalation or re-dispatch the same task to the same model without changes.**
+
+### Boundary: orchestrator MUST NOT verify coder output itself
+
+> After a `coder` returns `DONE` or `DONE_WITH_CONCERNS`, the orchestrator MUST NOT run local grep / Python / assertion scripts, spot checks, or final-acceptance checks to decide whether the implementation satisfies the task. The only sanctioned path for substantive task verification is dispatching a fresh `verifier` subagent (Step 11) with the planner-authored acceptance criteria and `Verify:` recipes, then mechanically parsing the verifier's protocol output via `agent/skills/execute-plan/scripts/parse-verifier-report.py`.
+> Forbidden behaviors (illustrative, not exhaustive): writing Python / grep / `Read` scripts that independently check criteria; running spot checks against implemented files to decide whether criteria pass; synthesizing a "final acceptance" script that re-checks task-specific expected strings; interpreting local command output as evidence that a task passed.
+> See `agent/skills/_shared/orchestrator-verification-boundary.md` for the shared statement that anchors this rule across `execute-plan`, `refine-code`, and `refine-plan`.
+
+### Allowed mechanical work (orchestrator)
+
+> The orchestrator's sanctioned activities are mechanical glue connecting substantive subagents. None of these produces a PASS/FAIL verdict on implementation acceptance criteria — those judgments belong to `verifier` and `test-runner`.
+>
+> | Activity | Helper |
+> |---|---|
+> | Plan parsing (task spec, files, criteria, recipes) | `agent/skills/execute-plan/scripts/extract-plan-tasks.py` |
+> | Coder prompt assembly | `agent/skills/execute-plan/scripts/assemble-coder-prompt.py` |
+> | Verifier prompt assembly | `agent/skills/execute-plan/scripts/assemble-verifier-prompt.py` |
+> | Diff context generation | `agent/skills/execute-plan/scripts/collect-diff-context.py` |
+> | Verifier-visible file-set assembly | orchestrator-computed (union rule, Step 11.2) |
+> | Model-tier resolution | `agent/skills/_shared/scripts/resolve-model-dispatch.py` |
+> | Test-runner artifact parsing | `agent/skills/execute-plan/scripts/parse-test-runner-artifact.py` |
+> | Verifier report parsing | `agent/skills/execute-plan/scripts/parse-verifier-report.py` |
+> | Per-plan test-runs cleanup (success exit only) | `agent/skills/_shared/scripts/cleanup-test-runs.py` |
+> | Post-helper Python bytecode cache cleanup | `agent/skills/_shared/scripts/cleanup-pycache.py` |
+> | Completion bookkeeping (todo close, branch finish) | native git / todo tool |
 
 ## Step 10: Wave gate: blocked and concerns handling
 
@@ -684,7 +719,7 @@ Otherwise, always run this gate: re-run the full integration suite and confirm n
    - `current_non_baseline_stable` := `current_failing_stable \ baseline_failures` (byte-for-byte set difference).
 
 3. **Gate on the union `current_non_baseline_stable ∪ current_non_reconcilable`:**
-   - If **both** `current_non_baseline_stable` and `current_non_reconcilable` are empty: the gate passes. Proceed to `### 1. Move plan to done`.
+   - If **both** `current_non_baseline_stable` and `current_non_reconcilable` are empty: the gate passes. Proceed to `### 1. Cleanup`.
    - If **either** `current_non_baseline_stable` or `current_non_reconcilable` is non-empty: the plan cannot be marked complete. Present the report and menu below.
 
    Use the three-section format defined in the [User-facing summary format](integration-regression-model.md#user-facing-summary-format) section of `integration-regression-model.md` with the header `⚠️ Final completion blocked: current integration failures remain.` and a trailing note `These current failures must be resolved before the plan can be marked complete (current_non_baseline_stable and current_non_reconcilable must both be empty).` followed by this menu:
@@ -699,16 +734,17 @@ Otherwise, always run this gate: re-run the full integration suite and confirm n
 
 4. **Menu actions:**
    - **(d) Debug failures now:** Run the shared `Debugger-first flow` (defined under Step 12) with the **Step 16 (final-gate)** parameter row, scoped to `current_non_baseline_stable ∪ current_non_reconcilable`. That flow judges success by re-entering this gate at step 1 (re-run the suite, recompute `current_failing_stable`, `current_non_reconcilable`, and `current_non_baseline_stable`), so a remediation attempt succeeds when both gate-blocking sets are empty on the re-run. Repeat until both gate-blocking sets are empty or the user picks `(x)`. Each debugging attempt counts toward the Step 13 retry budget for the implicated tasks.
-   - **(x) Stop execution:** Halt execution. Report partial progress via Step 14 so the user has a complete picture of failures left on the branch: list the unresolved `current_non_baseline_stable` and `current_non_reconcilable` from the most recent final-gate artifact under the Step 14 most-recent-run headings. Do NOT move the plan file, close the todo, or run branch completion. The per-plan `docs/test-runs/<plan-name>/` directory is preserved on this exit path so the user can inspect run artifacts after stop.
+   - **(x) Stop execution:** Halt execution. Report partial progress via Step 14 so the user has a complete picture of failures left on the branch: list the unresolved `current_non_baseline_stable` and `current_non_reconcilable` from the most recent final-gate artifact under the Step 14 most-recent-run headings. Do NOT close the todo or run branch completion. The per-plan `docs/test-runs/<plan-name>/` directory is preserved on this exit path so the user can inspect run artifacts after stop.
 
-**Blocking guarantee:** Steps `### 1. Move plan to done`, `### 2. Close linked todo`, and `### 4. Branch completion` MUST NOT execute while `current_non_baseline_stable ∪ current_non_reconcilable` is non-empty. The only exits from this gate are: (a) both sets become empty (gate passes), or (b) the user selects `(x) Stop execution`.
+**Blocking guarantee:** Steps `### 1. Cleanup`, `### 2. Close linked todo`, and `### 4. Branch completion` MUST NOT execute while `current_non_baseline_stable ∪ current_non_reconcilable` is non-empty. The only exits from this gate are: (a) both sets become empty (gate passes), or (b) the user selects `(x) Stop execution`.
 
-### 1. Move plan to done
+### 1. Cleanup
 
-**Unconditional** — the plan was executed regardless of what happens to the branch:
-- Create `docs/plans/done/` if it doesn't exist
-- Move the plan file to `docs/plans/done/`
-- Delete the per-plan `docs/test-runs/<plan-name>/` directory now that the final integration regression gate has passed: `rm -rf docs/test-runs/<plan-name>`. This cleanup runs ONLY on successful gate exit (i.e. when this `### 1. Move plan to done` sub-step executes). Every stop exit path — Step 10's wave gate, Step 12's intermediate-wave or final-wave menu, Step 13's failure-handling prompt, Step 15's review max-iterations menu, and Step 16's final-gate menu — leaves `docs/test-runs/<plan-name>/` in place so the user can inspect run artifacts after stop.
+**Precondition:** `current_non_baseline_stable ∪ current_non_reconcilable` is empty AND this run reached this substep via the final-gate success exit (never via any `(x) Stop execution` path; every stop exit leaves `docs/test-runs/<plan-name>/` in place so the user can inspect run artifacts). Delete the per-plan test-runs directory via the sanctioned helper (argument validation is the safety surface — see the helper for the exact validation contract):
+
+```bash
+python3 agent/skills/_shared/scripts/cleanup-test-runs.py docs/test-runs/<plan-name>
+```
 
 ### 2. Close linked todo
 
@@ -718,7 +754,7 @@ Scan the plan file for a line matching `**Source:** TODO-<id>`. This line appear
 2. Read the todo using the `todo` tool to check if it exists and its current status
 3. If the todo exists and is not already "done":
    - Update the todo status to "done"
-   - Append to the todo body: `\nCompleted via plan: docs/plans/done/<plan-filename>.md`
+   - Append to the todo body: `\nCompleted via plan: docs/plans/<plan-filename>.md`
    - Record the closed todo ID for the summary report
 4. If the todo does not exist, is already "done", or reading it fails: skip silently (no error, no warning)
 

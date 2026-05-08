@@ -8,8 +8,7 @@ Validation (refuses with exit 1 and JSON {"failure": ...} on stderr):
   - dotdot_traversal       : argument contains a '..' segment.
   - outside_cwd            : resolved path is outside the current working directory tree.
   - protected_segment      : resolved path's segments include any of .git, .ssh,
-                             node_modules, .venv, venv (HARD_PROTECTED_SEGMENTS in
-                             agent/extensions/guardrails.ts).
+                             node_modules, .venv, venv (the protected-segment list).
   - outside_test_runs_prefix : resolved path is not a strict child of <cwd>/docs/test-runs/
                                (the test-runs root itself is also rejected; only per-plan
                                subdirectories under it are accepted).
@@ -17,7 +16,7 @@ Validation (refuses with exit 1 and JSON {"failure": ...} on stderr):
 On success or no-op (target already absent), exits 0 with no stdout output.
 
 Why this exists: the orchestrator's bash invocation `python3 agent/skills/_shared/scripts/cleanup-test-runs.py <path>`
-does NOT match the recursive-delete regex in agent/extensions/guardrails.ts, so the guardrail confirm
+does NOT match the recursive-delete regex in the dangerous-command guardrail, so the guardrail confirm
 prompt does not fire. Argument validation here makes the internal shutil.rmtree safe.
 """
 import argparse

@@ -145,6 +145,34 @@ For each review file path in the `## Review Files` list parsed in Step 9, invoke
 
 When all paths pass validation, proceed to Step 10.
 
+### Boundary: orchestrator MUST NOT re-judge the plan-refiner's verdict
+
+> Between parsing the `plan-refiner`'s `finalMessage` (Step 9), validating each review
+> file's provenance (Step 9.5), and routing on `STATUS:` to the commit gate (Step 10), the
+> orchestrator MUST NOT:
+>
+> - Read the review files (`docs/plans/reviews/<PLAN_BASENAME>-plan-review-v<ERA>.md`) or
+>   the plan content (`PLAN_PATH`) to form an independent verdict on the plan.
+> - Override or recompute the `STATUS:` line returned by the `plan-refiner` (`approved`,
+>   `approved_with_concerns`, `not_approved_within_budget`, `failed`).
+> - Run local checks (grep, ad hoc Python scripts, additional `Read` calls on the plan or
+>   reviews) to second-guess the coordinator's judgment.
+> - Edit the plan file directly, or invent extra refinement dispatches outside the
+>   documented loop. Iteration is owned by the `plan-refiner`'s internal review-edit cycle;
+>   the only sanctioned re-entry from this skill is the (a) commit-and-continue choice on
+>   `not_approved_within_budget`, which re-runs from Step 6 onward with `STARTING_ERA`
+>   recomputed.
+>
+> The only sanctioned post-coordinator paths are: parse `finalMessage`, validate each review
+> file's provenance via `agent/skills/_shared/scripts/validate-review-provenance.py`, and
+> route on `STATUS:` to Step 10's commit gate. See
+> `agent/skills/_shared/orchestrator-verification-boundary.md` for the shared statement.
+>
+> Post-helper bookkeeping: any Python bytecode caches (`__pycache__`) left behind by
+> helper-script invocations under `agent/skills/refine-plan/scripts/` are removed via
+> `python3 agent/skills/_shared/scripts/cleanup-pycache.py <path>`, never via ad hoc
+> `find … -exec rm` commands.
+
 ## Step 10
 
 Handle `STATUS` as follows.

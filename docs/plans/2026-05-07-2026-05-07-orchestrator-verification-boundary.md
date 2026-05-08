@@ -4,17 +4,17 @@
 
 ## Goal
 
-Tighten the orchestrator/subagent boundary in `execute-plan`, `refine-code`, and `refine-plan` so orchestrators route subagent protocol output mechanically without re-judging work — anchored on a single shared boundary statement that all three skills reference. In parallel, replace two friction-prone ad hoc cleanup invocations (`rm -rf docs/test-runs/<plan-name>` and `find <dir> -type d -name __pycache__ -prune -exec rm -rf {} +`) with named helper scripts under `agent/skills/_shared/scripts/` so the dangerous-command guardrail in `agent/extensions/guardrails.ts` no longer fires on the orchestrator's normal success paths.
+Tighten the orchestrator/subagent boundary in `execute-plan`, `refine-code`, and `refine-plan` so orchestrators route subagent protocol output mechanically without re-judging work — anchored on a single shared boundary statement that all three skills reference. In parallel, replace two friction-prone ad hoc cleanup invocations (`rm -rf docs/test-runs/<plan-name>` and `find <dir> -type d -name __pycache__ -prune -exec rm -rf {} +`) with named helper scripts under `agent/skills/_shared/scripts/` so the dangerous-command guardrail no longer fires on the orchestrator's normal success paths.
 
 ## Architecture summary
 
 The change splits cleanly into three additions and three edits:
 
-- **Two new helper scripts** under `agent/skills/_shared/scripts/` (`cleanup-test-runs.py`, `cleanup-pycache.py`) following the existing six-helper convention (Python, positional arg, argparse-driven, structured failures, tests under `tests/`). Each helper validates its argument (no `..` traversal, must resolve under cwd, no `HARD_PROTECTED_SEGMENTS` per `agent/extensions/guardrails.ts`, plus a `<cwd>/docs/test-runs/` prefix constraint for the test-runs helper) and then performs the deletion via `shutil.rmtree` / `os.walk`. The orchestrator-visible bash invocation becomes `python3 agent/skills/_shared/scripts/cleanup-*.py <arg>`, which does NOT match either dangerous-command regex in `guardrails.ts:94–95`.
+- **Two new helper scripts** under `agent/skills/_shared/scripts/` (`cleanup-test-runs.py`, `cleanup-pycache.py`) following the existing six-helper convention (Python, positional arg, argparse-driven, structured failures, tests under `tests/`). Each helper validates its argument (no `..` traversal, must resolve under cwd, no protected segments from the dangerous-command guardrail's protected-segment list, plus a `<cwd>/docs/test-runs/` prefix constraint for the test-runs helper) and then performs the deletion via `shutil.rmtree` / `os.walk`. The orchestrator-visible bash invocation becomes `python3 agent/skills/_shared/scripts/cleanup-*.py <arg>`, which does NOT match either dangerous-command regex.
 - **One new shared boundary file** at `agent/skills/_shared/orchestrator-verification-boundary.md` stating the orchestrator-verification principle once. The three affected SKILL.md files reference it instead of restating it.
 - **Three SKILL.md edits** that add explicit prohibition language at the temptation hot spots, reference the shared boundary file, enumerate allowed mechanical work paired with existing helpers, and (for `execute-plan`) substitute the cleanup helper at the test-runs cleanup site. `execute-plan/SKILL.md` ALSO removes the plan-archive-to-done flow per Requirement 9 to make line budget for the new wording (Requirement 8 forbids growing `wc -l`); the test-runs cleanup is relocated to its own substep on the final-gate success path per Requirement 10.
 
-`agent/extensions/guardrails.ts` and `agent/extensions/guardrails.test.ts` are NOT modified — the cleanup-helper strategy is the entire response to the friction motivation.
+The dangerous-command guardrail implementation and its tests are NOT modified — the cleanup-helper strategy is the entire response to the friction motivation.
 
 ## Tech stack
 
@@ -195,8 +195,7 @@ Validation (refuses with exit 1 and JSON {"failure": ...} on stderr):
   - dotdot_traversal       : argument contains a '..' segment.
   - outside_cwd            : resolved path is outside the current working directory tree.
   - protected_segment      : resolved path's segments include any of .git, .ssh,
-                             node_modules, .venv, venv (HARD_PROTECTED_SEGMENTS in
-                             agent/extensions/guardrails.ts).
+                             node_modules, .venv, venv (the protected-segment list).
   - outside_test_runs_prefix : resolved path is not a strict child of <cwd>/docs/test-runs/
                                (the test-runs root itself is also rejected; only per-plan
                                subdirectories under it are accepted).
@@ -204,7 +203,7 @@ Validation (refuses with exit 1 and JSON {"failure": ...} on stderr):
 On success or no-op (target already absent), exits 0 with no stdout output.
 
 Why this exists: the orchestrator's bash invocation `python3 agent/skills/_shared/scripts/cleanup-test-runs.py <path>`
-does NOT match the recursive-delete regex in agent/extensions/guardrails.ts, so the guardrail confirm
+does NOT match the recursive-delete regex in the dangerous-command guardrail, so the guardrail confirm
 prompt does not fire. Argument validation here makes the internal shutil.rmtree safe.
 """
 import argparse
@@ -282,7 +281,7 @@ if __name__ == "__main__":
   Verify: `cd agent && python3 -m unittest discover -s skills/_shared/scripts/tests -p "test_cleanup_test_runs.py"` exits 0 with all eight tests passing (no `FAIL`, no `ERROR` in output).
 - The helper rejects the `docs/test-runs/` root itself (only strict per-plan subdirectories under it are accepted).
   Verify: `cd agent/skills/_shared/scripts && python3 -c "import os, shutil, subprocess, sys, tempfile; script=os.path.abspath('cleanup-test-runs.py'); cwd=tempfile.mkdtemp(); os.makedirs(os.path.join(cwd,'docs','test-runs','p')); r=subprocess.run([sys.executable,script,'docs/test-runs'],cwd=cwd,capture_output=True,text=True); print('rc=',r.returncode,'failed=','outside_test_runs_prefix' in r.stderr,'preserved=',os.path.isdir(os.path.join(cwd,'docs','test-runs','p'))); shutil.rmtree(cwd)"` prints `rc= 1`, `failed= True`, and `preserved= True`.
-- The helper script's name and its docstring's documented invocation form do not contain `rm -r` or `rm --recursive`, so the regex `\brm\s+(-[^\s]*r|--recursive)/i` from `agent/extensions/guardrails.ts:94` does NOT match. (The SKILL.md-side invocation form is verified in Task 4.)
+- The helper script's name and its docstring's documented invocation form do not contain `rm -r` or `rm --recursive`, so the regex `\brm\s+(-[^\s]*r|--recursive)/i` from the dangerous-command guardrail does NOT match. (The SKILL.md-side invocation form is verified in Task 4.)
   Verify: `grep -nE "rm[[:space:]]+(-[^[:space:]]*r|--recursive)" agent/skills/_shared/scripts/cleanup-test-runs.py` returns zero matches.
 - `agent/skills/_shared/scripts/README.md` documents the new helper under the `## Helpers` list.
   Verify: `grep -n "cleanup-test-runs.py" agent/skills/_shared/scripts/README.md` returns at least one match inside the `## Helpers` section (between `## Helpers` and `## Running tests`).
@@ -434,13 +433,12 @@ Validation (refuses with exit 1 and JSON {"failure": ...} on stderr):
   - dotdot_traversal   : argument contains a '..' segment.
   - outside_cwd        : resolved path is outside the current working directory tree.
   - protected_segment  : resolved path's segments include any of .git, .ssh,
-                         node_modules, .venv, venv (HARD_PROTECTED_SEGMENTS in
-                         agent/extensions/guardrails.ts).
+                         node_modules, .venv, venv (the protected-segment list).
 
 On success or no-op (no __pycache__ directories found, or the target is absent), exits 0.
 
 Why this exists: the orchestrator's bash invocation `python3 agent/skills/_shared/scripts/cleanup-pycache.py <path>`
-does NOT match the find-exec-rm regex in agent/extensions/guardrails.ts, so the guardrail confirm
+does NOT match the find-exec-rm regex in the recursive-delete guardrail, so the guardrail confirm
 prompt does not fire. Argument validation here makes the internal shutil.rmtree safe.
 """
 import argparse
@@ -515,7 +513,7 @@ if __name__ == "__main__":
   Verify: `cd agent/skills/_shared/scripts && python3 -c "import os, shutil, subprocess, sys, tempfile; script=os.path.abspath('cleanup-pycache.py'); cwd=tempfile.mkdtemp(); os.makedirs(os.path.join(cwd,'a','__pycache__')); os.makedirs(os.path.join(cwd,'a','b','__pycache__')); r=subprocess.run([sys.executable,script,'a'],cwd=cwd,capture_output=True,text=True); print('rc=',r.returncode,'stderr=',r.stderr,'pc1=',os.path.exists(os.path.join(cwd,'a','__pycache__')),'pc2=',os.path.exists(os.path.join(cwd,'a','b','__pycache__'))); shutil.rmtree(cwd)"` prints `rc= 0`, `pc1= False`, and `pc2= False`.
 - The helper exits non-zero on each invalid input class enumerated in spec Requirement 13.
   Verify: `cd agent && python3 -m unittest discover -s skills/_shared/scripts/tests -p "test_cleanup_pycache.py"` exits 0 with all seven tests passing.
-- The helper uses the orchestrator-visible bash form `python3 agent/skills/_shared/scripts/cleanup-pycache.py <path>` and the regex `\bfind\b.*(?:\s-delete\b|\s-exec\s+rm\b)/i` from `agent/extensions/guardrails.ts:95` does NOT match this invocation form.
+- The helper uses the orchestrator-visible bash form `python3 agent/skills/_shared/scripts/cleanup-pycache.py <path>` and the regex `\bfind\b.*(?:\s-delete\b|\s-exec\s+rm\b)/i` from the dangerous-command guardrail does NOT match this invocation form.
   Verify: open `agent/skills/_shared/scripts/cleanup-pycache.py` and confirm the file does not include any `find` shell command in any code or comment that would later be presented as the orchestrator-visible invocation; the documented invocation form in the docstring is `python3 ... cleanup-pycache.py <path>` with no `find` token.
 - `agent/skills/_shared/scripts/README.md` documents the new helper under the `## Helpers` list.
   Verify: `grep -n "cleanup-pycache.py" agent/skills/_shared/scripts/README.md` returns at least one match inside the `## Helpers` section.
@@ -636,7 +634,7 @@ verdict authoritative, and the orchestrator's context clean.
 
 **Steps:**
 
-- [ ] **Step 1: Record the pre-change line count** — run `wc -l agent/skills/execute-plan/SKILL.md` and write the result down (call it `PRE_LINES`). The post-change line count must not exceed `PRE_LINES` (spec Requirement 8). The current value is 739; the implementer must capture whatever value `wc -l` reports just before editing.
+- [ ] **Step 1: Record the pre-change line count** — run `wc -l agent/skills/execute-plan/SKILL.md` and write the result down as a historical baseline (the pre-change value at the time this plan was drafted was 739). The post-change line count must be ≤ 775 (the user-relaxed budget; spec Requirement 8 as updated).
 
 - [ ] **Step 2: Add the post-coder verification guardrail block** — between Step 9 (line 354's "After the wave drains…") and Step 10's heading (line 358), insert a single guardrail block titled `### Boundary: orchestrator MUST NOT verify coder output itself` containing this exact wording:
 
@@ -736,7 +734,7 @@ python3 agent/skills/_shared/scripts/cleanup-test-runs.py docs/test-runs/<plan-n
 ```
 
 This invocation is the sanctioned mechanism for this cleanup; it does not match the
-recursive-delete regex in `agent/extensions/guardrails.ts` and does not surface a manual
+recursive-delete regex in the dangerous-command guardrail and does not surface a manual
 confirm. Helper argument validation is the safety surface — see
 `agent/skills/_shared/scripts/cleanup-test-runs.py` for the exact validation contract.
 ````
@@ -750,7 +748,7 @@ confirm. Helper argument validation is the safety surface — see
 
 - [ ] **Step 6: Add the cleanup-pycache reference** — append a single short note to the allowed-mechanical-work block (already added in Step 4 — it has a `cleanup-pycache.py` row). No additional placement is required if Step 4's table is in place; if not, insert a one-line note adjacent to the allowed-mechanical-work block stating: `Post-helper Python bytecode cache cleanup uses `agent/skills/_shared/scripts/cleanup-pycache.py <path>` rather than ad hoc `find … -exec rm` invocations.`
 
-- [ ] **Step 7: Verify line budget** — run `wc -l agent/skills/execute-plan/SKILL.md` and confirm the result is `≤ PRE_LINES` from Step 1. If exceeded, perform cosmetic reflows (joining short lines, tightening repeated stop-exit phrasing into a single back-reference) until budget is met. Do NOT delete substantive content beyond what Steps 5(a)–5(g) authorize.
+- [ ] **Step 7: Verify line budget** — run `wc -l agent/skills/execute-plan/SKILL.md` and confirm the result is `≤ 775` (the user-relaxed budget). If exceeded, perform cosmetic reflows (joining short lines, tightening repeated stop-exit phrasing into a single back-reference) until budget is met. Do NOT delete substantive content beyond what Steps 5(a)–5(g) authorize.
 
 - [ ] **Step 8: Verify no `docs/plans/done/` references and no stale plan-move phrasing remain** — `grep -n "docs/plans/done" agent/skills/execute-plan/SKILL.md` must return zero matches, AND `grep -nE "[Mm]ove the plan file" agent/skills/execute-plan/SKILL.md` must return zero matches (the stop-exit phrasing sweep from Step 5(g) is complete).
 
@@ -774,8 +772,8 @@ confirm. Helper argument validation is the safety surface — see
   Verify: `grep -n "cleanup-pycache.py" agent/skills/execute-plan/SKILL.md` returns at least one match inside the allowed-mechanical-work block (within 30 lines of the `Allowed mechanical work` heading).
 - `agent/skills/execute-plan/SKILL.md` references the shared boundary file from each of the two new guardrail blocks.
   Verify: `grep -c "orchestrator-verification-boundary.md" agent/skills/execute-plan/SKILL.md` returns a count ≥ 2.
-- Post-change line count of `agent/skills/execute-plan/SKILL.md` does not exceed the pre-change line count.
-  Verify: `wc -l agent/skills/execute-plan/SKILL.md` returns a value ≤ 739 (the pre-change count recorded in this plan; the implementer recomputes the pre-change baseline in Step 1 of this task and confirms ≤ that value if it differs from 739 due to ambient repo state).
+- Post-change line count of `agent/skills/execute-plan/SKILL.md` is within the user-relaxed budget of 775 lines (the pre-change baseline at plan-draft time was 739, recorded for historical reference only).
+  Verify: `wc -l agent/skills/execute-plan/SKILL.md` returns a value ≤ 775.
 
 **Model recommendation:** capable
 

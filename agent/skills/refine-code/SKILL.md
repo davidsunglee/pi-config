@@ -80,6 +80,31 @@ For any other outcome (`STATUS: failed`, dispatch failure, unexpected status), s
 
 The caller (execute-plan or user) makes the decision. This skill does not auto-continue. Proceed to Step 6 before reporting anything to the caller.
 
+### Boundary: orchestrator MUST NOT re-judge the code-refiner's verdict
+
+> Between parsing the `code-refiner`'s `finalMessage` (Step 5) and forwarding it verbatim to
+> the caller (Step 6), the orchestrator MUST NOT:
+>
+> - Read the review file or the diff under `BASE_SHA..HEAD_SHA` to form an independent
+>   verdict on the change.
+> - Override or recompute the `STATUS:` line returned by the `code-refiner` (`approved`,
+>   `approved_with_concerns`, `not_approved_within_budget`, `failed`).
+> - Run local checks (grep, the test command, additional `Read` calls on implementation
+>   files, ad hoc Python scripts) to second-guess the coordinator's judgment.
+> - Dispatch ad hoc remediation subagents outside the documented loop. Iteration is owned by
+>   the `code-refiner`'s internal review-remediate cycle; the only sanctioned re-entry from
+>   this skill is the (a) keep-iterating choice on `not_approved_within_budget`.
+>
+> The only sanctioned post-coordinator path is: parse `finalMessage` for the `STATUS:` line,
+> validate provenance via `agent/skills/_shared/scripts/validate-review-provenance.py`
+> (Step 6), and forward the coordinator's output verbatim. See
+> `agent/skills/_shared/orchestrator-verification-boundary.md` for the shared statement.
+>
+> Post-helper bookkeeping: any Python bytecode caches (`__pycache__`) left behind by
+> helper-script invocations under `agent/skills/refine-code/scripts/` are removed via
+> `python3 agent/skills/_shared/scripts/cleanup-pycache.py <path>`, never via ad hoc
+> `find … -exec rm` commands.
+
 ## Step 6: Validate review provenance
 
 Run this validation only on `STATUS: approved`, `STATUS: approved_with_concerns`, or `STATUS: not_approved_within_budget`; skip on any other outcome (including `STATUS: failed`).

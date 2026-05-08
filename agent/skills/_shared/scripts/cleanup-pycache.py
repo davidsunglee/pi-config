@@ -9,13 +9,12 @@ Validation (refuses with exit 1 and JSON {"failure": ...} on stderr):
   - dotdot_traversal   : argument contains a '..' segment.
   - outside_cwd        : resolved path is outside the current working directory tree.
   - protected_segment  : resolved path's segments include any of .git, .ssh,
-                         node_modules, .venv, venv (HARD_PROTECTED_SEGMENTS in
-                         agent/extensions/guardrails.ts).
+                         node_modules, .venv, venv (the protected-segment list).
 
 On success or no-op (no __pycache__ directories found, or the target is absent), exits 0.
 
 Why this exists: the orchestrator's bash invocation `python3 agent/skills/_shared/scripts/cleanup-pycache.py <path>`
-does NOT match the find-exec-rm regex in agent/extensions/guardrails.ts, so the guardrail confirm
+does NOT match the find-exec-rm regex in the recursive-delete guardrail, so the guardrail confirm
 prompt does not fire. Argument validation here makes the internal shutil.rmtree safe.
 """
 import argparse
