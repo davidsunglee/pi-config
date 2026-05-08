@@ -125,6 +125,13 @@ def main():
     cwd = args.working_dir or "."
 
     # Step 1: extract provenance preamble
+    if not Path(brief_path).is_file():
+        sys.stderr.write(json.dumps({
+            "failure": "brief_path_not_found",
+            "brief_path": brief_path,
+        }) + "\n")
+        sys.exit(2)
+
     preamble_script = Path(__file__).resolve().with_name("extract-provenance-preamble.py")
     preamble_result = subprocess.run(
         [sys.executable, str(preamble_script), "--file", brief_path, "--mode", "brief"],
@@ -132,13 +139,37 @@ def main():
         text=True,
     )
 
-    preamble_ok = preamble_result.returncode == 0
+    preamble_ok = False
     brief_sha = None
-    if preamble_ok:
-        preamble = json.loads(preamble_result.stdout)
+    if preamble_result.returncode == 0:
+        try:
+            preamble = json.loads(preamble_result.stdout)
+        except json.JSONDecodeError:
+            sys.stderr.write(json.dumps({
+                "failure": "preamble_helper_invalid_json",
+                "brief_path": brief_path,
+                "stdout": preamble_result.stdout,
+            }) + "\n")
+            sys.exit(2)
         brief_sha = preamble.get("git_sha")
-        if brief_sha is None:
+        preamble_ok = brief_sha is not None
+    else:
+        # Only git_sha_malformed is a normal uninspectable_a outcome.
+        # Any other helper failure is a structured failure.
+        try:
+            err_payload = json.loads(preamble_result.stderr)
+        except json.JSONDecodeError:
+            err_payload = None
+        if isinstance(err_payload, dict) and err_payload.get("failure") == "git_sha_malformed":
             preamble_ok = False
+        else:
+            sys.stderr.write(json.dumps({
+                "failure": "preamble_helper_failure",
+                "brief_path": brief_path,
+                "exit_code": preamble_result.returncode,
+                "stderr": preamble_result.stderr,
+            }) + "\n")
+            sys.exit(2)
 
     # Step 2: get HEAD SHA
     try:

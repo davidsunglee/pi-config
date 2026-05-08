@@ -264,6 +264,34 @@ class TestClassifyWorkflowDrift(unittest.TestCase):
         finally:
             tmp.cleanup()
 
+    def test_missing_brief_file_exits_2_with_failure(self):
+        tmp = make_temp_repo()
+        try:
+            repo = tmp.name
+            missing = os.path.join(tmp.name, "does-not-exist.md")
+            result = run_helper(missing, repo)
+            self.assertEqual(result.returncode, 2)
+            err = json.loads(result.stderr.strip())
+            self.assertIn("failure", err)
+            self.assertEqual(err["brief_path"], missing)
+        finally:
+            tmp.cleanup()
+
+    def test_preamble_helper_unexpected_failure_exits_2(self):
+        # Pass --brief-path that points to a directory (open() raises IsADirectoryError),
+        # which is an unexpected helper failure rather than git_sha_malformed.
+        tmp = make_temp_repo()
+        try:
+            repo = tmp.name
+            dir_as_brief = os.path.join(tmp.name, "subdir")
+            os.makedirs(dir_as_brief)
+            result = run_helper(dir_as_brief, repo)
+            self.assertEqual(result.returncode, 2)
+            err = json.loads(result.stderr.strip())
+            self.assertIn("failure", err)
+        finally:
+            tmp.cleanup()
+
     def test_message_body_uninspectable_c_byte_equal(self):
         tmp = make_temp_repo()
         try:
