@@ -185,12 +185,10 @@ def main():
 
     if head_failed:
         head_sha = "<unknown>"
-        if not preamble_ok:
-            _emit("uninspectable_a", brief_path, None, head_sha, [], None,
-                  _uninspectable_a_body(brief_path, head_sha))
-        else:
-            _emit("uninspectable_c", brief_path, brief_sha, head_sha, [], head_error,
-                  _uninspectable_c_body(brief_path, str(brief_sha), head_sha, head_error))
+        rendered_brief_sha = str(brief_sha) if preamble_ok else "<unknown>"
+        _emit("uninspectable_c", brief_path, brief_sha if preamble_ok else None,
+              head_sha, [], head_error,
+              _uninspectable_c_body(brief_path, rendered_brief_sha, head_sha, head_error))
         return
 
     head_sha = head_result.stdout.strip()

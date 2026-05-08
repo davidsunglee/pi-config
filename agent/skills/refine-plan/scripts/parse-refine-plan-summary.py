@@ -128,8 +128,21 @@ def main():
     if args.summary == "-":
         content = sys.stdin.read()
     else:
-        with open(args.summary, "r") as f:
-            content = f.read()
+        try:
+            with open(args.summary, "r") as f:
+                content = f.read()
+        except OSError as exc:
+            json.dump(
+                {
+                    "failure": "input missing or unreadable",
+                    "input": "summary",
+                    "path": args.summary,
+                    "error": str(exc),
+                },
+                sys.stderr,
+            )
+            sys.stderr.write("\n")
+            sys.exit(2)
 
     result = parse(content)
     json.dump(result, sys.stdout)

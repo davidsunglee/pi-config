@@ -264,6 +264,44 @@ class TestEmptyStringSubstitution(unittest.TestCase):
 class TestNoRecursiveExpansion(unittest.TestCase):
     """Test that placeholders in values don't expand recursively."""
 
+    def test_owned_placeholder_in_value_is_preserved(self):
+        """A value containing another owned placeholder is inserted literally."""
+        template_content = "Artifact: {TASK_ARTIFACT}; Todo: {SOURCE_TODO}"
+        template_file = write_temp_file(template_content)
+        spec_file = write_temp_file("Original spec")
+        note_file = write_temp_file("Note")
+        matrix_file = write_temp_file("Matrix")
+        output_file = tempfile.NamedTemporaryFile(
+            mode="w", delete=False, suffix=".md"
+        ).name
+
+        try:
+            rc, stdout, stderr = run_script(
+                "--template", template_file,
+                "--plan-path", "/path/to/plan.md",
+                "--task-artifact", "{SOURCE_TODO}",
+                "--source-todo", "Source todo value",
+                "--source-spec", "Source spec",
+                "--scout-brief", "Scout brief",
+                "--original-spec-inline", spec_file,
+                "--structural-only-note", note_file,
+                "--max-iterations", "5",
+                "--starting-era", "1",
+                "--review-output-path", "/path/to/review",
+                "--working-dir", "/work",
+                "--model-matrix", matrix_file,
+                "--output", output_file,
+            )
+
+            self.assertEqual(rc, 0, f"Script failed with stderr: {stderr}")
+            with open(output_file, "r") as f:
+                content = f.read()
+            self.assertIn("Artifact: {SOURCE_TODO}; Todo: Source todo value", content)
+        finally:
+            for f in [template_file, spec_file, note_file, matrix_file, output_file]:
+                if os.path.exists(f):
+                    os.unlink(f)
+
     def test_no_recursive_expansion(self):
         """Test passing value with placeholder; assert no recursive expansion."""
         # Create a template with all 12 placeholders to avoid "unreplaced" error

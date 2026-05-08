@@ -168,9 +168,17 @@ Placeholders:
         )
         sys.exit(1)
 
-    # Apply single-pass literal-substring substitution.
-    for placeholder, value in placeholders.items():
-        content = content.replace(placeholder, value)
+    # Apply single-pass literal substitution over the original template. Values
+    # are returned verbatim, so placeholder-looking text inside inputs is not
+    # expanded by later replacements.
+    def substitute(match):
+        key = match.group(1)
+        placeholder = "{" + key + "}"
+        if placeholder in placeholders:
+            return str(placeholders[placeholder])
+        return match.group(0)
+
+    content = re.sub(r"\{([A-Z_][A-Z0-9_]*)\}", substitute, content)
 
     # Write output
     if args.output == "-":

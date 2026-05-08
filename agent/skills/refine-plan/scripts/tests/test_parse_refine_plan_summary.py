@@ -163,6 +163,13 @@ class TestParseRefinePlanSummary(unittest.TestCase):
         err = json.loads(proc.stderr)
         self.assertEqual(err["failure"], "commit_missing")
 
+    def test_missing_summary_file_emits_structured_json(self):
+        proc = run_script("/path/that/does/not/exist.txt")
+        self.assertEqual(proc.returncode, 2)
+        err = json.loads(proc.stderr)
+        self.assertEqual(err["failure"], "input missing or unreadable")
+        self.assertEqual(err["input"], "summary")
+
 
 if __name__ == "__main__":
     unittest.main()

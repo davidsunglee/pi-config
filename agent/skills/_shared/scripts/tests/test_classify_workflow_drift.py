@@ -185,6 +185,21 @@ class TestClassifyWorkflowDrift(unittest.TestCase):
         finally:
             tmp.cleanup()
 
+    def test_uninspectable_c_git_failure_takes_precedence_over_missing_sha(self):
+        tmp = tempfile.TemporaryDirectory()
+        try:
+            brief = os.path.join(tmp.name, "brief.md")
+            write_brief(brief, sha=None)
+            result = run_helper(brief, working_dir=tmp.name)
+            self.assertEqual(result.returncode, 0)
+            data = json.loads(result.stdout)
+            self.assertEqual(data["outcome"], "uninspectable_c")
+            self.assertIsNone(data["brief_sha"])
+            self.assertEqual(data["head_sha"], "<unknown>")
+            self.assertIsNotNone(data["error"])
+        finally:
+            tmp.cleanup()
+
     def test_message_body_workflow_only_byte_equal(self):
         tmp = make_temp_repo()
         try:

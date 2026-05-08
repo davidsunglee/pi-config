@@ -44,8 +44,21 @@ def main():
     )
     args = parser.parse_args()
 
-    with open(args.file, "r") as fh:
-        lines = fh.readlines()
+    try:
+        with open(args.file, "r") as fh:
+            lines = fh.readlines()
+    except OSError as exc:
+        json.dump(
+            {
+                "failure": "input missing or unreadable",
+                "input": "file",
+                "path": args.file,
+                "error": str(exc),
+            },
+            sys.stderr,
+        )
+        sys.stderr.write("\n")
+        sys.exit(2)
 
     if args.mode == "spec":
         bound = 40

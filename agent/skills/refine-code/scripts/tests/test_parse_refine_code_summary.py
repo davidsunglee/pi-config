@@ -240,6 +240,13 @@ class TestFailClosed(unittest.TestCase):
         err = parse_stderr(stderr)
         self.assertEqual(err["failure"], "missing_failure_reason")
 
+    def test_missing_summary_file_emits_structured_json(self):
+        rc, stdout, stderr = run_script("--summary", "/path/that/does/not/exist.txt")
+        self.assertEqual(rc, 2)
+        err = parse_stderr(stderr)
+        self.assertEqual(err["failure"], "input missing or unreadable")
+        self.assertEqual(err["input"], "summary")
+
 
 class TestRemainingIssuesDocumentedHeading(unittest.TestCase):
     """The coordinator prompt's documented heading is

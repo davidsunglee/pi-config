@@ -160,8 +160,17 @@ Failure labels (emitted as JSON to stderr on non-zero exit):
     if args.summary == "-":
         text = sys.stdin.read()
     else:
-        with open(args.summary, "r") as f:
-            text = f.read()
+        try:
+            with open(args.summary, "r") as f:
+                text = f.read()
+        except OSError as exc:
+            print(json.dumps({
+                "failure": "input missing or unreadable",
+                "input": "summary",
+                "path": args.summary,
+                "error": str(exc),
+            }), file=sys.stderr)
+            sys.exit(2)
 
     lines = text.splitlines()
 

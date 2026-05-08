@@ -130,6 +130,13 @@ class TestExtractProvenancePreamble(unittest.TestCase):
         self.assertIsNone(data["scout_brief"])
         self.assertIsNone(data["git_sha"])
 
+    def test_missing_file_emits_structured_json(self):
+        result = run(["--file", "/path/that/does/not/exist.md", "--mode", "brief"])
+        self.assertEqual(result.returncode, 2)
+        err = json.loads(result.stderr)
+        self.assertEqual(err["failure"], "input missing or unreadable")
+        self.assertEqual(err["input"], "file")
+
 
 if __name__ == "__main__":
     unittest.main()
