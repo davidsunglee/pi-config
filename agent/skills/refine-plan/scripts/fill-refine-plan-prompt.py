@@ -143,22 +143,34 @@ Placeholders:
         "{MODEL_MATRIX}": model_matrix,
     }
 
-    # Find placeholders in the original template
-    original_pattern = r"\{[A-Z_][A-Z0-9_]*\}"
-    original_placeholders = set(re.findall(original_pattern, content))
+    # refine-plan-prompt.md intentionally documents downstream placeholders
+    # used by the plan-refiner when it fills reviewer prompts. This helper owns
+    # only the twelve placeholders above; values may also contain literal
+    # {TOKENS} from specs/plans. Fail only when the input template itself
+    # contains an unknown placeholder outside these sets.
+    owned = {placeholder.strip("{}") for placeholder in placeholders}
+    allowed_downstream = {
+        "OUTPUT_PATH",
+        "PLAN_ARTIFACT",
+        "REVIEWER_PROVENANCE",
+        "REVIEW_FINDINGS",
+    }
+    template_placeholders = set(
+        re.findall(r"\{([A-Z_][A-Z0-9_]*)\}", content)
+    )
+    unreplaced = sorted(template_placeholders - owned - allowed_downstream)
+    if unreplaced:
+        print(
+            json.dumps(
+                {"failure": "unreplaced placeholders remain", "unreplaced": unreplaced}
+            ),
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
-    # Apply single-pass literal-substring substitution
+    # Apply single-pass literal-substring substitution.
     for placeholder, value in placeholders.items():
         content = content.replace(placeholder, value)
-
-    # Scan for remaining placeholders that were in the original template
-    remaining_matches = set(re.findall(original_pattern, content))
-
-    # Check if any original placeholders remain unreplaced
-    unreplaced = remaining_matches & original_placeholders
-
-    if unreplaced:
-        emit_error_exit_1("unreplaced placeholders remain")
 
     # Write output
     try:

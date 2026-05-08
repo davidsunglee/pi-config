@@ -234,13 +234,54 @@ class TestFillRefineCodePrompt(unittest.TestCase):
                 "--output", output_file
             ])
 
-            self.assertEqual(code, 1, "Script should exit 1 for unreplaced placeholders")
-            stderr_json = json.loads(stderr)
-            self.assertEqual(stderr_json["failure"], "unreplaced placeholders remain")
-            self.assertIn("OTHER", stderr_json["unreplaced"])
+            self.assertEqual(code, 0, f"Script failed: {stderr}")
+            with open(output_file) as f:
+                content = f.read()
+            self.assertIn("See {OTHER}", content)
         finally:
             os.unlink(plan_goal_file)
             os.unlink(template_file)
+            os.unlink(plan_contents_file)
+            os.unlink(model_matrix_file)
+            os.unlink(output_file)
+
+    def test_plan_contents_placeholders_preserved(self):
+        """Plan contents may document placeholder tokens and must be inserted literally."""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.md', delete=False) as f:
+            f.write("Test goal")
+            plan_goal_file = f.name
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.md', delete=False) as f:
+            f.write("Plan mentions {TASK_SPEC} and {WORKING_DIR}")
+            plan_contents_file = f.name
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            json.dump({"crossProvider.capable": "model1"}, f)
+            model_matrix_file = f.name
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.md', delete=False) as f:
+            output_file = f.name
+
+        try:
+            stdout, stderr, code = self.run_script([
+                "--template", str(self.real_template),
+                "--plan-goal", plan_goal_file,
+                "--plan-contents", plan_contents_file,
+                "--base-sha", "abc1234",
+                "--head-sha", "def5678",
+                "--review-output-path", "/path/to/review.md",
+                "--max-iterations", "5",
+                "--model-matrix", model_matrix_file,
+                "--working-dir", "/work/dir",
+                "--output", output_file
+            ])
+
+            self.assertEqual(code, 0, f"Script failed: {stderr}")
+            with open(output_file) as f:
+                content = f.read()
+            self.assertIn("Plan mentions {TASK_SPEC} and {WORKING_DIR}", content)
+        finally:
+            os.unlink(plan_goal_file)
             os.unlink(plan_contents_file)
             os.unlink(model_matrix_file)
             os.unlink(output_file)

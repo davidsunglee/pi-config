@@ -139,7 +139,7 @@ Example:
         plan_contents = read_text_input(args.plan_contents, "plan-contents")
         model_matrix = read_text_input(args.model_matrix, "model-matrix")
 
-        # Build placeholder map with 8 required keys
+        # Build placeholder map with 8 required keys.
         placeholders = {
             "PLAN_GOAL": plan_goal,
             "PLAN_CONTENTS": plan_contents,
@@ -151,33 +151,45 @@ Example:
             "WORKING_DIR": args.working_dir,
         }
 
-        # Convert all values to strings
-        str_placeholders = {k: str(v) for k, v in placeholders.items()}
+        # refine-code-prompt.md intentionally documents downstream placeholders
+        # used by the code-refiner when it fills reviewer/remediator prompts.
+        # This helper owns only the eight placeholders above; values may also
+        # contain literal {TOKENS} from plan text. Fail only when the input
+        # template itself contains an unknown placeholder outside these sets.
+        allowed_downstream_placeholders = {
+            "DESCRIPTION",
+            "NEW_HEAD",
+            "PLAN_OR_REQUIREMENTS",
+            "PREVIOUS_FINDINGS",
+            "PREV_HEAD",
+            "REVIEWER_PROVENANCE",
+            "RE_REVIEW_BLOCK",
+            "WHAT_WAS_IMPLEMENTED",
+        }
+        template_placeholders = set(
+            re.findall(r'\{([A-Z_][A-Z0-9_]*)\}', template_content)
+        )
+        unreplaced = sorted(
+            template_placeholders - set(placeholders) - allowed_downstream_placeholders
+        )
+        if unreplaced:
+            sys.stderr.write(json.dumps({
+                "failure": "unreplaced placeholders remain",
+                "unreplaced": unreplaced,
+            }) + "\n")
+            sys.exit(1)
 
-        # Single-pass literal substitution (no recursive expansion)
+        # Single-pass literal substitution (no recursive expansion). Unknown
+        # allowed downstream placeholders are preserved for the coordinator.
         def _sub(match):
             key = match.group(1)
-            if key in str_placeholders:
-                return str_placeholders[key]
+            if key in placeholders:
+                return str(placeholders[key])
             return match.group(0)
 
         output_content = re.sub(
             r'\{([A-Z_][A-Z0-9_]*)\}', _sub, template_content
         )
-
-        # Check for unreplaced placeholders
-        unreplaced_pattern = r'\{([A-Z_][A-Z0-9_]*)\}'
-        matches = re.findall(unreplaced_pattern, output_content)
-
-        if matches:
-            # Sort and deduplicate
-            unreplaced = sorted(set(matches))
-            error_json = {
-                "failure": "unreplaced placeholders remain",
-                "unreplaced": unreplaced
-            }
-            sys.stderr.write(json.dumps(error_json) + "\n")
-            sys.exit(1)
 
         # Write output
         if args.output == "-":
