@@ -173,6 +173,9 @@ Placeholders:
         content = content.replace(placeholder, value)
 
     # Write output
+    if args.output == "-":
+        sys.stdout.write(content)
+        return
     try:
         with open(args.output, "w") as f:
             f.write(content)

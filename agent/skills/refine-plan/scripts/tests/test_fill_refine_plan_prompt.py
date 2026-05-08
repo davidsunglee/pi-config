@@ -354,6 +354,56 @@ class TestStartingEraStringified(unittest.TestCase):
                     os.unlink(f)
 
 
+class TestOutputDashWritesStdout(unittest.TestCase):
+    """`--output -` should write to stdout, not a file named '-'."""
+
+    def test_output_dash_writes_stdout(self):
+        template_file = write_temp_file("Era: {STARTING_ERA}")
+        spec_file = write_temp_file("Original spec")
+        note_file = write_temp_file("Note")
+        matrix_file = write_temp_file("Matrix")
+
+        cwd = tempfile.mkdtemp()
+        try:
+            result = subprocess.run(
+                [
+                    sys.executable, SCRIPT,
+                    "--template", template_file,
+                    "--plan-path", "/path/to/plan.md",
+                    "--task-artifact", "Task artifact",
+                    "--source-todo", "Source todo",
+                    "--source-spec", "Source spec",
+                    "--scout-brief", "Scout brief",
+                    "--original-spec-inline", spec_file,
+                    "--structural-only-note", note_file,
+                    "--max-iterations", "5",
+                    "--starting-era", "7",
+                    "--review-output-path", "/path/to/review",
+                    "--working-dir", "/work",
+                    "--model-matrix", matrix_file,
+                    "--output", "-",
+                ],
+                capture_output=True,
+                text=True,
+                cwd=cwd,
+            )
+            self.assertEqual(result.returncode, 0, f"stderr: {result.stderr}")
+            self.assertIn("Era: 7", result.stdout)
+            # No literal '-' file created in cwd
+            self.assertFalse(
+                os.path.exists(os.path.join(cwd, "-")),
+                "Helper should not create a file literally named '-'",
+            )
+        finally:
+            for f in [template_file, spec_file, note_file, matrix_file]:
+                if os.path.exists(f):
+                    os.unlink(f)
+            dash_path = os.path.join(cwd, "-")
+            if os.path.exists(dash_path):
+                os.unlink(dash_path)
+            os.rmdir(cwd)
+
+
 class TestHelp(unittest.TestCase):
     """Test --help output."""
 

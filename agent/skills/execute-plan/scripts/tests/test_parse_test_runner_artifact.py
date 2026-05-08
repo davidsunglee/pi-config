@@ -103,6 +103,57 @@ class TestBothBucketsPopulated(unittest.TestCase):
         self.assertGreater(len(data["non_reconcilable_failures"]), 0)
 
 
+class TestSuccessJsonShape(unittest.TestCase):
+    def test_success_json_includes_count_fields(self):
+        content = (
+            "PHASE: baseline\n"
+            "COMMAND: pytest\n"
+            "WORKING_DIRECTORY: /tmp\n"
+            "EXIT_CODE: 1\n"
+            "TIMESTAMP: 2026-05-01T10:00:00Z\n"
+            "FAILING_IDENTIFIERS_COUNT: 3\n"
+            "FAILING_IDENTIFIERS:\n"
+            "tests/test_a.py::test_one\n"
+            "tests/test_b.py::test_two\n"
+            "tests/test_a.py::test_one\n"
+            "END_FAILING_IDENTIFIERS\n"
+            "NON_RECONCILABLE_COUNT: 1\n"
+            "NON_RECONCILABLE_FAILURES:\n"
+            "Some error\n"
+            "END_NON_RECONCILABLE_FAILURES\n"
+            "\n"
+            "--- RAW RUN OUTPUT BELOW ---\n"
+            "output\n"
+        )
+        path = write_temp_artifact(content)
+        try:
+            rc, data, _, _ = run_script("--artifact", path)
+            self.assertEqual(rc, 0)
+            self.assertIsNotNone(data)
+            # Declared counts must be preserved separately from list lengths.
+            self.assertEqual(data["failing_identifiers_count"], 3)
+            self.assertEqual(data["non_reconcilable_count"], 1)
+            # Deduplicated list length differs from declared count.
+            self.assertEqual(len(data["failing_identifiers"]), 2)
+            # Full documented shape
+            self.assertEqual(
+                set(data.keys()),
+                {
+                    "phase",
+                    "command",
+                    "working_directory",
+                    "exit_code",
+                    "timestamp",
+                    "failing_identifiers_count",
+                    "failing_identifiers",
+                    "non_reconcilable_count",
+                    "non_reconcilable_failures",
+                },
+            )
+        finally:
+            os.unlink(path)
+
+
 class TestDuplicateIdentifierDedupes(unittest.TestCase):
     def test_duplicate_identifier_dedupes(self):
         content = (

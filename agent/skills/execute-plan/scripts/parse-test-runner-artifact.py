@@ -190,7 +190,9 @@ def parse_artifact(path):
         "working_directory": working_directory,
         "exit_code": exit_code,
         "timestamp": timestamp,
+        "failing_identifiers_count": failing_count,
         "failing_identifiers": failing_identifiers,
+        "non_reconcilable_count": non_rec_count,
         "non_reconcilable_failures": non_rec_entries,
     }
 
