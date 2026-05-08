@@ -229,7 +229,7 @@ Failure labels (in stderr JSON .failure):
     args = parser.parse_args()
 
     if args.final_message and args.expected_path:
-        handoff_script = Path(__file__).resolve().parents[2] / "_shared" / "scripts" / "parse-artifact-handoff.py"
+        handoff_script = Path(__file__).resolve().parent / "parse-artifact-handoff.py"
         result = subprocess.run(
             [
                 sys.executable, str(handoff_script),
