@@ -1,0 +1,135 @@
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import unittest
+
+SCRIPT = os.path.join(
+    os.path.dirname(__file__), "..", "extract-provenance-preamble.py"
+)
+FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures")
+SPEC_CLEAN = os.path.join(FIXTURES, "preamble-spec-clean.md")
+BRIEF_CLEAN = os.path.join(FIXTURES, "preamble-brief-clean.md")
+MALFORMED_SHA = os.path.join(FIXTURES, "preamble-malformed-sha.md")
+NO_PROVENANCE = os.path.join(FIXTURES, "preamble-no-provenance.md")
+
+
+def run(args):
+    return subprocess.run(
+        [sys.executable, SCRIPT] + args,
+        capture_output=True,
+        text=True,
+    )
+
+
+def write_tmp(content):
+    f = tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False)
+    f.write(content)
+    f.close()
+    return f.name
+
+
+class TestExtractProvenancePreamble(unittest.TestCase):
+
+    def test_spec_mode_extracts_source_todo(self):
+        result = run(["--file", SPEC_CLEAN, "--mode", "spec"])
+        self.assertEqual(result.returncode, 0)
+        data = json.loads(result.stdout)
+        self.assertEqual(data["source_todo"], "TODO-12345678")
+
+    def test_spec_mode_extracts_scout_brief(self):
+        result = run(["--file", SPEC_CLEAN, "--mode", "spec"])
+        self.assertEqual(result.returncode, 0)
+        data = json.loads(result.stdout)
+        self.assertEqual(data["scout_brief"], "docs/briefs/sample.md")
+
+    def test_spec_mode_ignores_lines_after_first_heading(self):
+        result = run(["--file", SPEC_CLEAN, "--mode", "spec"])
+        self.assertEqual(result.returncode, 0)
+        data = json.loads(result.stdout)
+        self.assertIsNone(data["git_sha"])
+
+    def test_spec_mode_ignores_lines_after_40_lines(self):
+        lines = ["Arbitrary line {}\n".format(i) for i in range(44)]
+        lines.append("Source: TODO-abcdef01\n")
+        lines.append("Trailing line\n")
+        path = write_tmp("".join(lines))
+        try:
+            result = run(["--file", path, "--mode", "spec"])
+            self.assertEqual(result.returncode, 0)
+            data = json.loads(result.stdout)
+            self.assertIsNone(data["source_todo"])
+        finally:
+            os.unlink(path)
+
+    def test_brief_mode_extracts_git_sha(self):
+        result = run(["--file", BRIEF_CLEAN, "--mode", "brief"])
+        self.assertEqual(result.returncode, 0)
+        data = json.loads(result.stdout)
+        self.assertEqual(data["git_sha"], "1234567890abcdef1234567890abcdef12345678")
+
+    def test_brief_mode_ignores_lines_after_8_lines(self):
+        result = run(["--file", BRIEF_CLEAN, "--mode", "brief"])
+        self.assertEqual(result.returncode, 0)
+        data = json.loads(result.stdout)
+        self.assertEqual(data["git_sha"], "1234567890abcdef1234567890abcdef12345678")
+
+    def test_git_sha_malformed_fails_closed(self):
+        result = run(["--file", MALFORMED_SHA, "--mode", "brief"])
+        self.assertEqual(result.returncode, 1)
+        err = json.loads(result.stderr)
+        self.assertEqual(err["failure"], "git_sha_malformed")
+        self.assertEqual(err["value"], "not-a-valid-sha")
+
+    def test_git_sha_short_hex_fails_closed(self):
+        path = write_tmp("# Title\n\nGit SHA: deadbeef\n")
+        try:
+            result = run(["--file", path, "--mode", "brief"])
+            self.assertEqual(result.returncode, 1)
+            err = json.loads(result.stderr)
+            self.assertEqual(err["failure"], "git_sha_malformed")
+        finally:
+            os.unlink(path)
+
+    def test_source_todo_non_hex_silently_ignored(self):
+        path = write_tmp("# Title\n\nSource: TODO-zzzzzzzz\n")
+        try:
+            result = run(["--file", path, "--mode", "spec"])
+            self.assertEqual(result.returncode, 0)
+            data = json.loads(result.stdout)
+            self.assertIsNone(data["source_todo"])
+        finally:
+            os.unlink(path)
+
+    def test_source_todo_wrong_length_silently_ignored(self):
+        path = write_tmp("# Title\n\nSource: TODO-1234\n")
+        try:
+            result = run(["--file", path, "--mode", "spec"])
+            self.assertEqual(result.returncode, 0)
+            data = json.loads(result.stdout)
+            self.assertIsNone(data["source_todo"])
+        finally:
+            os.unlink(path)
+
+    def test_scout_brief_outside_docs_briefs_ignored(self):
+        path = write_tmp("# Title\n\nScout brief: docs/specs/foo.md\n")
+        try:
+            result = run(["--file", path, "--mode", "spec"])
+            self.assertEqual(result.returncode, 0)
+            data = json.loads(result.stdout)
+            self.assertIsNone(data["scout_brief"])
+        finally:
+            os.unlink(path)
+
+    def test_no_provenance_returns_all_null(self):
+        result = run(["--file", NO_PROVENANCE, "--mode", "brief"])
+        self.assertEqual(result.returncode, 0)
+        data = json.loads(result.stdout)
+        self.assertIsNone(data["source_todo"])
+        self.assertIsNone(data["scout_brief"])
+        self.assertIsNone(data["git_sha"])
+
+
+if __name__ == "__main__":
+    unittest.main()
