@@ -309,7 +309,7 @@ Task <N>: <task_title> (current tier: <tier>) — choose an intervention:
   (m) Better model      — re-dispatch this task with a more capable model tier
                             [omit this line if current tier is already `capable`]
   (s) Split into sub-tasks — break this task into smaller sub-tasks and dispatch them
-  (x) Stop execution — halt the plan; prior wave commits remain in git history
+(x) Stop execution — halt the plan; prior wave commits remain in git history
 ~~~
 
 These are the canonical intervention options. The `(m) Better model` option is suppressed when the task's tier is already `capable` (no higher tier exists; re-dispatching to the same model violates the Step 9 rule). When suppressed, the user must pick `(c)`, `(s)`, or `(x)`.
@@ -344,7 +344,7 @@ Otherwise, present every concerned task together in a single combined message �
 Options:
   (c) Continue to verification — proceed to Step 11 with all tasks as-is
   (r) Remediate selected task(s) — specify task number(s) and guidance; re-dispatch those tasks
-  (x) Stop execution — halt the plan; prior wave commits remain in git history
+(x) Stop execution — halt the plan; prior wave commits remain in git history
 ```
 
 - **(c) Continue to verification.** Exit §3 with concerned tasks' status unchanged; the verifier is the next gate.
@@ -452,7 +452,7 @@ If a worker produces empty, missing, or incorrect output:
    ```
    Options:
    (r) Retry again — optionally with a different model or more context. Resets the per-task budget back to 3 for that task only.
-   (x) Stop execution — halt the plan; prior wave commits remain in git history
+(x) Stop execution — halt the plan; prior wave commits remain in git history
    ```
    `docs/test-runs/<plan-name>/` is preserved on `(x)`. There is no skip option. Any unresolved failure — including Step 11 `VERDICT: FAIL` — must be `(r)` retried to resolution or `(x)` stopped.
 
@@ -496,7 +496,7 @@ After all waves complete successfully (and if review was enabled in Step 3):
    Options:
    (c) Continue iterating — fresh budget; new era starts with a remediation pass on the prior era's findings before the next review.
    (p) Proceed with issues noted
-   (x) Stop execution — halt the plan; prior wave commits remain in git history
+(x) Stop execution — halt the plan; prior wave commits remain in git history
    ```
    `docs/test-runs/<plan-name>/` is preserved on `(x)`.
 
@@ -517,7 +517,7 @@ Otherwise, always run this gate: re-run the full integration suite and confirm n
    ```
    Options:
    (d) Debug failures now — follow integration-regression-debugging.md (Step 16 final-gate row) against current_non_baseline_stable ∪ current_non_reconcilable; on success, re-enter this gate.
-   (x) Stop execution — halt the plan; prior wave commits remain in git history
+(x) Stop execution — halt the plan; prior wave commits remain in git history
    ```
    Empty sections render as `(none)`. No continue option by design (matches the Step 12 final-wave menu).
 4. **Menu actions:**

@@ -388,7 +388,7 @@ class TestFillRefineCodePrompt(unittest.TestCase):
             os.unlink(output_file)
 
     def test_carry_over_review_populated(self):
-        """Test that --carry-over-review substitutes populated path in output."""
+        """Test that --carry-over-review substitutes the populated path literally."""
         with tempfile.NamedTemporaryFile(mode='w', suffix='.md', delete=False) as f:
             f.write("Test goal")
             plan_goal_file = f.name
@@ -430,8 +430,8 @@ class TestFillRefineCodePrompt(unittest.TestCase):
             self.assertEqual(code, 0, f"Script failed: {stderr}")
             with open(output_file) as f:
                 content = f.read()
-            # Verify the carry_over_review file content is substituted
-            self.assertIn("Review findings from prior era", content)
+            self.assertIn(carry_over_file, content)
+            self.assertNotIn("Review findings from prior era", content)
             self.assertNotIn("{CARRY_OVER_REVIEW}", content)
         finally:
             os.unlink(plan_goal_file)

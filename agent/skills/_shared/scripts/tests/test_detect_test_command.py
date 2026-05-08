@@ -66,6 +66,23 @@ class TestDetectTestCommand(unittest.TestCase):
         self.assertEqual(result["command"], "cargo test")
         self.assertIn("warning: malformed package.json", stderr)
 
+    def test_package_json_with_invalid_scripts_shape_falls_through(self):
+        """Test: valid JSON with non-dict scripts falls through to later rules."""
+        package_json_path = os.path.join(self.temp_dir, "package.json")
+        with open(package_json_path, 'w') as f:
+            json.dump({"scripts": []}, f)
+
+        cargo_toml_path = os.path.join(self.temp_dir, "Cargo.toml")
+        with open(cargo_toml_path, 'w') as f:
+            f.write("")
+
+        stdout, stderr, code = self.run_script(["--working-dir", self.temp_dir])
+        self.assertEqual(code, 0, f"Script failed: {stderr}")
+        result = json.loads(stdout)
+        self.assertEqual(result["command"], "cargo test")
+        self.assertEqual(result["source"], "Cargo.toml")
+        self.assertEqual(stderr, "")
+
     def test_cargo_toml_only(self):
         """Test: Cargo.toml only → cargo test."""
         cargo_toml_path = os.path.join(self.temp_dir, "Cargo.toml")

@@ -87,7 +87,8 @@ When `{CARRY_OVER_REVIEW}` is non-empty, perform one targeted code-edit pass aga
 2. Extract Critical + Important findings (skip Minor — non-blocking).
 3. Dispatch `coder` (remediator) per the existing Iteration 1 Step 6 remediation procedure with `{REVIEW_FINDINGS}` populated from the extracted findings, scoped to the files referenced by the carry-over findings.
 4. Commit the remediation per Iteration 1 Step 7's commit shape (`fix(review): carry-over — <summary>`).
-5. Begin Iteration 1 Full Review against the post-remediation HEAD. The carry-over remediation pass does NOT consume an iteration of the new era's `{MAX_ITERATIONS}` budget.
+5. Set `HEAD_SHA = git rev-parse HEAD` after that carry-over remediation commit.
+6. Begin Iteration 1 Full Review against that post-remediation HEAD. The carry-over remediation pass does NOT consume an iteration of the new era's `{MAX_ITERATIONS}` budget.
 
 When `{CARRY_OVER_REVIEW}` is empty (first-era runs, etc.), skip the carry-over remediation pass entirely and begin Iteration 1 Full Review as today.
 
@@ -99,7 +100,7 @@ When `{CARRY_OVER_REVIEW}` is empty (first-era runs, etc.), skip the carry-over 
    - `{WHAT_WAS_IMPLEMENTED}` — the Plan Goal above
    - `{PLAN_OR_REQUIREMENTS}` — the Requirements/Plan above
    - `{BASE_SHA}` — `{BASE_SHA}` from this prompt
-   - `{HEAD_SHA}` — `{HEAD_SHA}` from this prompt
+   - `{HEAD_SHA}` — `HEAD_SHA`, using `{HEAD_SHA}` from this prompt when no carry-over remediation ran, or the updated `git rev-parse HEAD` value from the carry-over remediation pass when it did
    - `{DESCRIPTION}` — the Plan Goal above (same as `{WHAT_WAS_IMPLEMENTED}`)
    - `{RE_REVIEW_BLOCK}` — empty string (first pass)
    - `{REVIEW_OUTPUT_PATH}` — the absolute path `{WORKING_DIR}/{REVIEW_OUTPUT_PATH}-v<ERA>.md` (concatenate `{WORKING_DIR}` and the relative review-output base path supplied above, then append `-v<ERA>.md`). Use the SAME path across iteration 1, hybrid re-reviews, and final-verification within one era — the file is overwritten in place.

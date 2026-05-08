@@ -5,7 +5,7 @@ fill-refine-code-prompt: Fill placeholders in the refine-code-prompt.md template
 This script reads the refine-code-prompt.md template and replaces nine required
 placeholders with provided values. Text inputs (plan-goal, plan-contents, model-matrix)
 accept file paths or '-' for stdin. Other inputs (SHAs, paths, integers) are literal values.
-The carry-over-review input accepts file paths or empty string.
+The carry-over-review input is a literal prior-review path or empty string.
 
 The script performs single-pass literal substitution (no recursive expansion).
 After substitution, it checks for any remaining {PLACEHOLDER} tokens and fails if found.
@@ -32,10 +32,10 @@ Nine required placeholders:
   MAX_ITERATIONS — maximum number of review iterations
   MODEL_MATRIX — JSON with model tier configurations
   WORKING_DIR — working directory for execution
-  CARRY_OVER_REVIEW — prior era's review findings (empty string "" valid)
+  CARRY_OVER_REVIEW — prior era's review file path (empty string "" valid)
 
 Text inputs (plan-goal, plan-contents, model-matrix) accept file paths or '-' for stdin.
-Other inputs are literal values. CARRY_OVER_REVIEW accepts file paths or empty string.
+Other inputs are literal values. CARRY_OVER_REVIEW is passed through literally.
 
 Example:
   fill-refine-code-prompt.py \\
@@ -103,7 +103,7 @@ Example:
     parser.add_argument(
         "--carry-over-review",
         required=True,
-        help="Path to prior era's review findings, or empty string"
+        help="Path to prior era's review file, or empty string"
     )
     parser.add_argument(
         "--output",
@@ -147,10 +147,8 @@ Example:
         plan_contents = read_text_input(args.plan_contents, "plan-contents")
         model_matrix = read_text_input(args.model_matrix, "model-matrix")
 
-        # Read carry_over_review: empty string or file path
-        carry_over_review = ""
-        if args.carry_over_review:
-            carry_over_review = read_text_input(args.carry_over_review, "carry-over-review")
+        # Carry-over review is a literal path string (or empty string).
+        carry_over_review = args.carry_over_review
 
         # Build placeholder map with 9 required keys.
         placeholders = {

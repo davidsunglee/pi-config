@@ -83,8 +83,9 @@ def main():
         try:
             with open(package_json_path, 'r') as f:
                 data = json.load(f)
-            test_script = data.get("scripts", {}).get("test")
-            if test_script and isinstance(test_script, str) and test_script.strip():
+            scripts = data.get("scripts") if isinstance(data, dict) else None
+            test_script = scripts.get("test") if isinstance(scripts, dict) else None
+            if isinstance(test_script, str) and test_script.strip():
                 success(True, "npm test", "package.json")
         except (json.JSONDecodeError, IOError) as e:
             sys.stderr.write(f"warning: malformed package.json at {package_json_path}: {e}\n")
