@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""Fill placeholders in the refine-plan prompt template."""
+"""Fill placeholders in the refine-plan prompt template.
+
+Supports thirteen placeholders:
+  {PLAN_PATH}, {TASK_ARTIFACT}, {SOURCE_TODO}, {SOURCE_SPEC}, {SCOUT_BRIEF},
+  {ORIGINAL_SPEC_INLINE}, {STRUCTURAL_ONLY_NOTE}, {MAX_ITERATIONS},
+  {STARTING_ERA}, {REVIEW_OUTPUT_PATH}, {WORKING_DIR}, {MODEL_MATRIX},
+  {CARRY_OVER_REVIEW}
+"""
 
 import argparse
 import json
@@ -51,6 +58,7 @@ Placeholders:
   REVIEW_OUTPUT_PATH - Review output path
   WORKING_DIR - Working directory
   MODEL_MATRIX - Model matrix content (path or -)
+  CARRY_OVER_REVIEW - Carry-over review content (empty string or path)
         """,
     )
 
@@ -110,6 +118,11 @@ Placeholders:
         help="Model matrix content (path or -)",
     )
     parser.add_argument(
+        "--carry-over-review",
+        required=True,
+        help="Carry-over review content (empty string or path)",
+    )
+    parser.add_argument(
         "--output", required=True, help="Output file path"
     )
 
@@ -126,6 +139,11 @@ Placeholders:
     original_spec_inline = read_file_or_stdin(args.original_spec_inline, "original-spec-inline")
     structural_only_note = read_file_or_stdin(args.structural_only_note, "structural-only-note")
     model_matrix = read_file_or_stdin(args.model_matrix, "model-matrix")
+    carry_over_review = (
+        args.carry_over_review
+        if args.carry_over_review == ""
+        else read_file_or_stdin(args.carry_over_review, "carry-over-review")
+    )
 
     # Build the placeholder map
     placeholders = {
@@ -141,11 +159,12 @@ Placeholders:
         "{REVIEW_OUTPUT_PATH}": args.review_output_path,
         "{WORKING_DIR}": args.working_dir,
         "{MODEL_MATRIX}": model_matrix,
+        "{CARRY_OVER_REVIEW}": carry_over_review,
     }
 
     # refine-plan-prompt.md intentionally documents downstream placeholders
     # used by the plan-refiner when it fills reviewer prompts. This helper owns
-    # only the twelve placeholders above; values may also contain literal
+    # only the thirteen placeholders above; values may also contain literal
     # {TOKENS} from specs/plans. Fail only when the input template itself
     # contains an unknown placeholder outside these sets.
     owned = {placeholder.strip("{}") for placeholder in placeholders}

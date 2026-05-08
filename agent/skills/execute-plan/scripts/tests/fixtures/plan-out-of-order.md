@@ -2,6 +2,10 @@
 
 Extract tasks from plan files for automated processing.
 
+## Architecture summary
+
+Single-script Python tool that parses markdown and emits JSON.
+
 ## Tech stack
 
 Python 3, argparse, json

@@ -2,9 +2,10 @@
 """
 fill-refine-code-prompt: Fill placeholders in the refine-code-prompt.md template.
 
-This script reads the refine-code-prompt.md template and replaces eight required
+This script reads the refine-code-prompt.md template and replaces nine required
 placeholders with provided values. Text inputs (plan-goal, plan-contents, model-matrix)
 accept file paths or '-' for stdin. Other inputs (SHAs, paths, integers) are literal values.
+The carry-over-review input accepts file paths or empty string.
 
 The script performs single-pass literal substitution (no recursive expansion).
 After substitution, it checks for any remaining {PLACEHOLDER} tokens and fails if found.
@@ -22,7 +23,7 @@ def main():
         description="Fill placeholders in refine-code-prompt.md template.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Eight required placeholders:
+Nine required placeholders:
   PLAN_GOAL — the implementation goal/summary
   PLAN_CONTENTS — the plan or requirements text
   BASE_SHA — pre-implementation git SHA
@@ -31,9 +32,10 @@ Eight required placeholders:
   MAX_ITERATIONS — maximum number of review iterations
   MODEL_MATRIX — JSON with model tier configurations
   WORKING_DIR — working directory for execution
+  CARRY_OVER_REVIEW — prior era's review findings (empty string "" valid)
 
 Text inputs (plan-goal, plan-contents, model-matrix) accept file paths or '-' for stdin.
-Other inputs are literal values.
+Other inputs are literal values. CARRY_OVER_REVIEW accepts file paths or empty string.
 
 Example:
   fill-refine-code-prompt.py \\
@@ -45,6 +47,7 @@ Example:
     --max-iterations 5 \\
     --model-matrix /path/to/models.json \\
     --working-dir /work \\
+    --carry-over-review /path/to/review.txt \\
     --output output.md
         """
     )
@@ -98,6 +101,11 @@ Example:
         help="Working directory (literal)"
     )
     parser.add_argument(
+        "--carry-over-review",
+        required=True,
+        help="Path to prior era's review findings, or empty string"
+    )
+    parser.add_argument(
         "--output",
         required=True,
         help="Output file path"
@@ -139,7 +147,12 @@ Example:
         plan_contents = read_text_input(args.plan_contents, "plan-contents")
         model_matrix = read_text_input(args.model_matrix, "model-matrix")
 
-        # Build placeholder map with 8 required keys.
+        # Read carry_over_review: empty string or file path
+        carry_over_review = ""
+        if args.carry_over_review:
+            carry_over_review = read_text_input(args.carry_over_review, "carry-over-review")
+
+        # Build placeholder map with 9 required keys.
         placeholders = {
             "PLAN_GOAL": plan_goal,
             "PLAN_CONTENTS": plan_contents,
@@ -149,6 +162,7 @@ Example:
             "MAX_ITERATIONS": str(args.max_iterations),
             "MODEL_MATRIX": model_matrix,
             "WORKING_DIR": args.working_dir,
+            "CARRY_OVER_REVIEW": carry_over_review,
         }
 
         # refine-code-prompt.md intentionally documents downstream placeholders

@@ -22,15 +22,31 @@ Output shape (stdout, exit 0):
         "model_recommendation": "cheap|standard|capable",
         "dependencies": [1, 2, ...]
       }
+    ],
+    "waves": [
+      {"wave": 1, "subwave": 1, "tasks": [1, 2]},
+      {"wave": 2, "subwave": 1, "tasks": [3]}
     ]
   }
 
 Protocol-error kinds (stderr JSON, exit non-zero):
+  missing_required_section  — a required top-level section is absent or has empty body;
+                              section names: goal, architecture_summary, tech_stack,
+                              file_structure, numbered_tasks, dependencies, risk_assessment
+  dependency_unknown_target — a dependency references a task number not in the plan
+  dependency_cycle          — dependency graph contains a cycle; cycle lists participating
+                              task numbers in discovery order
   missing_verify_recipe     — a criterion bullet has no trailing Verify: line
   duplicate_task_number     — two ### Task N: headings share the same N
   missing_files_block       — a task has no **Files:** block before **Steps:**/**Acceptance criteria:**
   missing_model_recommendation — **Model recommendation:** is absent or its value is not cheap|standard|capable
   out_of_order_task_number  — task numbers are not strictly ascending from 1 with no gaps
+
+Options:
+  --plan                    Path to the plan markdown file
+  --task-number             If given, return only this task (single-element tasks array)
+  --max-parallel-hard-cap   Maximum tasks per subwave (default: 8); matches MAX_PARALLEL_HARD_CAP
+                            constant used by pi-interactive-subagent
 """
 
 import argparse
@@ -45,14 +61,156 @@ TASK_HEADING_RE = re.compile(r"^### Task (\d+):\s*(.*)")
 SECTION_HEADING_RE = re.compile(r"^## ")
 DEP_LINE_RE = re.compile(r"^-\s+Task\s+(\d+)\s+depends\s+on:\s*(.+)")
 
+MAX_PARALLEL_HARD_CAP = 8
 
-def parse_plan(text):
+SECTION_RULES = [
+    {"key": "goal", "patterns": [r"^## Goal\s*$", r"^\*\*Goal\*\*:"], "requires_body": True},
+    {"key": "architecture_summary", "patterns": [r"^## Architecture summary\s*$", r"^\*\*Architecture summary\*\*:"], "requires_body": True},
+    {"key": "tech_stack", "patterns": [r"^## Tech stack\s*$", r"^\*\*Tech stack\*\*:"], "requires_body": True},
+    {"key": "file_structure", "patterns": [r"^## File Structure"], "requires_body": False},
+    {"key": "numbered_tasks", "patterns": [r"^### Task \d+:"], "requires_body": False},
+    {"key": "dependencies", "patterns": [r"^## Dependencies\s*$"], "requires_body": False},
+    {"key": "risk_assessment", "patterns": [r"^## Risk [Aa]ssessment\s*$"], "requires_body": False},
+]
+
+
+def validate_required_sections(text):
+    """Return list of missing_required_section errors for absent/empty sections."""
+    lines = text.splitlines()
+    errors = []
+
+    def check_section(patterns, requires_body):
+        compiled = [re.compile(p) for p in patterns]
+        matches = []
+        for idx, raw_line in enumerate(lines):
+            stripped = raw_line.strip()
+            for pat in compiled:
+                m = pat.match(stripped)
+                if m:
+                    matches.append((idx, m, stripped))
+                    break
+        if not matches:
+            return False
+        if not requires_body:
+            return True
+        for idx, m, stripped in matches:
+            inline = stripped[m.end():].strip()
+            if inline:
+                return True
+            j = idx + 1
+            while j < len(lines):
+                if re.match(r"^#{1,3}\s", lines[j]):
+                    break
+                if lines[j].strip():
+                    return True
+                j += 1
+        return False
+
+    for rule in SECTION_RULES:
+        if not check_section(rule["patterns"], rule["requires_body"]):
+            errors.append({"kind": "missing_required_section", "section": rule["key"]})
+
+    return errors
+
+
+def validate_dependency_targets(tasks, dep_raw):
+    """Return errors for dep references to unknown task numbers."""
+    errors = []
+    known = {t["number"] for t in tasks}
+    for task_num, dep_nums in dep_raw.items():
+        for dep in dep_nums:
+            if dep not in known:
+                errors.append({
+                    "kind": "dependency_unknown_target",
+                    "task_number": task_num,
+                    "unknown_dep": dep,
+                })
+    return errors
+
+
+def detect_dependency_cycle(dep_raw):
+    """Detect a cycle in the dependency graph via DFS. Returns at most one error."""
+    all_nodes = set(dep_raw.keys())
+    for deps in dep_raw.values():
+        all_nodes.update(deps)
+
+    visited = set()
+    rec_stack = []
+    rec_set = set()
+
+    def dfs(node):
+        visited.add(node)
+        rec_stack.append(node)
+        rec_set.add(node)
+        for neighbor in dep_raw.get(node, []):
+            if neighbor not in visited:
+                result = dfs(neighbor)
+                if result is not None:
+                    return result
+            elif neighbor in rec_set:
+                cycle_start = rec_stack.index(neighbor)
+                return list(rec_stack[cycle_start:])
+        rec_stack.pop()
+        rec_set.remove(node)
+        return None
+
+    for node in sorted(all_nodes):
+        if node not in visited:
+            cycle = dfs(node)
+            if cycle is not None:
+                return [{"kind": "dependency_cycle", "cycle": cycle}]
+
+    return []
+
+
+def compute_waves(tasks, dep_raw, max_parallel_hard_cap):
+    """Assign tasks to waves based on dependencies; split oversized waves into subwaves."""
+    task_numbers = [t["number"] for t in tasks]
+    wave_assignment = {}
+    remaining = set(task_numbers)
+    current_wave = 1
+
+    while remaining:
+        wave_tasks = [
+            t for t in sorted(remaining)
+            if all(d in wave_assignment for d in dep_raw.get(t, []))
+        ]
+        if not wave_tasks:
+            break
+        for t in wave_tasks:
+            wave_assignment[t] = current_wave
+            remaining.remove(t)
+        current_wave += 1
+
+    waves_dict = {}
+    for t, w in wave_assignment.items():
+        waves_dict.setdefault(w, []).append(t)
+    for w in waves_dict:
+        waves_dict[w].sort()
+
+    result = []
+    for w in sorted(waves_dict.keys()):
+        wave_tasks = waves_dict[w]
+        subwave = 1
+        for i in range(0, len(wave_tasks), max_parallel_hard_cap):
+            chunk = wave_tasks[i:i + max_parallel_hard_cap]
+            result.append({"wave": w, "subwave": subwave, "tasks": chunk})
+            subwave += 1
+
+    return result
+
+
+def parse_plan(text, max_parallel_hard_cap=MAX_PARALLEL_HARD_CAP):
     lines = text.splitlines(keepends=True)
     errors = []
 
+    # Section validation first; skip task parsing if any section is missing
+    section_errors = validate_required_sections(text)
+    if section_errors:
+        return {"goal": None, "test_command": None, "tasks": []}, section_errors
+
     goal = None
     test_command = None
-    raw_tasks = []  # list of (number, title, line_start, line_end_exclusive)
     dep_raw = {}  # task_number -> list of dep numbers
     section = None
 
@@ -76,7 +234,6 @@ def parse_plan(text):
         i += 1
 
     # Compute task raw blocks
-    # Each task block: from task heading line up to (but not including) next task or ## heading
     section_starts = []
     for idx, line_str in enumerate(lines):
         s = line_str.rstrip("\n")
@@ -196,7 +353,6 @@ def parse_plan(text):
         criteria = []
         model_recommendation = None
 
-        # State machine over block lines
         state = "header"
         j = 0
         nb = len(block_lines)
@@ -213,9 +369,6 @@ def parse_plan(text):
                 continue
 
             if stripped == "**Steps:**":
-                if state == "header" and not has_files_block:
-                    # steps appeared before files
-                    pass
                 state = "steps"
                 j += 1
                 continue
@@ -254,14 +407,13 @@ def parse_plan(text):
 
             if state == "criteria" and stripped.startswith("- "):
                 criterion_text = stripped[2:].strip()
-                # Look ahead for Verify: line (indented child line)
                 verify_text = None
                 if j + 1 < nb:
                     next_line = block_lines[j + 1]
                     next_stripped = next_line.strip()
                     if next_stripped.startswith("Verify:"):
                         verify_text = next_stripped[len("Verify:"):].strip()
-                        j += 1  # consume the verify line
+                        j += 1
 
                 criteria.append({"text": criterion_text, "verify": verify_text or ""})
                 if verify_text is None:
@@ -323,11 +475,33 @@ def parse_plan(text):
 
     errors.extend(all_task_errors)
 
+    if errors:
+        return {
+            "goal": goal,
+            "test_command": test_command,
+            "tasks": final_tasks,
+        }, errors
+
+    # Dependency reference + cycle validation
+    dep_errors = validate_dependency_targets(final_tasks, dep_raw)
+    dep_errors.extend(detect_dependency_cycle(dep_raw))
+
+    if dep_errors:
+        return {
+            "goal": goal,
+            "test_command": test_command,
+            "tasks": final_tasks,
+        }, dep_errors
+
+    # All clean: compute waves
+    waves = compute_waves(final_tasks, dep_raw, max_parallel_hard_cap)
+
     return {
         "goal": goal,
         "test_command": test_command,
         "tasks": final_tasks,
-    }, errors
+        "waves": waves,
+    }, []
 
 
 def main():
@@ -342,12 +516,18 @@ def main():
         default=None,
         help="If given, return only this task (still as a single-element tasks array)",
     )
+    parser.add_argument(
+        "--max-parallel-hard-cap",
+        type=int,
+        default=MAX_PARALLEL_HARD_CAP,
+        help=f"Maximum tasks per subwave when splitting oversized waves (default: {MAX_PARALLEL_HARD_CAP})",
+    )
     args = parser.parse_args()
 
     with open(args.plan, "r", encoding="utf-8") as f:
         text = f.read()
 
-    result, errors = parse_plan(text)
+    result, errors = parse_plan(text, args.max_parallel_hard_cap)
 
     if errors:
         print(json.dumps({"errors": errors}, indent=2), file=sys.stderr)

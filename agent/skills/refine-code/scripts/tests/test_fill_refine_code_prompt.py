@@ -78,6 +78,7 @@ class TestFillRefineCodePrompt(unittest.TestCase):
                 "--max-iterations", "5",
                 "--model-matrix", model_matrix_file,
                 "--working-dir", "/work/dir",
+                "--carry-over-review", "",
                 "--output", output_file
             ])
 
@@ -141,6 +142,7 @@ class TestFillRefineCodePrompt(unittest.TestCase):
                 "--max-iterations", "5",
                 "--model-matrix", model_matrix_file,
                 "--working-dir", "/work/dir",
+                "--carry-over-review", "",
                 "--output", output_file
             ])
 
@@ -185,6 +187,7 @@ class TestFillRefineCodePrompt(unittest.TestCase):
                 "--max-iterations", "5",
                 "--model-matrix", model_matrix_file,
                 "--working-dir", "/work/dir",
+                "--carry-over-review", "",
                 "--output", output_file
             ])
 
@@ -231,6 +234,7 @@ class TestFillRefineCodePrompt(unittest.TestCase):
                 "--max-iterations", "5",
                 "--model-matrix", model_matrix_file,
                 "--working-dir", "/work/dir",
+                "--carry-over-review", "",
                 "--output", output_file
             ])
 
@@ -273,6 +277,7 @@ class TestFillRefineCodePrompt(unittest.TestCase):
                 "--max-iterations", "5",
                 "--model-matrix", model_matrix_file,
                 "--working-dir", "/work/dir",
+                "--carry-over-review", "",
                 "--output", output_file
             ])
 
@@ -318,6 +323,7 @@ class TestFillRefineCodePrompt(unittest.TestCase):
                 "--max-iterations", "3",
                 "--model-matrix", model_matrix_file,
                 "--working-dir", "/work/dir",
+                "--carry-over-review", "",
                 "--output", output_file
             ])
 
@@ -335,13 +341,111 @@ class TestFillRefineCodePrompt(unittest.TestCase):
             os.unlink(output_file)
 
     def test_help_flag(self):
-        """Test that --help exits 0 and lists all eight placeholders."""
+        """Test that --help exits 0 and lists all nine placeholders."""
         stdout, stderr, code = self.run_script(["--help"])
         self.assertEqual(code, 0, f"Help failed: {stderr}")
-        # Should mention all eight placeholders
+        # Should mention all nine placeholders
         for placeholder in ["PLAN_GOAL", "PLAN_CONTENTS", "BASE_SHA", "HEAD_SHA",
-                           "REVIEW_OUTPUT_PATH", "MAX_ITERATIONS", "MODEL_MATRIX", "WORKING_DIR"]:
+                           "REVIEW_OUTPUT_PATH", "MAX_ITERATIONS", "MODEL_MATRIX", "WORKING_DIR", "CARRY_OVER_REVIEW"]:
             self.assertIn(placeholder, stdout, f"--help should mention {placeholder}")
+
+    def test_carry_over_review_with_empty_string(self):
+        """Test that --carry-over-review accepts empty string."""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.md', delete=False) as f:
+            f.write("Test goal")
+            plan_goal_file = f.name
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.md', delete=False) as f:
+            f.write("Test contents")
+            plan_contents_file = f.name
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            json.dump({"crossProvider.capable": "model1"}, f)
+            model_matrix_file = f.name
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.md', delete=False) as f:
+            output_file = f.name
+
+        try:
+            stdout, stderr, code = self.run_script([
+                "--plan-goal", plan_goal_file,
+                "--plan-contents", plan_contents_file,
+                "--base-sha", "abc1234",
+                "--head-sha", "def5678",
+                "--review-output-path", "review.md",
+                "--max-iterations", "5",
+                "--model-matrix", model_matrix_file,
+                "--working-dir", "/work/dir",
+                "--carry-over-review", "",
+                "--output", output_file
+            ])
+
+            self.assertEqual(code, 0, f"Script failed: {stderr}")
+        finally:
+            os.unlink(plan_goal_file)
+            os.unlink(plan_contents_file)
+            os.unlink(model_matrix_file)
+            os.unlink(output_file)
+
+    def test_carry_over_review_populated(self):
+        """Test that --carry-over-review substitutes populated path in output."""
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.md', delete=False) as f:
+            f.write("Test goal")
+            plan_goal_file = f.name
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.md', delete=False) as f:
+            f.write("Test contents")
+            plan_contents_file = f.name
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+            json.dump({"crossProvider.capable": "model1"}, f)
+            model_matrix_file = f.name
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.md', delete=False) as f:
+            f.write("Review findings from prior era")
+            carry_over_file = f.name
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.md', delete=False) as f:
+            f.write("# Template\n{CARRY_OVER_REVIEW}")
+            template_file = f.name
+
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.md', delete=False) as f:
+            output_file = f.name
+
+        try:
+            stdout, stderr, code = self.run_script([
+                "--template", template_file,
+                "--plan-goal", plan_goal_file,
+                "--plan-contents", plan_contents_file,
+                "--base-sha", "abc1234",
+                "--head-sha", "def5678",
+                "--review-output-path", "review.md",
+                "--max-iterations", "5",
+                "--model-matrix", model_matrix_file,
+                "--working-dir", "/work/dir",
+                "--carry-over-review", carry_over_file,
+                "--output", output_file
+            ])
+
+            self.assertEqual(code, 0, f"Script failed: {stderr}")
+            with open(output_file) as f:
+                content = f.read()
+            # Verify the carry_over_review file content is substituted
+            self.assertIn("Review findings from prior era", content)
+            self.assertNotIn("{CARRY_OVER_REVIEW}", content)
+        finally:
+            os.unlink(plan_goal_file)
+            os.unlink(plan_contents_file)
+            os.unlink(model_matrix_file)
+            os.unlink(carry_over_file)
+            os.unlink(template_file)
+            os.unlink(output_file)
+
+    def test_help_flag_includes_carry_over_review(self):
+        """Test that --help documents CARRY_OVER_REVIEW placeholder."""
+        stdout, stderr, code = self.run_script(["--help"])
+        self.assertEqual(code, 0, f"Help failed: {stderr}")
+        self.assertIn("CARRY_OVER_REVIEW", stdout, "--help should mention CARRY_OVER_REVIEW")
 
 
 if __name__ == '__main__':

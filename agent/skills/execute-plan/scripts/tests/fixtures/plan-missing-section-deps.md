@@ -22,13 +22,10 @@ Python 3, argparse, json
 
 **Steps:**
 - [ ] **Step 1:** Read the plan file
-- [ ] **Step 2:** Parse task headings
 
 **Acceptance criteria:**
 - The script exits 0 on a clean plan.
-  Verify: Run the script on a clean plan and check exit code is zero.
-- The script outputs valid JSON.
-  Verify: Parse stdout as JSON and confirm no exception is raised.
+  Verify: Run the script and check exit code is zero.
 
 **Model recommendation:** cheap
 
@@ -45,10 +42,6 @@ Python 3, argparse, json
   Verify: Parse the output as JSON and check that tasks is a list.
 
 **Model recommendation:** standard
-
-## Dependencies
-
-- Task 2 depends on: Task 1
 
 ## Risk Assessment
 

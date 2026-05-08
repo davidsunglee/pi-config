@@ -33,11 +33,11 @@ def write_temp_file(content):
 
 
 class TestFullSuccessAgainstRealTemplate(unittest.TestCase):
-    """Test successful substitution with all twelve placeholders."""
+    """Test successful substitution with all thirteen placeholders."""
 
     def test_full_success_against_real_template(self):
-        """Supply all twelve placeholders and verify full substitution with no remaining tokens."""
-        # Create a template with only the 12 placeholders this script handles
+        """Supply all thirteen placeholders and verify full substitution with no remaining tokens."""
+        # Create a template with only the 13 placeholders this script handles
         template_content = """# Refine Plan
 
 Plan: {PLAN_PATH}
@@ -59,6 +59,7 @@ Era: {STARTING_ERA}
 Review: {REVIEW_OUTPUT_PATH}
 Work: {WORKING_DIR}
 Matrix: {MODEL_MATRIX}
+Carry: {CARRY_OVER_REVIEW}
 """
         template_file = write_temp_file(template_content)
         spec_file = write_temp_file("Original spec inline content")
@@ -83,6 +84,7 @@ Matrix: {MODEL_MATRIX}
                 "--review-output-path", "/path/to/review",
                 "--working-dir", "/work",
                 "--model-matrix", matrix_file,
+                "--carry-over-review", "",
                 "--output", output_file,
             )
 
@@ -119,6 +121,7 @@ Matrix: {MODEL_MATRIX}
             self.assertNotIn("{REVIEW_OUTPUT_PATH}", content)
             self.assertNotIn("{WORKING_DIR}", content)
             self.assertNotIn("{MODEL_MATRIX}", content)
+            self.assertNotIn("{CARRY_OVER_REVIEW}", content)
         finally:
             for f in [template_file, spec_file, note_file, matrix_file, output_file]:
                 if os.path.exists(f):
@@ -151,6 +154,7 @@ class TestInputMissingOrUnreadable(unittest.TestCase):
                 "--review-output-path", "/path/to/review",
                 "--working-dir", "/work",
                 "--model-matrix", matrix_file,
+                "--carry-over-review", "",
                 "--output", output_file,
             )
 
@@ -197,6 +201,7 @@ class TestUnreplacedPlaceholder(unittest.TestCase):
                 "--review-output-path", "/path/to/review",
                 "--working-dir", "/work",
                 "--model-matrix", matrix_file,
+                "--carry-over-review", "",
                 "--output", output_file,
             )
 
@@ -243,6 +248,7 @@ class TestEmptyStringSubstitution(unittest.TestCase):
                 "--review-output-path", "/path/to/review",
                 "--working-dir", "/work",
                 "--model-matrix", matrix_file,
+                "--carry-over-review", "",
                 "--output", output_file,
             )
 
@@ -290,6 +296,7 @@ class TestNoRecursiveExpansion(unittest.TestCase):
                 "--review-output-path", "/path/to/review",
                 "--working-dir", "/work",
                 "--model-matrix", matrix_file,
+                "--carry-over-review", "",
                 "--output", output_file,
             )
 
@@ -304,8 +311,8 @@ class TestNoRecursiveExpansion(unittest.TestCase):
 
     def test_no_recursive_expansion(self):
         """Test passing value with placeholder; assert no recursive expansion."""
-        # Create a template with all 12 placeholders to avoid "unreplaced" error
-        template_content = """{PLAN_PATH} {TASK_ARTIFACT} {SOURCE_TODO} {SOURCE_SPEC} {SCOUT_BRIEF} {ORIGINAL_SPEC_INLINE} {STRUCTURAL_ONLY_NOTE} {MAX_ITERATIONS} {STARTING_ERA} {REVIEW_OUTPUT_PATH} {WORKING_DIR} {MODEL_MATRIX}"""
+        # Create a template with all 13 placeholders to avoid "unreplaced" error
+        template_content = """{PLAN_PATH} {TASK_ARTIFACT} {SOURCE_TODO} {SOURCE_SPEC} {SCOUT_BRIEF} {ORIGINAL_SPEC_INLINE} {STRUCTURAL_ONLY_NOTE} {MAX_ITERATIONS} {STARTING_ERA} {REVIEW_OUTPUT_PATH} {WORKING_DIR} {MODEL_MATRIX} {CARRY_OVER_REVIEW}"""
         template_file = write_temp_file(template_content)
         spec_file = write_temp_file("Original spec")
         note_file = write_temp_file("Note")
@@ -329,6 +336,7 @@ class TestNoRecursiveExpansion(unittest.TestCase):
                 "--review-output-path", "/path/to/review",
                 "--working-dir", "/work",
                 "--model-matrix", matrix_file,
+                "--carry-over-review", "",
                 "--output", output_file,
             )
 
@@ -374,6 +382,7 @@ class TestStartingEraStringified(unittest.TestCase):
                 "--review-output-path", "/path/to/review",
                 "--working-dir", "/work",
                 "--model-matrix", matrix_file,
+                "--carry-over-review", "",
                 "--output", output_file,
             )
 
@@ -419,6 +428,7 @@ class TestOutputDashWritesStdout(unittest.TestCase):
                     "--review-output-path", "/path/to/review",
                     "--working-dir", "/work",
                     "--model-matrix", matrix_file,
+                    "--carry-over-review", "",
                     "--output", "-",
                 ],
                 capture_output=True,
@@ -442,16 +452,65 @@ class TestOutputDashWritesStdout(unittest.TestCase):
             os.rmdir(cwd)
 
 
+class TestCarryOverReviewPopulated(unittest.TestCase):
+    """Test carry-over-review with populated file content."""
+
+    def test_carry_over_review_populated(self):
+        """Test --carry-over-review with file path; assert content substitution."""
+        template_file = write_temp_file("Review: {CARRY_OVER_REVIEW}")
+        spec_file = write_temp_file("Original spec")
+        note_file = write_temp_file("Note")
+        matrix_file = write_temp_file("Matrix")
+        review_content = "Plan review findings from prior era"
+        review_file = write_temp_file(review_content)
+        output_file = tempfile.NamedTemporaryFile(
+            mode="w", delete=False, suffix=".md"
+        ).name
+
+        try:
+            rc, stdout, stderr = run_script(
+                "--template", template_file,
+                "--plan-path", "/path/to/plan.md",
+                "--task-artifact", "Task artifact",
+                "--source-todo", "Source todo",
+                "--source-spec", "Source spec",
+                "--scout-brief", "Scout brief",
+                "--original-spec-inline", spec_file,
+                "--structural-only-note", note_file,
+                "--max-iterations", "5",
+                "--starting-era", "1",
+                "--review-output-path", "/path/to/review",
+                "--working-dir", "/work",
+                "--model-matrix", matrix_file,
+                "--carry-over-review", review_file,
+                "--output", output_file,
+            )
+
+            self.assertEqual(rc, 0, f"Script failed with stderr: {stderr}")
+
+            # Read the output file
+            with open(output_file, "r") as f:
+                content = f.read()
+
+            # Verify the review content was substituted
+            self.assertIn(review_content, content)
+            self.assertNotIn("{CARRY_OVER_REVIEW}", content)
+        finally:
+            for f in [template_file, spec_file, note_file, matrix_file, review_file, output_file]:
+                if os.path.exists(f):
+                    os.unlink(f)
+
+
 class TestHelp(unittest.TestCase):
     """Test --help output."""
 
     def test_help_contains_all_placeholders(self):
-        """Test --help output contains all twelve placeholder names."""
+        """Test --help output contains all thirteen placeholder names."""
         rc, stdout, stderr = run_script("--help")
 
         self.assertEqual(rc, 0, f"Help failed with stderr: {stderr}")
 
-        # Verify all twelve placeholder names are mentioned
+        # Verify all thirteen placeholder names are mentioned
         placeholders = [
             "PLAN_PATH",
             "TASK_ARTIFACT",
@@ -465,6 +524,7 @@ class TestHelp(unittest.TestCase):
             "REVIEW_OUTPUT_PATH",
             "WORKING_DIR",
             "MODEL_MATRIX",
+            "CARRY_OVER_REVIEW",
         ]
 
         for placeholder in placeholders:

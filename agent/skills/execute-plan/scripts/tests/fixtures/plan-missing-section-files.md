@@ -10,10 +10,6 @@ Single-script Python tool that parses markdown and emits JSON.
 
 Python 3, argparse, json
 
-## File Structure
-
-- scripts/extract-plan-tasks.py
-
 ### Task 1: Parse plan headings
 
 **Files:**
@@ -22,13 +18,10 @@ Python 3, argparse, json
 
 **Steps:**
 - [ ] **Step 1:** Read the plan file
-- [ ] **Step 2:** Parse task headings
 
 **Acceptance criteria:**
 - The script exits 0 on a clean plan.
-  Verify: Run the script on a clean plan and check exit code is zero.
-- The script outputs valid JSON.
-  Verify: Parse stdout as JSON and confirm no exception is raised.
+  Verify: Run the script and check exit code is zero.
 
 **Model recommendation:** cheap
 
