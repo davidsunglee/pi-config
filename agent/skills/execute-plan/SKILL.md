@@ -707,7 +707,7 @@ After all waves complete successfully (and if the user chose review in Step 3):
 
 **Skip if:** Integration tests are disabled (Step 3 settings) or no test command is available.
 
-Otherwise, always run this gate: re-run the full integration suite and confirm no plan-introduced regression remains before moving the plan to done. The gate uses the same baseline-only reconciliation defined in [`integration-regression-model.md`](integration-regression-model.md) — comparing the final-gate run's stable failures against the frozen `baseline_failures` and treating any non-reconcilable failure as a blocker.
+Otherwise, always run this gate: re-run the full integration suite and confirm no plan-introduced regression remains before marking the plan complete. The gate uses the same baseline-only reconciliation defined in [`integration-regression-model.md`](integration-regression-model.md) — comparing the final-gate run's stable failures against the frozen `baseline_failures` and treating any non-reconcilable failure as a blocker.
 
 **Gate protocol:**
 
