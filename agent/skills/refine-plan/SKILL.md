@@ -110,13 +110,17 @@ Fill `refine-plan-prompt.md` by invoking `agent/skills/refine-plan/scripts/fill-
 
 ### Step 7.5: Compose structural-only note
 
-When `STRUCTURAL_ONLY` is `true`, replace `{STRUCTURAL_ONLY_NOTE}` with exactly:
+The note text below is the only skill-owned source material for this placeholder; the helper performs all substitution. Do NOT attempt a manual replacement of `{STRUCTURAL_ONLY_NOTE}` after the helper runs — the helper fails closed on unreplaced placeholders, and a second substitution pass is forbidden.
 
-```
-This is a structural-only review run. No original spec or todo is available. The plan-reviewer must skip the Spec/Todo Coverage check and include the literal phrase "Structural-only review — no spec/todo coverage check performed." inside the `### Outcome` section's `**Reasoning:**` line (the Summary section no longer exists in the new output format).
-```
+Before invoking the Step 7 helper:
 
-When `STRUCTURAL_ONLY` is `false`, replace `{STRUCTURAL_ONLY_NOTE}` with the empty string.
+- When `STRUCTURAL_ONLY` is `true`, write this exact text to a temp file and pass that file's path via `--structural-only-note`:
+
+  ```
+  This is a structural-only review run. No original spec or todo is available. The plan-reviewer must skip the Spec/Todo Coverage check and include the literal phrase "Structural-only review — no spec/todo coverage check performed." inside the `### Outcome` section's `**Reasoning:**` line (the Summary section no longer exists in the new output format).
+  ```
+
+- When `STRUCTURAL_ONLY` is `false`, pass an empty file (or `/dev/null`) via `--structural-only-note` so the helper substitutes an empty string.
 
 ## Step 8: Dispatch plan-refiner
 

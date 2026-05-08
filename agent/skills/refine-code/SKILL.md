@@ -91,10 +91,14 @@ Use the path the coordinator reported in its `## Review File` block (the latest 
 
 On non-zero exit, surface `refine-code: review provenance validation failed at <path>: <specific check>` to the caller and do not report the stashed success.
 
-When validation passes, proceed to report the stashed outcome from Step 5 to the caller:
-- `STATUS: approved` — report with iteration count and review file path; no menu.
-- `STATUS: approved_with_concerns` — report with iteration count, review file path, and a note pointing the caller at the review file's `### Outcome` reasoning (which names the waived Important findings); no menu.
-- `STATUS: not_approved_within_budget` — report with remaining findings and the (a)/(b)/(c) choice menu.
+When validation passes, proceed to report the stashed outcome from Step 5 to the caller.
+
+**Caller-facing reporting format (contract).** This skill's caller — including `execute-plan` Step 15, which parses the report with `parse-refine-code-summary.py` — depends on a strict producer/consumer protocol. Forward the code-refiner's `finalMessage` to the caller verbatim, preserving the exact compact format defined in [refine-code-prompt.md](refine-code-prompt.md)'s `## Output Format` section: the leading `STATUS:` line, the `## Summary` block (with `Iterations:`, `Issues found: <X> (<N> Critical, <N> Important, <N> Minor)`, `Issues fixed:`, `Issues remaining:` lines), the `## Review File` block, and — only on the corresponding statuses — the `## Remaining Issues` and `## Failure Reason` blocks. Do NOT rewrite, paraphrase, summarize, or wrap this content in narrative prose; doing so will fail the parser even though the underlying review succeeded.
+
+Per-status additions on top of the verbatim forwarded format:
+- `STATUS: approved` — no additions; no menu.
+- `STATUS: approved_with_concerns` — append a note pointing the caller at the review file's `### Outcome` reasoning (which names the waived Important findings); no menu.
+- `STATUS: not_approved_within_budget` — append the (a)/(b)/(c) choice menu after the forwarded blocks.
 
 This is the only point at which Step 5's success outcome may reach the caller.
 
