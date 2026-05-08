@@ -29,5 +29,6 @@ Examples:
 The following skills/agents reference this allowlist; new consumers MUST add themselves to this list when they adopt it so the allowlist's reach stays visible to readers and to audits.
 
 - `agent/skills/generate-plan/SKILL.md` Step 1b — staleness classifier inside the spec preamble extraction.
+- `agent/skills/_shared/scripts/classify-workflow-drift.py` — reads the allowlist to classify intervening commits as workflow-only or mixed changes.
 
 Future consumers add themselves under this bullet list when they begin referencing the allowlist.
