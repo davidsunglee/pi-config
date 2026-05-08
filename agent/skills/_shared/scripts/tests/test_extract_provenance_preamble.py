@@ -137,6 +137,23 @@ class TestExtractProvenancePreamble(unittest.TestCase):
         self.assertEqual(err["failure"], "input missing or unreadable")
         self.assertEqual(err["input"], "file")
 
+    def test_brief_mode_does_not_decode_after_bound(self):
+        fd, path = tempfile.mkstemp(suffix=".md")
+        os.close(fd)
+        try:
+            with open(path, "wb") as f:
+                f.write(b"# Brief\n")
+                f.write(b"Git SHA: 1234567890abcdef1234567890abcdef12345678\n")
+                for i in range(6):
+                    f.write(f"line {i}\n".encode())
+                f.write(b"\xff\xfe invalid utf-8 after bounded preamble\n")
+            result = run(["--file", path, "--mode", "brief"])
+            self.assertEqual(result.returncode, 0, result.stderr)
+            data = json.loads(result.stdout)
+            self.assertEqual(data["git_sha"], "1234567890abcdef1234567890abcdef12345678")
+        finally:
+            os.unlink(path)
+
 
 if __name__ == "__main__":
     unittest.main()

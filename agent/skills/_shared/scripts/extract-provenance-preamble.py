@@ -45,8 +45,20 @@ def main():
     args = parser.parse_args()
 
     try:
-        with open(args.file, "r") as fh:
-            lines = fh.readlines()
+        region = []
+        max_lines = 40 if args.mode == "spec" else 8
+        with open(args.file, "rb") as fh:
+            for _ in range(max_lines):
+                raw = fh.readline()
+                if raw == b"":
+                    break
+                try:
+                    line = raw.decode("utf-8")
+                except UnicodeDecodeError as exc:
+                    raise OSError(f"utf-8 decode failed in bounded preamble: {exc}") from exc
+                if args.mode == "spec" and line.startswith("## "):
+                    break
+                region.append(line)
     except OSError as exc:
         json.dump(
             {
@@ -59,16 +71,6 @@ def main():
         )
         sys.stderr.write("\n")
         sys.exit(2)
-
-    if args.mode == "spec":
-        bound = 40
-        for i, line in enumerate(lines):
-            if line.startswith("## "):
-                bound = min(i, 40)
-                break
-        region = lines[:bound]
-    else:
-        region = lines[:8]
 
     source_todo = None
     scout_brief = None
