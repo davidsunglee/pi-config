@@ -453,16 +453,15 @@ class TestOutputDashWritesStdout(unittest.TestCase):
 
 
 class TestCarryOverReviewPopulated(unittest.TestCase):
-    """Test carry-over-review with populated file content."""
+    """Test carry-over-review with a non-empty path value."""
 
-    def test_carry_over_review_populated(self):
-        """Test --carry-over-review with file path; assert content substitution."""
+    def test_carry_over_review_path_substituted(self):
+        """Test --carry-over-review with a path; assert the path string is substituted (not file content)."""
         template_file = write_temp_file("Review: {CARRY_OVER_REVIEW}")
         spec_file = write_temp_file("Original spec")
         note_file = write_temp_file("Note")
         matrix_file = write_temp_file("Matrix")
-        review_content = "Plan review findings from prior era"
-        review_file = write_temp_file(review_content)
+        review_path = "docs/plans/reviews/foo-plan-review-v1.md"
         output_file = tempfile.NamedTemporaryFile(
             mode="w", delete=False, suffix=".md"
         ).name
@@ -482,7 +481,7 @@ class TestCarryOverReviewPopulated(unittest.TestCase):
                 "--review-output-path", "/path/to/review",
                 "--working-dir", "/work",
                 "--model-matrix", matrix_file,
-                "--carry-over-review", review_file,
+                "--carry-over-review", review_path,
                 "--output", output_file,
             )
 
@@ -492,11 +491,12 @@ class TestCarryOverReviewPopulated(unittest.TestCase):
             with open(output_file, "r") as f:
                 content = f.read()
 
-            # Verify the review content was substituted
-            self.assertIn(review_content, content)
+            # Verify the path string itself was substituted (not file content)
+            self.assertIn(review_path, content)
+            self.assertIn("Review: docs/plans/reviews/foo-plan-review-v1.md", content)
             self.assertNotIn("{CARRY_OVER_REVIEW}", content)
         finally:
-            for f in [template_file, spec_file, note_file, matrix_file, review_file, output_file]:
+            for f in [template_file, spec_file, note_file, matrix_file, output_file]:
                 if os.path.exists(f):
                     os.unlink(f)
 

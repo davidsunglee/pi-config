@@ -24,6 +24,10 @@ You are the plan refiner. Drive one era of the plan review-edit cycle for the pl
 
 {ORIGINAL_SPEC_INLINE}
 
+## Carry-Over Review
+
+{CARRY_OVER_REVIEW}
+
 ## Configuration
 
 - **Max iterations:** {MAX_ITERATIONS}
@@ -76,6 +80,18 @@ Every review file persisted in this loop MUST begin with a `**Reviewer:**` prove
 3. **Validate** the on-disk first non-empty line on read-back (Per-Iteration Full Review Step 5 below), as a fail-fast check. The check is: the line is BYTE-EQUAL to the EXACT `{REVIEWER_PROVENANCE}` string you supplied for THIS iteration's dispatch — not merely regex-conformant. As defense-in-depth, the line must additionally match the regex `^\*\*Reviewer:\*\* [^/]+/[^ ]+ via [a-zA-Z0-9_-]+$` and must NOT contain the substring `inline` (case-insensitive), but the primary, authoritative check is exact equality with the supplied `{REVIEWER_PROVENANCE}`. The downstream `refine-plan/SKILL.md` Step 9.5 validation runs again on the returned path with the same regex and reason labels — your fail-fast check is additive (and stricter, since it pins to your supplied value), not a replacement.
 
 When the file is overwritten in place across iterations within one era, the reviewer's fresh write replaces the prior first line with iteration N's provenance; you supply iteration N's `{REVIEWER_PROVENANCE}` afresh per iteration.
+
+### Carry-over edit pass (era handoff)
+
+When `{CARRY_OVER_REVIEW}` is non-empty, perform a planner edit pass against that review file's findings BEFORE entering the Per-Iteration Full Review loop:
+
+1. Read the carry-over review file at `{CARRY_OVER_REVIEW}`.
+2. Extract Critical + Important findings (skip Minor — non-blocking, same rule as the in-loop Planner Edit Pass).
+3. Dispatch `planner` (edit mode) per the existing Planner Edit Pass procedure with `{REVIEW_FINDINGS}` populated from the extracted findings and `{OUTPUT_PATH} = {PLAN_PATH}`.
+4. After the planner returns, verify the plan file still exists and is non-empty (same check as the in-loop Planner Edit Pass step 4). If missing or empty, emit `STATUS: failed` with reason `input artifact missing or empty: plan file after carry-over edit pass`.
+5. Begin Per-Iteration Full Review at iteration 1. The carry-over edit pass does NOT consume an iteration of the new era's `{MAX_ITERATIONS}` budget.
+
+When `{CARRY_OVER_REVIEW}` is empty (first-era runs, etc.), skip the carry-over edit pass entirely and begin Per-Iteration Full Review at iteration 1 as today.
 
 ### Per-Iteration Full Review
 
@@ -226,4 +242,4 @@ All failure conditions produce `STATUS: failed` with a one-line reason string dr
 | Coordinator infra | `coordinator dispatch unavailable` | Emitted when `subagent_run_serial` is unavailable in this session. |
 | Worker dispatch | `worker dispatch failed: <which worker>` | `<which worker>` ∈ `plan-reviewer`, `planner-edit-pass`. Plan-reviewer primary→fallback retry logic is preserved internally; only retry exhaustion surfaces this string. |
 | Reviewer artifact handoff | `reviewer artifact handoff failed: <specific check>` | `<specific check>` ∈ `missing REVIEW_ARTIFACT marker`, `missing or empty at <path>`, `path mismatch: expected <X> got <Y>`, `provenance malformed at <path>: <sub-check>` (where `<sub-check>` ∈ `does not match supplied REVIEWER_PROVENANCE`, `format mismatch`, `inline-substring forbidden`, `missing or unrecognized Verdict label`). |
-| Input artifact | `input artifact missing or empty: <which>` | `<which>` ∈ `plan file at iteration start`, `plan file after planner edit pass`. |
+| Input artifact | `input artifact missing or empty: <which>` | `<which>` ∈ `plan file at iteration start`, `plan file after planner edit pass`, `plan file after carry-over edit pass`. |

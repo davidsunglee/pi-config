@@ -10,6 +10,10 @@ You are the code refiner. Drive the review-remediate cycle for the changes descr
 
 {PLAN_CONTENTS}
 
+## Carry-Over Review
+
+{CARRY_OVER_REVIEW}
+
 ## Git Range
 
 **Base (pre-implementation):** {BASE_SHA}
@@ -74,6 +78,18 @@ An "era" is one full pass of the loop (Iteration 1 → hybrid re-reviews → Fin
 - **First era starts at `ERA=1`.** The first reviewer dispatch in this protocol uses the path `{WORKING_DIR}/{REVIEW_OUTPUT_PATH}-v1.md`. Iteration 1, all hybrid re-reviews within this era, and Final Verification all reuse this same `v1` path — the reviewer overwrites the file in place each pass.
 - **Subsequent eras increment `ERA` only when Final Verification surfaces Critical/Important issues.** When Final Verification finds issues, set `ERA = ERA + 1` and re-enter the remediation loop; the very next reviewer dispatch (Iteration 1 of the new era) is given the next versioned path `{WORKING_DIR}/{REVIEW_OUTPUT_PATH}-v<ERA>.md` (e.g., `-v2.md`, `-v3.md`). Within each new era the same overwrite-in-place rule applies.
 - **The coordinator never creates the versioned review file directly.** New versioned files come into existence solely as a result of the next reviewer dispatch (which writes to the new path you supply as `{REVIEW_OUTPUT_PATH}`). You compute and pass the next `-v<ERA>.md` path; the reviewer creates the file on disk.
+
+### Carry-over remediation pass (era handoff)
+
+When `{CARRY_OVER_REVIEW}` is non-empty, perform one targeted code-edit pass against that review file's findings BEFORE entering the Iteration 1 Full Review loop:
+
+1. Read the carry-over review file at `{CARRY_OVER_REVIEW}`.
+2. Extract Critical + Important findings (skip Minor — non-blocking).
+3. Dispatch `coder` (remediator) per the existing Iteration 1 Step 6 remediation procedure with `{REVIEW_FINDINGS}` populated from the extracted findings, scoped to the files referenced by the carry-over findings.
+4. Commit the remediation per Iteration 1 Step 7's commit shape (`fix(review): carry-over — <summary>`).
+5. Begin Iteration 1 Full Review against the post-remediation HEAD. The carry-over remediation pass does NOT consume an iteration of the new era's `{MAX_ITERATIONS}` budget.
+
+When `{CARRY_OVER_REVIEW}` is empty (first-era runs, etc.), skip the carry-over remediation pass entirely and begin Iteration 1 Full Review as today.
 
 ### Iteration 1: Full Review
 

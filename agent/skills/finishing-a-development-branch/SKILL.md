@@ -75,8 +75,8 @@ git pull
 # Merge feature branch
 git merge <feature-branch>
 
-# Verify tests on merged result
-<test command>
+# Resolve the test command via detect-test-command.py and run it.
+python3 ~/.pi/agent/skills/_shared/scripts/detect-test-command.py --working-dir . | jq -r '.command' | xargs -I{} sh -c '{}'
 
 # If tests pass
 git branch -d <feature-branch>

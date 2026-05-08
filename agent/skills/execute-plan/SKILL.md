@@ -9,38 +9,11 @@ description: "Executes a structured plan file from docs/plans/. Decomposes tasks
 
 Before starting execution, determine the workspace.
 
-**Precondition:** Verify this is a git repository:
-```bash
-git rev-parse --git-dir 2>/dev/null || { echo "execute-plan requires a git repository."; exit 1; }
-```
-
-If the check fails, stop with: "execute-plan requires a git repository."
-
-**Auto-detect:** Determine whether the current workspace is a worktree and whether it is on a feature branch. Use these exact checks:
-
-```bash
-# Worktree detection: --git-dir is per-worktree; --git-common-dir is shared. They differ inside a linked worktree.
-GIT_DIR_ABS=$(cd "$(git rev-parse --git-dir)" && pwd)
-GIT_COMMON_DIR_ABS=$(cd "$(git rev-parse --git-common-dir)" && pwd)
-[ "$GIT_DIR_ABS" != "$GIT_COMMON_DIR_ABS" ] && IS_WORKTREE=1 || IS_WORKTREE=0
-
-CURRENT_BRANCH=$(git branch --show-current)  # empty if detached HEAD
-if [ -n "$CURRENT_BRANCH" ]; then
-  BRANCH_LABEL="$CURRENT_BRANCH"
-else
-  BRANCH_LABEL="detached HEAD at $(git rev-parse --short HEAD)"
-fi
-
-# Feature-branch: any non-empty branch that is not main/master/develop
-case "$CURRENT_BRANCH" in
-  ""|main|master|develop) IS_FEATURE_BRANCH=0 ;;
-  *)                      IS_FEATURE_BRANCH=1 ;;
-esac
-```
+**Auto-detect:** Run `python3 agent/skills/_shared/scripts/git-workspace-status.py --working-dir <working-dir>`. The helper emits a JSON object with `is_git_repo`, `is_worktree`, `is_feature_branch`, `current_branch`, `branch_label`, and `workspace_path` fields. If `.is_git_repo` is `false`, stop with: `execute-plan requires a git repository.` Otherwise consume `IS_WORKTREE`, `IS_FEATURE_BRANCH`, `CURRENT_BRANCH`, `BRANCH_LABEL`, and `WORKSPACE_PATH` from the helper output.
 
 **If `IS_WORKTREE=1` or `IS_FEATURE_BRANCH=1`:** Reuse the existing workspace, but log and safety-check it first.
 
-1. **Log the reused workspace explicitly.** With `WORKSPACE_PATH=$(git rev-parse --show-toplevel)`, emit one message (worktree takes priority over feature-branch):
+1. **Log the reused workspace explicitly.** Emit one message (worktree takes priority over feature-branch):
    - If `IS_WORKTREE=1`: `Reusing current workspace: <WORKSPACE_PATH> (reason: already inside worktree for branch '<BRANCH_LABEL>')`
    - Else (`IS_FEATURE_BRANCH=1`): `Reusing current workspace: <WORKSPACE_PATH> (reason: already on feature branch '<BRANCH_LABEL>')`
 
@@ -85,16 +58,9 @@ If the user picks "current workspace" during customization, proceed without a wo
 
 ## Step 2: Validate the plan
 
-Check the plan contains all of:
-1. A header (goal, architecture summary, tech stack)
-2. A file structure section (files with Create/Modify annotations)
-3. Numbered tasks — each with `**Files:**`, checkbox steps, acceptance criteria, and a model recommendation
-4. A Dependencies section
-5. A Risk assessment
+Run `python3 agent/skills/execute-plan/scripts/extract-plan-tasks.py --plan <PLAN_PATH>`; on non-zero exit, surface the stderr JSON `missing_required_section` / `dependency_unknown_target` / `dependency_cycle` errors verbatim and stop. Suggest re-running `generate-plan`.
 
 The plan may also contain an optional `## Test Command` section with a bash command for running the project's test suite. If present, extract the command (the content of the bash fenced code block inside `## Test Command`) for use in later steps (baseline capture and integration tests). If absent, test command detection falls back to auto-detect in Step 3.
-
-If any of the 5 required sections is missing: **stop and tell the user** what's missing, and suggest re-generating with the `generate-plan` skill. Do NOT guess or fill in missing sections.
 
 ## Step 3: Confirm execution settings
 
@@ -130,17 +96,12 @@ Ready to execute: (s)tart / (c)ustomize / (q)uit
 
 **Test command resolution order:**
 1. If the plan contains a `## Test Command` section (extracted in Step 2), use that command.
-2. Otherwise, auto-detect from project files:
-   - `package.json` with a `test` script → `npm test`
-   - `Cargo.toml` → `cargo test`
-   - `Makefile` with a `test:` target → `make test`
-   - `pyproject.toml` or `setup.py` → `pytest`
-   - `go.mod` → `go test ./...`
+2. Otherwise, run `python3 agent/skills/_shared/scripts/detect-test-command.py --working-dir <working-dir>` and consume the helper's `.command` field.
 3. If neither yields a command, show "not detected" in the settings. During customize, allow the user to provide a command or confirm no tests.
 
 **If `s`:** Accept all defaults and proceed to Step 4.
 
-**If `c`:** Ask each setting individually — Workspace (skip if Step 0 reuse was accepted), TDD, Execution mode (Sequential/Parallel), Wave pacing if parallel (Pause between waves / Auto-continue / Auto-continue unless failures), Integration test (prompt for command if enabling and none detected), Final review (prompt for max iterations if enabling). After customization, show the final settings summary for confirmation.
+**If `c`:** Ask each setting individually — Workspace (skip if Step 0 reuse was accepted), TDD, Execution mode (Sequential/Parallel), Wave pacing if parallel ((f) Pause only on failure [default] / (w) Pause every wave), Integration test (prompt for command if enabling and none detected), Final review (prompt for max iterations if enabling). After customization, show the final settings summary for confirmation.
 
 **If `q`:** stop with `Plan execution cancelled.`
 
@@ -154,13 +115,9 @@ Before execution, scan the plan's task list for output file paths. If any alread
 
 ## Step 5: Build dependency graph and group into waves
 
-1. Parse every task number and its dependencies from the Dependencies section.
-2. Assign each task to the earliest wave where all its dependencies are in prior waves.
-   - Wave 1 = tasks with no dependencies
-   - Wave 2 = tasks depending only on Wave 1 tasks
-   - Wave N = tasks whose latest dependency is in Wave N−1
+Read the `waves` array from `extract-plan-tasks.py` output (Step 2 invocation). Each entry is `{wave, subwave, tasks}`; dispatch each subwave in order. The cap `MAX_PARALLEL_HARD_CAP = 8` is enforced by the helper; pass `--max-parallel-hard-cap N` to override.
 
-Example:
+Worked example (illustrative only — helper output is authoritative):
 ```
 Dependencies:
 - Task 3 depends on: Task 1, Task 2
@@ -171,8 +128,6 @@ Wave 1: [Task 1, Task 2]
 Wave 2: [Task 3, Task 4]
 Wave 3: [Task 5]
 ```
-
-If a wave has more than 8 tasks, split it into sequential sub-waves of ≤8 each. This matches the pi-interactive-subagent in-flight hard cap (`MAX_PARALLEL_HARD_CAP = 8`, see `~/Code/pi-interactive-subagent/pi-extension/orchestration/types.ts`); the extension rejects dispatches above the cap. Update this number if that constant changes.
 
 ## Step 6: Resolve model tiers
 
@@ -201,17 +156,17 @@ Before the first wave, run the integration suite via `test-runner` (see the shar
 
 #### Baseline recording
 
-After artifact readback succeeds, classify the baseline by both `EXIT_CODE` and the two artifact buckets (`FAILING_IDENTIFIERS:` and `NON_RECONCILABLE_FAILURES:`):
+After artifact readback, run `python3 agent/skills/_shared/scripts/reconcile-test-run.py --artifact <baseline-artifact-path> --mode capture`. Read `.classification` (`clean` | `stable-failures-only` | `contains-non-reconcilable-evidence`) and `.baseline_failures` from stdout JSON, then route to the per-classification user prompts below.
 
-**If `EXIT_CODE == 0`** (and both `FAILING_IDENTIFIERS_COUNT == 0` and `NON_RECONCILABLE_COUNT == 0` by the test-runner contract): record `baseline_failures := ∅` and proceed.
+**`clean`:** record `baseline_failures := ∅` and proceed.
 
-**If `EXIT_CODE != 0` AND `NON_RECONCILABLE_COUNT == 0`** (only stable failures at baseline): read the failing-identifier set from the artifact's `FAILING_IDENTIFIERS:` block and record `baseline_failures` as that set. Warn the user:
+**`stable-failures-only`:** record `baseline_failures` from the helper's `.baseline_failures`. Warn the user:
 ```
 ⚠️ Baseline: N tests already failing before execution. Only failures with stable identifiers not in this baseline will be flagged after each wave.
 ```
 Then proceed.
 
-**If `EXIT_CODE != 0` AND `NON_RECONCILABLE_COUNT != 0`** (baseline contains non-reconcilable evidence): record `baseline_failures` from `FAILING_IDENTIFIERS:` (may be empty). Non-reconcilable entries are never set members of `baseline_failures`. Present the user with an explicit decision:
+**`contains-non-reconcilable-evidence`:** record `baseline_failures` from `.baseline_failures` (may be empty). Non-reconcilable entries are never set members of `baseline_failures`. Present the user with an explicit decision:
 ```
 ⚠️ Baseline contains <M> non-reconcilable failure(s) (failures with no stable suite-native identifier).
 These cannot be safely exempted by stable-identifier comparison: each later integration run will treat any non-reconcilable failure as a current gate-blocking failure, including ones that may already exist before this plan runs.
@@ -267,7 +222,7 @@ If executing directly in the current workspace (not a worktree), emit this warni
 
 For each wave, dispatch all tasks in parallel via `subagent_run_parallel`; in sequential mode, dispatch one at a time via `subagent_run_serial`. Each task entry has shape `{ name: "<task-N>: <task-title>", agent: "coder", task: "<self-contained prompt>", model: "<resolved>", cli: "<resolved>" }`.
 
-Read `results[i].finalMessage` for each worker report; `subagent_run_parallel` preserves input-task order.
+For each result, run `python3 agent/skills/execute-plan/scripts/parse-coder-report.py --report <results[i].finalMessage path>`; route on `.status` (`DONE` / `DONE_WITH_CONCERNS` / `NEEDS_CONTEXT` / `BLOCKED`). `subagent_run_parallel` preserves input-task order.
 
 ### Assembling worker prompts
 
@@ -318,7 +273,7 @@ Run this gate once per wave after every dispatched worker is classified. Order: 
 
 ### 1. Drain the current wave
 
-Wait for every dispatched worker to return and be classified by Step 9. Do not start the next wave or run Step 11/12 yet. Build `BLOCKED_TASKS` (Step 9 status `BLOCKED`) and `CONCERNED_TASKS` (status `DONE_WITH_CONCERNS`).
+Wait for every dispatched worker to return and be classified by Step 9. Do not start the next wave or run Step 11/12 yet. Build `BLOCKED_TASKS` from `parse-coder-report.py` output (`.status == "BLOCKED"`) and `CONCERNED_TASKS` from `.status == "DONE_WITH_CONCERNS"`. Use the helper's `.blocker_text` or `.concerns_block` field for the user-facing escalation view.
 
 ### 2. Blocked handling (runs first)
 
@@ -354,7 +309,7 @@ Task <N>: <task_title> (current tier: <tier>) — choose an intervention:
   (m) Better model      — re-dispatch this task with a more capable model tier
                             [omit this line if current tier is already `capable`]
   (s) Split into sub-tasks — break this task into smaller sub-tasks and dispatch them
-  (x) Stop execution    — halt the plan; prior wave commits remain in git history
+  (x) Stop execution — halt the plan; prior wave commits remain in git history
 ~~~
 
 These are the canonical intervention options. The `(m) Better model` option is suppressed when the task's tier is already `capable` (no higher tier exists; re-dispatching to the same model violates the Step 9 rule). When suppressed, the user must pick `(c)`, `(s)`, or `(x)`.
@@ -387,9 +342,9 @@ Otherwise, present every concerned task together in a single combined message �
 ───────────────────────────────────────────────────────────
 
 Options:
-  (c) Continue to verification            — proceed to Step 11 with all tasks as-is
-  (r) Remediate selected task(s)          — specify task number(s) and guidance; re-dispatch those tasks
-  (x) Stop execution                      — halt the plan; prior wave commits remain in git history
+  (c) Continue to verification — proceed to Step 11 with all tasks as-is
+  (r) Remediate selected task(s) — specify task number(s) and guidance; re-dispatch those tasks
+  (x) Stop execution — halt the plan; prior wave commits remain in git history
 ```
 
 - **(c) Continue to verification.** Exit §3 with concerned tasks' status unchanged; the verifier is the next gate.
@@ -412,12 +367,7 @@ The gate exits when `BLOCKED_TASKS` is empty and `CONCERNED_TASKS` is either emp
 
 Verifier dispatches for the wave run in parallel, bounded by the pi-interactive-subagent `MAX_PARALLEL_HARD_CAP` cap (see Step 5). Issue all verifier subagents concurrently up to the cap and wait for all of them to return before parsing in Step 11.3.
 
-**Union rule for `{MODIFIED_FILES}` (wave-shape-specific).** The orchestrator MUST compute the verifier-visible file set as the union of three inputs so the worker being judged cannot narrow its own verification surface:
-  1. **Task-declared scope** — every path in the task's `**Files:**` section, verbatim.
-  2. **Worker-reported changes** — paths from the worker's `## Files Changed` section (informative, not authoritative on their own).
-  3. **Orchestrator-observed diff state** — paths from `git status --porcelain` and `git diff HEAD` for the wave. In parallel-wave dispatch, scope to files plausibly belonging to this task: include every path from (1) and (2) that also appears in the observed set, plus any additional observed paths under the task's declared `**Files:**` directories. Include all observed paths when the wave contains only this task.
-
-Deduplicate the union. The prompt records that the set is orchestrator-assembled, not the worker's self-report.
+**Verifier-visible file set (`{MODIFIED_FILES}`).** For each task in the wave, run `python3 agent/skills/execute-plan/scripts/compute-verifier-file-set.py --task-files <task-files-json> --worker-files <worker-files-json> --observed-status <git-status-output-path-or-dash> --observed-diff-paths <diff-paths-json> --wave-shape <single-task|parallel-multi-task>`; consume `.verifier_visible_files` as `{MODIFIED_FILES}`. The `--observed-status` argument is the path to a file holding the verbatim `git status --porcelain` output, or `-` to stream that output via stdin (matches the helper's `PATH_OR_DASH` contract); never pass the porcelain text directly as the argument value. The prompt records that the set is orchestrator-assembled, not the worker's self-report.
 
 **Sub-task carve-out:** Step 10 split-into-sub-tasks dispatches MUST run pre-commit; their changes must remain in the working tree at Step 11 so `git diff HEAD` captures them. (Step 12's commit is the only sanctioned working-tree → committed transition.) If a sub-task's changes were committed before Step 11 (protocol violation), substitute `git diff <pre-subtask-commit>..HEAD -- <modified files>` for those criteria.
 
@@ -458,14 +408,11 @@ git commit -m "feat(plan): wave <N> - <plan_goal_summary>
 
 **Skip if:** Integration test is disabled (Step 3 settings) or no test command is available.
 
-Run the integration suite via `test-runner` (see Step 7's shared dispatch subsection) with `{ARTIFACT_PATH} = <working-dir>/docs/test-runs/<plan-name>/wave-<N>-attempt-<K>.log` (`<K>` is a 1-based attempt counter for the wave, incremented on each Debugger-first re-test) and `{PHASE_LABEL} = wave-<N>-attempt-<K>`. Compute per-run inputs from [`integration-regression-gate.md`](integration-regression-gate.md):
-- `current_failing_stable` := `FAILING_IDENTIFIERS:` from the artifact.
-- `current_non_reconcilable` := `NON_RECONCILABLE_FAILURES:` from the artifact.
-- `current_non_baseline_stable` := `current_failing_stable \ baseline_failures`.
+Run the integration suite via `test-runner` (see Step 7's shared dispatch subsection) with `{ARTIFACT_PATH} = <working-dir>/docs/test-runs/<plan-name>/wave-<N>-attempt-<K>.log` (`<K>` is a 1-based attempt counter for the wave, incremented on each Debugger-first re-test) and `{PHASE_LABEL} = wave-<N>-attempt-<K>`. Run `python3 agent/skills/_shared/scripts/reconcile-test-run.py --artifact <wave-artifact-path> --mode reconcile --baseline-failures <baseline-json-path>`; consume `.current_failing_stable`, `.current_non_reconcilable`, `.current_non_baseline_stable`, and `.classification` (`pass`|`fail`). Render the [`integration-regression-gate.md`](integration-regression-gate.md) three-section summary from those fields.
 
-**Pass:** both `current_non_baseline_stable` and `current_non_reconcilable` are empty. Render the [User-facing summary](integration-regression-gate.md#user-facing-summary-format) and proceed to wave `<N+1>` (or Step 15/16 if final).
+**Pass (`.classification == "pass"`):** proceed to wave `<N+1>` (or Step 15/16 if final).
 
-**Fail:** either set is non-empty. Render the three-section summary with the Step 12 fail-path header, then present the menu below.
+**Fail (`.classification == "fail"`):** render the three-section summary with the Step 12 fail-path header, then present the menu below.
 
 #### Menu
 
@@ -477,7 +424,7 @@ The menu differs between intermediate and final waves.
 Options:
 (d) Debug failures now       — dispatch the Debugger-first flow against current_non_baseline_stable ∪ current_non_reconcilable, then re-test
 (c) Continue despite failures — proceed to wave <N+1> without modifying baseline_failures
-(x) Stop plan execution      — halt plan execution; prior wave commits remain in git history
+(x) Stop execution — halt the plan; prior wave commits remain in git history
 ```
 
 - **(d) Debug failures now:** Follow [`integration-regression-debugging.md`](integration-regression-debugging.md) using the **Step 12 (post-wave)** parameter row, scoped to `current_non_baseline_stable ∪ current_non_reconcilable`. `change_range` = the wave commit SHA; `suspect_universe` = wave `<N>`'s tasks whose modified files appear in failing stack traces (or all wave tasks if ambiguous); `re_test_callback` re-invokes test-runner-dispatch with a fresh `wave-<N>-attempt-<K>` artifact and recomputes via `integration-regression-gate.md`. Do NOT undo the wave commit up front; the debugging dispatch inspects the committed state. Counts as a retry toward Step 13's 3-retry limit.
@@ -489,7 +436,7 @@ Options:
 ```
 Options:
 (d) Debug failures now   — dispatch the Debugger-first flow against current_non_baseline_stable ∪ current_non_reconcilable, then re-test
-(x) Stop plan execution  — halt plan execution; prior wave commits remain in git history
+(x) Stop execution — halt the plan; prior wave commits remain in git history
 ```
 
 No continue option on the final wave: there is no subsequent wave to absorb unresolved failures, and the final-completion precondition forbids silently shipping them. The user MUST either debug or stop.
@@ -502,22 +449,26 @@ No continue option on the final wave: there is no subsequent wave to absorb unre
 If a worker produces empty, missing, or incorrect output:
 1. Retry automatically up to **3 times** (improving the prompt where possible). **Shared counter:** all re-dispatches from Step 10 Blocked handling, Step 10 Concerns `(r)` remediation, and Step 11 `VERDICT: FAIL` routing share a single per-task retry counter. Exhaustion in one path exhausts it everywhere; subsequent failures go directly to step 2 below. **Split rule:** choosing `(s) Split into sub-tasks` in Step 10 consumes 1 retry against the parent's budget, and each sub-task inherits the parent's remaining count (no fresh 3-budget) — this closes the split-to-bypass-exhaustion path.
 2. If still failing after 3 retries, **notify the user at the end of the wave** and ask:
-   - Retry again (optionally with a different model or more context). This **resets the per-task budget back to 3** for that task only.
-   - Stop the entire plan. `docs/test-runs/<plan-name>/` is preserved.
+   ```
+   Options:
+   (r) Retry again — optionally with a different model or more context. Resets the per-task budget back to 3 for that task only.
+   (x) Stop execution — halt the plan; prior wave commits remain in git history
+   ```
+   `docs/test-runs/<plan-name>/` is preserved on `(x)`. There is no skip option. Any unresolved failure — including Step 11 `VERDICT: FAIL` — must be `(r)` retried to resolution or `(x)` stopped.
 
-   There is no skip option. Any unresolved failure — including Step 11 `VERDICT: FAIL` — must be retried to resolution or stopped.
+Apply wave pacing from Step 3 — `(f)` Pause only on failure (default) or `(w)` Pause every wave. Pacing only governs waves where Step 10 has exited and every task is `VERDICT: PASS`. `BLOCKED`, unresolved concerns, and `VERDICT: FAIL` always pause via the gates regardless of wave pacing.
 
-Apply wave pacing from Step 3. Pacing only governs waves where Step 10 has exited and every task is `VERDICT: PASS`. `BLOCKED`, unresolved concerns, and `VERDICT: FAIL` already pause execution and are never eligible for option (b) deferral.
-
-- **(a)** Always pause and report before the next wave starts
-- **(b)** Never pause; collect all failures and report at the very end
-- **(c)** Pause only when a wave produced failures; otherwise auto-continue
+```
+Options:
+(f) Pause only on failure   [default]
+(w) Pause every wave
+```
 
 ## Step 14: Report partial progress
 
 When execution stops early: leave the plan file in `docs/plans/` for reference and report which tasks completed, failed, and remain.
 
-**Most recent integration run failures:** if any `test-runner` artifact exists (post-wave `wave-<N>-attempt-<K>.log` or `final-gate-<seq>.log`), recompute `current_non_baseline_stable` and `current_non_reconcilable` against the frozen `baseline_failures` from the most recent artifact and include them under dedicated headings:
+**Most recent integration run failures:** if any `test-runner` artifact exists (post-wave `wave-<N>-attempt-<K>.log` or `final-gate-<seq>.log`), run `python3 agent/skills/_shared/scripts/reconcile-test-run.py --artifact <most-recent-artifact-path> --mode reconcile --baseline-failures <baseline-json-path>`; render `.current_non_baseline_stable` and `.current_non_reconcilable` into the report sections below:
 
 ```
 ### Most recent integration run failures (unresolved)
@@ -538,9 +489,16 @@ After all waves complete successfully (and if review was enabled in Step 3):
 
 1. **Gather inputs:** `BASE_SHA` = `PRE_EXECUTION_SHA` (Step 8); `HEAD_SHA` = `git rev-parse HEAD`; Description = plan Goal; Requirements = full plan; Max iterations = Step 3 setting (default 3); Working directory = current workspace; Review output path = `docs/reviews/<plan-name>-code-review`.
 2. **Invoke the `refine-code` skill** with those inputs.
-3. **Handle the result:** Run `agent/skills/refine-code/scripts/parse-refine-code-summary.py --summary <path-or-`-`>` to obtain `{status, iterations, issues_found_total, issues_found_critical, issues_found_important, issues_found_minor, issues_fixed, issues_remaining, review_file, remaining_issues, failure_reason}`. Route on `status`: `approved` → include iteration count and review file in the Step 16 report; `approved_with_concerns` → also point the user at the review file's `### Outcome` reasoning; `not_approved_within_budget` → present `remaining_issues` plus the (a)/(b)/(c) menu below; `failed` → surface `failure_reason` and stop per Step 14.
+3. **Handle the result:** Run `agent/skills/refine-code/scripts/parse-refine-code-summary.py --summary <path-or-`-`>` to obtain `{status, iterations, issues_found_total, issues_found_critical, issues_found_important, issues_found_minor, issues_fixed, issues_remaining, review_file, remaining_issues, failure_reason}`. Route on `status`: `approved` → include iteration count and review file in the Step 16 report; `approved_with_concerns` → also point the user at the review file's `### Outcome` reasoning; `not_approved_within_budget` → present `remaining_issues` plus the menu below; `failed` → surface `failure_reason` and stop per Step 14.
 
-   **`not_approved_within_budget` menu:** (a) keep iterating (budget resets), (b) proceed with issues noted, or (c) stop. `docs/test-runs/<plan-name>/` is preserved on stop.
+   **`not_approved_within_budget` menu:**
+   ```
+   Options:
+   (c) Continue iterating — fresh budget; new era starts with a remediation pass on the prior era's findings before the next review.
+   (p) Proceed with issues noted
+   (x) Stop execution — halt the plan; prior wave commits remain in git history
+   ```
+   `docs/test-runs/<plan-name>/` is preserved on `(x)`.
 
    **Review disabled:** skip to Step 16.
 
@@ -554,15 +512,12 @@ Otherwise, always run this gate: re-run the full integration suite and confirm n
 
 **Gate protocol:**
 1. **Re-dispatch the integration suite via `test-runner`** per Step 7's shared dispatch subsection with `{ARTIFACT_PATH} = <working-dir>/docs/test-runs/<plan-name>/final-gate-<seq>.log` (where `<seq>` is a 1-based counter incremented on every gate entry) and `{PHASE_LABEL} = final-gate-<seq>`. Read back the artifact.
-2. **Compute the per-run inputs** from [`integration-regression-gate.md`](integration-regression-gate.md):
-   - `current_failing_stable` := `FAILING_IDENTIFIERS:` from the artifact.
-   - `current_non_reconcilable` := `NON_RECONCILABLE_FAILURES:` from the artifact.
-   - `current_non_baseline_stable` := `current_failing_stable \ baseline_failures`.
+2. **Compute the per-run inputs:** Run `python3 agent/skills/_shared/scripts/reconcile-test-run.py --artifact <final-gate-artifact-path> --mode reconcile --baseline-failures <baseline-json-path>`; consume `.current_failing_stable`, `.current_non_reconcilable`, `.current_non_baseline_stable`, `.classification`.
 3. **Gate on `current_non_baseline_stable ∪ current_non_reconcilable`:** if both are empty, the gate passes — proceed to `### 1. Cleanup`. Otherwise the plan cannot be marked complete: render the three-section [User-facing summary](integration-regression-gate.md#user-facing-summary-format) with header `⚠️ Final completion blocked: current integration failures remain.` and a trailing note that both sets must be empty, then present:
    ```
    Options:
    (d) Debug failures now — follow integration-regression-debugging.md (Step 16 final-gate row) against current_non_baseline_stable ∪ current_non_reconcilable; on success, re-enter this gate.
-   (x) Stop execution     — halt plan execution; prior wave commits remain in git history.
+   (x) Stop execution — halt the plan; prior wave commits remain in git history
    ```
    Empty sections render as `(none)`. No continue option by design (matches the Step 12 final-wave menu).
 4. **Menu actions:**

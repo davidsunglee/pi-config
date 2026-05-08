@@ -22,6 +22,7 @@ Collect the following from the caller (coder, user, or another skill):
 | Max iterations | no | 3 | Caller or execution settings |
 | Working directory | no | cwd | Worktree or project root |
 | Review output path | no | `docs/reviews/<name>-code-review` | Derived from plan name or caller-specified |
+| Carry-over review | no | empty | Path to a prior era's review file. Internally re-set on (a) Keep iterating re-entry from Step 5. May also be supplied directly by a caller for standalone "fix this set of findings, then verify" use against a hand-crafted review file (see spec Part C "Standalone-use bonus"). |
 
 If `BASE_SHA` or `HEAD_SHA` is not provided, stop with an error — the skill cannot infer these.
 
@@ -45,7 +46,7 @@ If the file doesn't exist or is unreadable, stop with: "refine-code requires ~/.
 
 ## Step 3: Assemble coordinator prompt
 
-Invoke `agent/skills/refine-code/scripts/fill-refine-code-prompt.py --plan-goal <path|-> --plan-contents <path|-> --base-sha <BASE_SHA> --head-sha <HEAD_SHA> --review-output-path <REVIEW_OUTPUT_PATH> --max-iterations <MAX_ITERATIONS> --model-matrix <path> --working-dir <WORKING_DIR> --output <filled-prompt-path>`. It performs single-pass substitution and fails closed on unreplaced placeholders.
+Invoke `agent/skills/refine-code/scripts/fill-refine-code-prompt.py --plan-goal <path|-> --plan-contents <path|-> --base-sha <BASE_SHA> --head-sha <HEAD_SHA> --review-output-path <REVIEW_OUTPUT_PATH> --max-iterations <MAX_ITERATIONS> --model-matrix <path> --working-dir <WORKING_DIR> --carry-over-review "<carry-over review path or empty>" --output <filled-prompt-path>`. It performs single-pass substitution and fails closed on unreplaced placeholders.
 
 ## Step 4: Dispatch code-refiner
 
@@ -72,7 +73,7 @@ Determine the stashed outcome:
 **`STATUS: not_approved_within_budget`**
 - Stash: remaining findings and the choice menu below — to be presented to the caller only after Step 6 succeeds.
 - Choices to offer (after Step 6 passes):
-  - **(a) Keep iterating** — re-invoke this skill from Step 3 with the same inputs but `HEAD_SHA` updated to current HEAD (budget resets, new cycle)
+  - **(a) Keep iterating** — re-invoke this skill from Step 3 with the same inputs but `HEAD_SHA` updated to current HEAD AND --carry-over-review set to the prior era's review file path (so code-refiner runs a carry-over remediation pass against the prior era's findings before the next review). Budget resets, new cycle.
   - **(b) Proceed with issues** — caller continues with known issues noted
   - **(c) Stop execution** — caller halts
 

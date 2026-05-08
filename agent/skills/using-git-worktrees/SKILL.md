@@ -128,13 +128,7 @@ if [ -f go.mod ]; then go mod download; fi
 
 Run tests to ensure worktree starts clean:
 
-```bash
-# Examples - use project-appropriate command
-npm test
-cargo test
-pytest
-go test ./...
-```
+Resolve the project's test command via `python3 ~/.pi/agent/skills/_shared/scripts/detect-test-command.py --working-dir <worktree-path>`; consume `.command`. If `.detected` is false, ask the user for an explicit command before continuing.
 
 **If tests fail:** Report failures, ask whether to proceed or investigate.
 

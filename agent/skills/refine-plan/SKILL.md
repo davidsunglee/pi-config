@@ -25,6 +25,7 @@ Collect the following from the caller (user, `generate-plan`, or another skill):
 | `MAX_ITERATIONS` | no | 3 | Caller flag |
 | `AUTO_COMMIT_ON_APPROVAL` | no | `false` | Set true by callers like `generate-plan` so the commit gate runs without prompting |
 | `WORKING_DIR` | no | cwd | Caller flag |
+| `CARRY_OVER_REVIEW` | no | empty | Path to a prior era's review file. Internally re-set by Step 10 § not_approved_within_budget (a) re-entry. May also be supplied directly by a caller for standalone "edit-then-review" use against a hand-crafted review file (see spec Part C "Standalone-use bonus"). |
 
 If `PLAN_PATH` is missing, stop with: "refine-plan: PLAN_PATH is required."
 
@@ -106,7 +107,7 @@ Set `STARTING_ERA = max_existing + 1`. If no matches found, `STARTING_ERA = 1`.
 
 Read [refine-plan-prompt.md](refine-plan-prompt.md) in this directory.
 
-Fill `refine-plan-prompt.md` by invoking `agent/skills/refine-plan/scripts/fill-refine-plan-prompt.py --plan-path "<PLAN_PATH from Step 1>" --task-artifact "<Task artifact line or empty>" --source-todo "<Source todo line or empty>" --source-spec "<Source spec line or empty>" --scout-brief "<Scout brief line or empty>" --original-spec-inline <path-to-task-description-text-or--for-stdin> --structural-only-note <path-to-structural-only-note-text-or--for-stdin> --max-iterations <MAX_ITERATIONS> --starting-era <STARTING_ERA> --review-output-path <REVIEW_OUTPUT_PATH> --working-dir <WORKING_DIR> --model-matrix <path-to-model-matrix-json> --output <filled-prompt-path>`. The helper enforces single-pass literal substitution and fails closed on any unreplaced placeholder.
+Fill `refine-plan-prompt.md` by invoking `agent/skills/refine-plan/scripts/fill-refine-plan-prompt.py --plan-path "<PLAN_PATH from Step 1>" --task-artifact "<Task artifact line or empty>" --source-todo "<Source todo line or empty>" --source-spec "<Source spec line or empty>" --scout-brief "<Scout brief line or empty>" --original-spec-inline <path-to-task-description-text-or--for-stdin> --structural-only-note <path-to-structural-only-note-text-or--for-stdin> --max-iterations <MAX_ITERATIONS> --starting-era <STARTING_ERA> --review-output-path <REVIEW_OUTPUT_PATH> --working-dir <WORKING_DIR> --model-matrix <path-to-model-matrix-json> --carry-over-review "<CARRY_OVER_REVIEW or empty>" --output <filled-prompt-path>`. The helper enforces single-pass literal substitution and fails closed on any unreplaced placeholder. Pass the `CARRY_OVER_REVIEW` value (path or empty string) unchanged — whatever value Step 1 received (caller-set or internally re-set by Step 10) is threaded through verbatim.
 
 ### Step 7.5: Compose structural-only note
 
@@ -206,7 +207,7 @@ Present the budget-exhaustion menu exactly as:
 
 **On `(a)`:** Run Step 10a (commit current era). Step 10a MUST succeed (`COMMIT = committed`) before the next era is dispatched. If Step 10a sets `COMMIT = not_attempted` (commit failed for any reason — pre-commit hook failure, dirty index, underlying error), STOP refinement immediately: preserve `STATUS = not_approved_within_budget` and the `COMMIT = not_attempted [reason]` value from Step 10a, do **NOT** dispatch the next era, and skip directly to Step 11. Continuing into a fresh era after a failed commit would leave the prior era's edits uncommitted while a new era runs — the abandoned-state recovery hazard the spec's two-option menu was designed to prevent.
 
-Only when Step 10a sets `COMMIT = committed` may the skill re-run from Step 6 onward, with `STARTING_ERA` recomputed by re-scanning `docs/plans/reviews/` (it will now reflect the just-committed file plus any uncommitted files; the rule remains `max(existing_N) + 1`). Loop until either `STATUS: approved` / `STATUS: approved_with_concerns` (proceed normally) or the user picks `(b)`.
+Only when Step 10a sets `COMMIT = committed` may the skill re-run from Step 6 onward, with `STARTING_ERA` recomputed by re-scanning `docs/plans/reviews/` (it will now reflect the just-committed file plus any uncommitted files; the rule remains `max(existing_N) + 1`). Before re-entering Step 6, set CARRY_OVER_REVIEW = <era-N review file path that was just committed in Step 10a> so the next plan-refiner dispatch performs a carry-over edit pass against era N's findings. Loop until either `STATUS: approved` / `STATUS: approved_with_concerns` (proceed normally) or the user picks `(b)`.
 
 **On `(b)`:** In `AUTO_COMMIT_ON_APPROVAL = true` mode, run Step 10a (auto-commit). In standalone mode, prompt:
 

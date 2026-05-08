@@ -58,7 +58,7 @@ Placeholders:
   REVIEW_OUTPUT_PATH - Review output path
   WORKING_DIR - Working directory
   MODEL_MATRIX - Model matrix content (path or -)
-  CARRY_OVER_REVIEW - Carry-over review content (empty string or path)
+  CARRY_OVER_REVIEW - Path to a prior era's review file (or empty string)
         """,
     )
 
@@ -120,7 +120,7 @@ Placeholders:
     parser.add_argument(
         "--carry-over-review",
         required=True,
-        help="Carry-over review content (empty string or path)",
+        help="Path to a prior era's review file (empty string or path; threaded through as-is)",
     )
     parser.add_argument(
         "--output", required=True, help="Output file path"
@@ -139,11 +139,7 @@ Placeholders:
     original_spec_inline = read_file_or_stdin(args.original_spec_inline, "original-spec-inline")
     structural_only_note = read_file_or_stdin(args.structural_only_note, "structural-only-note")
     model_matrix = read_file_or_stdin(args.model_matrix, "model-matrix")
-    carry_over_review = (
-        args.carry_over_review
-        if args.carry_over_review == ""
-        else read_file_or_stdin(args.carry_over_review, "carry-over-review")
-    )
+    carry_over_review = args.carry_over_review
 
     # Build the placeholder map
     placeholders = {
