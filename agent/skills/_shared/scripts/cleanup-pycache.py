@@ -63,6 +63,10 @@ def main():
     if not os.path.isdir(abs_target):
         sys.exit(0)
 
+    if os.path.basename(abs_target) == "__pycache__":
+        shutil.rmtree(abs_target)
+        sys.exit(0)
+
     for dirpath, dirnames, _ in os.walk(abs_target):
         if "__pycache__" in dirnames:
             shutil.rmtree(os.path.join(dirpath, "__pycache__"))

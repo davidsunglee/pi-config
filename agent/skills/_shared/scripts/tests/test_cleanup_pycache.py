@@ -63,6 +63,16 @@ class TestCleanupPycache(unittest.TestCase):
         finally:
             shutil.rmtree(cwd, ignore_errors=True)
 
+    def test_removes_target_when_target_is_pycache(self):
+        cwd = tempfile.mkdtemp()
+        try:
+            pc = make_pycache(cwd)
+            result = run(["__pycache__"], cwd=cwd)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertFalse(os.path.exists(pc))
+        finally:
+            shutil.rmtree(cwd, ignore_errors=True)
+
     def test_rejects_dotdot_traversal(self):
         cwd = tempfile.mkdtemp()
         try:

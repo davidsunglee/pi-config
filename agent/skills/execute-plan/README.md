@@ -73,7 +73,7 @@ Intermediate waves with current non-baseline or non-reconcilable failures presen
 
 ## Commits and finalization
 
-Each verified wave is checkpoint-committed. After all waves pass, the skill can invoke `refine-code` for iterative review/remediation, move the plan to `docs/plans/done/`, close the linked todo, and invoke `finishing-a-development-branch`.
+Each verified wave is checkpoint-committed. After all waves pass, the skill can invoke `refine-code` for iterative review/remediation, run the final integration gate, clean up per-plan test-run artifacts, close the linked todo while leaving the plan in `docs/plans/`, and invoke `finishing-a-development-branch` when applicable.
 
 ## Files
 
