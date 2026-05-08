@@ -69,7 +69,7 @@ Tasks that fail verification cannot be skipped.
 
 When integration tests are enabled, the skill captures a stable-identifier baseline before the first wave and freezes it for the rest of the plan run. After every later integration run, the skill compares the run's stable failing identifiers byte-for-byte against the frozen baseline; any current stable failure not in the baseline is a current non-baseline failure. Failures with no stable suite-native identifier are recorded separately as non-reconcilable evidence and never participate in set arithmetic.
 
-Intermediate waves with current non-baseline or non-reconcilable failures present the user with `(d) Debug failures now / (c) Continue despite failures / (x) Stop plan execution`. Choosing `(c)` does not mutate the baseline or persist any cross-wave failure state — the next wave's gate runs fresh against the frozen baseline. The final wave and the final-completion gate drop the continue option: completion is blocked until current non-baseline stable failures and non-reconcilable failures are both empty, with only `(d) Debug failures now / (x) Stop plan execution` available. The formal classification, identifier contract, and worked runner examples are documented in `integration-regression-model.md`.
+Intermediate waves with current non-baseline or non-reconcilable failures present the user with `(d) Debug failures now / (c) Continue despite failures / (x) Stop plan execution`. Choosing `(c)` does not mutate the baseline or persist any cross-wave failure state — the next wave's gate runs fresh against the frozen baseline. The final wave and the final-completion gate drop the continue option: completion is blocked until current non-baseline stable failures and non-reconcilable failures are both empty, with only `(d) Debug failures now / (x) Stop plan execution` available. The formal classification, identifier contract, and worked runner examples are documented in `integration-regression-gate.md`.
 
 ## Commits and finalization
 
@@ -81,4 +81,4 @@ Each verified wave is checkpoint-committed. After all waves pass, the skill can 
 - `execute-task-prompt.md` — coder prompt template.
 - `verify-task-prompt.md` — verifier prompt template.
 - `tdd-block.md` — TDD instructions injected when enabled.
-- `integration-regression-model.md` — baseline-only identifier contract, reconciliation, and runner examples.
+- `integration-regression-gate.md` — baseline-only identifier contract, reconciliation, runner examples, and gate procedure (capture/reconcile modes).

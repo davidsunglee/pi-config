@@ -10,6 +10,8 @@ The `_shared/scripts/` directory contains deterministic, testable Python helpers
 
 - **parse-artifact-handoff.py** — Extracts artifact metadata from a handoff payload, resolving references and validating that all required files exist. Example: `python3 parse-artifact-handoff.py --handoff handoff.json --validate`.
 
+- **parse-test-runner-artifact.py** — Parses a `test-runner` artifact's structured header per `agent/agents/test-runner.md` `## Artifact Format`; returns `EXIT_CODE`, `FAILING_IDENTIFIERS`, `NON_RECONCILABLE_FAILURES`, and other header fields as JSON. Tolerates an absent `PHASE:` header line. Example: `python3 parse-test-runner-artifact.py --artifact docs/test-runs/sample.log`.
+
 - **validate-review-provenance.py** — Validates that code review metadata (timestamps, reviewer info, decision rationale) meets compliance requirements. Example: `python3 validate-review-provenance.py --provenance review.json --strict`.
 
 - **fill-template.py** — Renders a Jinja2 template with provided context, handling conditional blocks and escaping. Example: `python3 fill-template.py --template prompt.jinja --context context.json --output prompt.md`.
