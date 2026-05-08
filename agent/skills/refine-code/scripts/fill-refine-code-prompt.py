@@ -176,6 +176,7 @@ Example:
             "PLAN_OR_REQUIREMENTS",
             "PREVIOUS_FINDINGS",
             "PREV_HEAD",
+            "REVIEW_FINDINGS",
             "REVIEWER_PROVENANCE",
             "RE_REVIEW_BLOCK",
             "WHAT_WAS_IMPLEMENTED",
