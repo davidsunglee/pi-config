@@ -380,5 +380,119 @@ class TestFencedH2InTests(unittest.TestCase):
             os.unlink(tmp)
 
 
+class TestFencedStatusBeforeRealStatus(unittest.TestCase):
+    """A fenced fake STATUS: line before the real STATUS: line must not be accepted."""
+
+    def test_fenced_blocked_before_real_done_uses_real_status(self):
+        import tempfile
+
+        content = (
+            "```\n"
+            "STATUS: BLOCKED\n"
+            "Fake fenced status above the real one.\n"
+            "```\n"
+            "\n"
+            "STATUS: DONE\n"
+            "\n"
+            "## Completed\n"
+            "Done.\n"
+            "\n"
+            "## Tests\n"
+            "Pass.\n"
+            "\n"
+            "## Files Changed\n"
+            "- `real/file.py`\n"
+            "\n"
+            "## Self-Review Findings\n"
+            "None.\n"
+        )
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:
+            f.write(content)
+            tmp = f.name
+
+        try:
+            rc, data, stderr_data, _, _ = run_script("--report", tmp)
+            self.assertEqual(rc, 0)
+            self.assertEqual(data["status"], "DONE")
+        finally:
+            os.unlink(tmp)
+
+
+class TestOnlyFencedStatus(unittest.TestCase):
+    """A fenced STATUS: line with no real STATUS: line must fail closed."""
+
+    def test_only_fenced_status_fails_closed_with_status_line_missing(self):
+        import tempfile
+
+        content = (
+            "Some preamble.\n"
+            "\n"
+            "```\n"
+            "STATUS: DONE\n"
+            "Fake fenced status, no real status anywhere else.\n"
+            "```\n"
+            "\n"
+            "## Completed\n"
+            "Done.\n"
+            "\n"
+            "## Tests\n"
+            "Pass.\n"
+            "\n"
+            "## Files Changed\n"
+            "- `real/file.py`\n"
+            "\n"
+            "## Self-Review Findings\n"
+            "None.\n"
+        )
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:
+            f.write(content)
+            tmp = f.name
+
+        try:
+            rc, data, stderr_data, _, stderr = run_script("--report", tmp)
+            self.assertNotEqual(rc, 0)
+            self.assertIsNotNone(stderr_data, f"stderr was not JSON: {stderr!r}")
+            self.assertEqual(stderr_data["failure"], "status_line_missing")
+        finally:
+            os.unlink(tmp)
+
+
+class TestFencedFilesChangedBullet(unittest.TestCase):
+    """Fenced `- `path`` bullets inside ## Files Changed must not be picked up as real changed files."""
+
+    def test_fenced_fake_bullet_excluded_from_files_changed(self):
+        import tempfile
+
+        content = (
+            "STATUS: DONE\n"
+            "\n"
+            "## Completed\n"
+            "Done.\n"
+            "\n"
+            "## Tests\n"
+            "Pass.\n"
+            "\n"
+            "## Files Changed\n"
+            "- `real/file.py`\n"
+            "\n"
+            "```\n"
+            "- `fake/path.py`\n"
+            "```\n"
+            "\n"
+            "## Self-Review Findings\n"
+            "None.\n"
+        )
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:
+            f.write(content)
+            tmp = f.name
+
+        try:
+            rc, data, _, _, _ = run_script("--report", tmp)
+            self.assertEqual(rc, 0)
+            self.assertEqual(data["files_changed"], ["real/file.py"])
+        finally:
+            os.unlink(tmp)
+
+
 if __name__ == "__main__":
     unittest.main()

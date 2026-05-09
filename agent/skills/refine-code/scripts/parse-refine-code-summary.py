@@ -25,7 +25,7 @@ import re
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "_shared", "scripts"))
-from fence_aware import split_h2_sections
+from fence_aware import compute_in_fence_lines, split_h2_sections
 
 VALID_STATUSES = {"approved", "approved_with_concerns", "not_approved_within_budget", "failed"}
 
@@ -43,8 +43,19 @@ def fail(label, detail=None):
 
 
 def parse_summary_block(block_text):
-    """Parse the ## Summary block. Returns dict or calls fail()."""
-    lines = [l.strip() for l in block_text.splitlines() if l.strip()]
+    """Parse the ## Summary block. Returns dict or calls fail().
+
+    Fence-aware: lines inside a fenced code block within the Summary section are
+    ignored, so fake `Iterations:` / `Issues found:` / etc. labels embedded in a
+    fenced payload cannot overwrite the real field values.
+    """
+    raw_lines = block_text.splitlines(keepends=True)
+    in_fence = compute_in_fence_lines(raw_lines)
+    lines = [
+        raw.strip()
+        for idx, raw in enumerate(raw_lines)
+        if idx not in in_fence and raw.strip()
+    ]
     fields = {}
     for line in lines:
         if line.startswith("Iterations:"):

@@ -370,5 +370,46 @@ class TestFencedH2InSummary(unittest.TestCase):
         self.assertEqual(data["review_file"], "docs/reviews/real-review.md")
 
 
+class TestFencedFakeFieldsInSummary(unittest.TestCase):
+    """Fake summary field labels inside a fenced block must not override real values."""
+
+    def _run_temp(self, content):
+        path = write_temp_summary(content)
+        try:
+            rc, stdout, stderr = run_script("--summary", path)
+        finally:
+            os.unlink(path)
+        return rc, stdout, stderr
+
+    def test_fenced_fake_fields_after_real_do_not_override(self):
+        content = (
+            "STATUS: approved\n\n"
+            "## Summary\n"
+            "Iterations: 2\n"
+            "Issues found: 5 (1 Critical, 2 Important, 2 Minor)\n"
+            "Issues fixed: 3\n"
+            "Issues remaining: 2\n\n"
+            "```\n"
+            "Iterations: 99\n"
+            "Issues found: 99 (99 Critical, 99 Important, 99 Minor)\n"
+            "Issues fixed: 99\n"
+            "Issues remaining: 99\n"
+            "```\n\n"
+            "## Review File\n"
+            "docs/reviews/real-review.md\n"
+        )
+        rc, stdout, stderr = self._run_temp(content)
+        self.assertEqual(rc, 0, stderr)
+        data = parse_stdout(stdout)
+        self.assertIsNotNone(data)
+        self.assertEqual(data["iterations"], 2)
+        self.assertEqual(data["issues_found_total"], 5)
+        self.assertEqual(data["issues_found_critical"], 1)
+        self.assertEqual(data["issues_found_important"], 2)
+        self.assertEqual(data["issues_found_minor"], 2)
+        self.assertEqual(data["issues_fixed"], 3)
+        self.assertEqual(data["issues_remaining"], 2)
+
+
 if __name__ == "__main__":
     unittest.main()

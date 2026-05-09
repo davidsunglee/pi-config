@@ -35,7 +35,7 @@ sys.path.insert(
     0,
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "_shared", "scripts"),
 )
-from fence_aware import split_h2_sections
+from fence_aware import compute_in_fence_lines, split_h2_sections
 
 VALID_STATUSES = {"DONE", "DONE_WITH_CONCERNS", "BLOCKED", "NEEDS_CONTEXT"}
 
@@ -46,10 +46,18 @@ def _get_section(sections, name):
 
 
 def _extract_files_changed(section_body):
-    """Extract backtick-delimited paths from a precomputed ## Files Changed section body."""
+    """Extract backtick-delimited paths from a precomputed ## Files Changed section body.
+
+    Fence-aware: bullets that appear inside a fenced code block are skipped, so a
+    fenced sample/output payload cannot inject paths into the changed-file set.
+    """
+    lines = section_body.splitlines(keepends=True)
+    in_fence = compute_in_fence_lines(lines)
     paths = []
-    for line in section_body.splitlines():
-        m = re.match(r"^- `(?P<path>[^`]+)`", line)
+    for idx, line in enumerate(lines):
+        if idx in in_fence:
+            continue
+        m = re.match(r"^- `(?P<path>[^`]+)`", line.rstrip("\n"))
         if m:
             paths.append(m.group("path"))
     return paths
@@ -88,10 +96,15 @@ Warning label (in stdout JSON protocol_warnings, exit 0):
             sys.stderr.write("\n")
             sys.exit(1)
 
-    # Find STATUS line
+    # Find STATUS line — fence-aware so a fenced fake STATUS: cannot satisfy
+    # or override the protocol status (fail closed if no real STATUS: exists).
+    raw_lines = text.splitlines(keepends=True)
+    in_fence = compute_in_fence_lines(raw_lines)
     status_match = None
-    for line in text.splitlines():
-        m = re.match(r"^STATUS:\s*(\S+)", line)
+    for idx, line in enumerate(raw_lines):
+        if idx in in_fence:
+            continue
+        m = re.match(r"^STATUS:\s*(\S+)", line.rstrip("\n"))
         if m:
             status_match = m
             break
