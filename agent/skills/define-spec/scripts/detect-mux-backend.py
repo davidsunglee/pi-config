@@ -18,10 +18,10 @@ Rules (first match wins):
 Status messages:
   mux branch:            Running spec design in subagent pane (mux detected, no override).
   inline (no mux):       Running spec design in this session (no multiplexer detected).
-  inline (override):     Running spec design in this session (per --no-subagent / inline override).
+  inline (override):     Running spec design in this session (per user override: --no-subagent or equivalent).
 
 --user-input override substrings (case-insensitive, first match wins):
-  --no-subagent, without a subagent, without subagent, no subagent, skip subagent, inline
+  --no-subagent, without a subagent, without subagent, no subagent, skip subagent
 """
 
 import argparse
@@ -33,7 +33,7 @@ import sys
 
 MSG_MUX = "Running spec design in subagent pane (mux detected, no override)."
 MSG_INLINE_NO_MUX = "Running spec design in this session (no multiplexer detected)."
-MSG_INLINE_OVERRIDE = "Running spec design in this session (per --no-subagent / inline override)."
+MSG_INLINE_OVERRIDE = "Running spec design in this session (per user override: --no-subagent or equivalent)."
 
 PINNED_BACKENDS = {"cmux", "tmux", "zellij", "wezterm"}
 
@@ -43,7 +43,6 @@ OVERRIDE_SUBSTRINGS = [
     "without subagent",
     "no subagent",
     "skip subagent",
-    "inline",
 ]
 
 
@@ -118,7 +117,7 @@ def main() -> None:
         help=(
             "User slash-command input to scan for inline-branch override substrings: "
             "--no-subagent, 'without a subagent', 'without subagent', "
-            "'no subagent', 'skip subagent', 'inline' (case-insensitive)."
+            "'no subagent', 'skip subagent' (case-insensitive)."
         ),
     )
     args = parser.parse_args()

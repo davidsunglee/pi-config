@@ -38,7 +38,9 @@ Perform these steps in order:
 
 4. Write the artifact to `## Artifact Output Path` using a single `write` call. Do not append; do not overwrite with a second call. Format the file exactly as documented in `## Artifact Format`.
 
-5. Emit `TEST_RESULT_ARTIFACT: <absolute path>` as the LAST line of your final assistant message, where `<absolute path>` is character-for-character identical to `## Artifact Output Path`. This marker MUST appear on its own line as the final line. No other structured markers anywhere in the response.
+5. Emit `TEST_RESULT_ARTIFACT: <absolute path>` as the LAST line of your final assistant message, where `<absolute path>` is character-for-character identical to `## Artifact Output Path`. This marker MUST appear on its own line as the final line.
+
+6. As your terminal tool action, call `subagent_done(message="TEST_RESULT_ARTIFACT: <absolute path>")`. The `message` argument MUST be byte-equal to the final-assistant-message marker line in step 5. No other structured markers anywhere in the response (no `STATUS:`, no other anchored lines).
 
 ### Identifier-Extraction Contract
 
@@ -133,14 +135,22 @@ Format constraints:
 - Do NOT consult or mention `baseline_failures`, prior runs, or any cross-wave state.
 - Do NOT classify the run as pass or fail. Reconciliation is the caller's responsibility.
 - Do NOT modify any source file; do NOT run `git` commands; do NOT run any command other than the supplied `## Test Command`.
-- Your final assistant message MUST end with `TEST_RESULT_ARTIFACT: <absolute path>` and MUST contain no other structured markers (no `STATUS:`, no other anchored lines).
+- Your final assistant message MUST end with `TEST_RESULT_ARTIFACT: <absolute path>`, AND your terminal tool action MUST be `subagent_done(message="TEST_RESULT_ARTIFACT: <absolute path>")` with a `message` argument byte-equal to the final-assistant-message marker line. No other structured markers anywhere in the response (no `STATUS:`, no other anchored lines).
 
 ## Output Contract
 
-Your `finalMessage` ends with exactly one anchored line:
+Your final assistant message MUST end with exactly one anchored line on its own line:
 
 ```
 TEST_RESULT_ARTIFACT: <absolute path>
 ```
 
-where `<absolute path>` is character-for-character identical to `## Artifact Output Path`. Conversational text before the marker is permitted. The orchestrator anchors on the LAST `^TEST_RESULT_ARTIFACT: (.+)$` line of `finalMessage`. No other structured markers may appear anywhere in the response.
+where `<absolute path>` is character-for-character identical to `## Artifact Output Path`. The orchestrator anchors on the LAST `^TEST_RESULT_ARTIFACT: (.+)$` line of your final message. Conversational text before the marker is permitted.
+
+Additionally, your terminal tool action MUST be:
+
+```
+subagent_done(message="TEST_RESULT_ARTIFACT: <absolute path>")
+```
+
+The `message` argument MUST be byte-equal to the final-assistant-message marker line above. Emitting both channels (final message + terminal call) ensures the marker reaches the orchestrator regardless of which channel the watcher reads. No other structured markers may appear anywhere in the response (no `STATUS:`, no other anchored lines).

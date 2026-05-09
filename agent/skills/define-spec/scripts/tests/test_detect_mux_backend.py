@@ -4,7 +4,7 @@ import subprocess
 import sys
 import unittest
 
-from conftest_path_stubs import make_stub_dir
+from .conftest_path_stubs import make_stub_dir
 
 SCRIPT = os.path.join(
     os.path.dirname(__file__), "..", "detect-mux-backend.py"
@@ -14,7 +14,7 @@ SYSTEM_PATH = "/usr/bin:/bin"
 
 MSG_MUX = "Running spec design in subagent pane (mux detected, no override)."
 MSG_INLINE_NO_MUX = "Running spec design in this session (no multiplexer detected)."
-MSG_INLINE_OVERRIDE = "Running spec design in this session (per --no-subagent / inline override)."
+MSG_INLINE_OVERRIDE = "Running spec design in this session (per user override: --no-subagent or equivalent)."
 
 
 def run_script(*args, env=None):
@@ -210,11 +210,22 @@ class TestUserInputOverrides(unittest.TestCase):
     def test_user_input_override_skip_subagent(self):
         self._assert_override("skip subagent for now", "user_input_override_skip subagent")
 
-    def test_user_input_override_inline(self):
-        self._assert_override("run inline mode", "user_input_override_inline")
-
     def test_user_input_override_case_insensitive(self):
         self._assert_override("NO SUBAGENT", "user_input_override_no subagent")
+
+    def test_inline_word_does_not_false_positive(self):
+        # Bare 'inline' in user-facing prompt text must NOT trigger the inline-override branch
+        # when no actual override substring (--no-subagent / 'no subagent' / etc.) is present.
+        result = run_script("--user-input=build a spec for inline editing of cells", env=clean_env())
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stderr, "")
+        data = json.loads(result.stdout)
+        # With clean_env() (no mux env vars), Rule 8 fires → branch=inline, reason=no_mux_detected.
+        # The key assertion is the REASON: no_mux_detected (NOT user_input_override_inline).
+        self.assertEqual(data["branch"], "inline")
+        self.assertIsNone(data["backend"])
+        self.assertEqual(data["reason"], "no_mux_detected")
+        self.assertEqual(data["status_message"], MSG_INLINE_NO_MUX)
 
 
 class TestPrecedence(unittest.TestCase):

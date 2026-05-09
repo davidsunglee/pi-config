@@ -2,12 +2,18 @@
 """
 parse-artifact-handoff.py - Extract artifact path from subagent final message.
 
-Supported markers: BRIEF_WRITTEN, SPEC_WRITTEN, REVIEW_ARTIFACT, TEST_RESULT_ARTIFACT
+Extracts the last <MARKER>: <path> line from a subagent's final assistant message
+and validates the marker family, file existence, non-empty content, and (optionally)
+path shape via --require-path-suffix and --require-path-prefix.
+
+Supported markers: BRIEF_ARTIFACT, SPEC_ARTIFACT, PLAN_ARTIFACT, REVIEW_ARTIFACT, TEST_RESULT_ARTIFACT
 
 Canonical failure labels (appear in stderr JSON .failure):
   missing <MARKER> marker
   path mismatch: expected <X> got <Y>
   missing or empty at <path>
+  path suffix mismatch: expected suffix <X> for path <Y>
+  path prefix mismatch: expected prefix <X> for path <Y>
 """
 
 import argparse
@@ -17,8 +23,9 @@ import re
 import sys
 
 VALID_MARKERS = [
-    "BRIEF_WRITTEN",
-    "SPEC_WRITTEN",
+    "BRIEF_ARTIFACT",
+    "SPEC_ARTIFACT",
+    "PLAN_ARTIFACT",
     "REVIEW_ARTIFACT",
     "TEST_RESULT_ARTIFACT",
 ]
@@ -66,6 +73,16 @@ def main() -> None:
         action="store_true",
         help="Verify the extracted path is a file with non-whitespace content",
     )
+    parser.add_argument(
+        "--require-path-suffix",
+        metavar="SUFFIX",
+        help="Verify the extracted path ends with this string (e.g., '.md').",
+    )
+    parser.add_argument(
+        "--require-path-prefix",
+        metavar="ABS_DIR",
+        help="Verify the extracted path's realpath starts with the realpath of this absolute directory followed by '/'.",
+    )
 
     args = parser.parse_args()
 
@@ -102,6 +119,18 @@ def main() -> None:
         except OSError:
             fail(f"missing or empty at {path}")
         checks.append("non-empty")
+
+    if args.require_path_suffix and not path.endswith(args.require_path_suffix):
+        fail(f"path suffix mismatch: expected suffix {args.require_path_suffix} for path {path}")
+    if args.require_path_suffix:
+        checks.append("path-suffix")
+
+    if args.require_path_prefix:
+        resolved_path = os.path.realpath(path)
+        resolved_prefix = os.path.realpath(args.require_path_prefix).rstrip("/") + "/"
+        if not resolved_path.startswith(resolved_prefix):
+            fail(f"path prefix mismatch: expected prefix {args.require_path_prefix} for path {path}")
+        checks.append("path-prefix")
 
     json.dump({"path": path, "marker": args.marker, "checks": checks}, sys.stdout)
     sys.stdout.write("\n")

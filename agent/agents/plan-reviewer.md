@@ -81,12 +81,13 @@ Your task prompt may include a designated output artifact path and a verbatim pr
 1. Write the full review to the absolute path supplied as `{REVIEW_OUTPUT_PATH}`. The first non-empty line of the file MUST be exactly the line supplied as `{REVIEWER_PROVENANCE}` — no edits, no normalization, no additional prefix or suffix on that line.
 2. The provenance line is followed by a single blank line, then the review body (Outcome, Strengths, Issues by severity, Recommendations as defined in your prompt template's Output Format).
 3. Perform a single write per iteration. Do not re-write the file later in the same dispatch.
-4. End your final assistant message with exactly one anchored line on its own line, as the very last line of your output: `REVIEW_ARTIFACT: <absolute path>` where `<absolute path>` is character-for-character identical to `{REVIEW_OUTPUT_PATH}`.
+4a. End your final assistant message with exactly one anchored line on its own line, as the very last line of your output: `REVIEW_ARTIFACT: <absolute path>` where `<absolute path>` is character-for-character identical to `{REVIEW_OUTPUT_PATH}`.
+4b. Call `subagent_done(message="REVIEW_ARTIFACT: <absolute path>")` as your terminal tool action. The `message` argument MUST be byte-equal to the final-assistant-message marker line in 4a. Emitting both channels ensures the marker reaches the refiner regardless of which channel the watcher reads.
 5. Do not emit any other structured markers in your response. The on-disk file is the sole source of truth for verdict, severity counts, and findings — the refiner reads the file from disk; the marker exists only to convey the path.
 6. Conversational text before the marker line is permitted; the refiner anchors on the last `^REVIEW_ARTIFACT: (.+)$` line.
 
 **When `{REVIEW_OUTPUT_PATH}` is empty** (standalone or non-refiner dispatch):
 
-Output the full review as your final assistant message in the format defined by your prompt template's Output Format. Do not write to any path. Do not emit a `REVIEW_ARTIFACT:` marker.
+Output the full review as your final assistant message in the format defined by your prompt template's Output Format. Do not write to any path. Do not emit a `REVIEW_ARTIFACT:` marker. Do not call `subagent_done` with a structured marker message; the standalone path returns the review verbatim as the final assistant message.
 
 Failure to follow this contract when `{REVIEW_OUTPUT_PATH}` is non-empty will be caught by the refiner's fail-fast validation (path-equality, file-existence-and-non-empty, on-disk first-line provenance) and surface as a `STATUS: failed` outcome with a specific reason naming the failed check.
