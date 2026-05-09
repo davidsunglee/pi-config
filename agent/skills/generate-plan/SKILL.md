@@ -59,7 +59,7 @@ On non-zero exit, surface its stderr output byte-equal (canonical Templates (1)�
    - `{TASK_DESCRIPTION}` — for todo and freeform inputs, the inlined text from Step 1. For file inputs, an empty string (the artifact on disk is the task description).
    - `{TASK_ARTIFACT}` — for file inputs, `Task artifact: <input path>`. For todo and freeform inputs, an empty string.
    - `{WORKING_DIR}` — absolute path to cwd
-   - `{OUTPUT_PATH}` — `docs/plans/yyyy-MM-dd-<short-description>.md`
+   - `{OUTPUT_PATH}` — absolute path of the form `<working-dir>/docs/plans/yyyy-MM-dd-<short-description>.md` (substitute `{WORKING_DIR}` from above to produce a fully-resolved absolute path before filling the prompt; Step 3.4's `--expected-path` validation and the planner prompt's byte-equal `PLAN_ARTIFACT: {OUTPUT_PATH}` emission both require this to be absolute).
      - For **file inputs**, derive `<short-description>` from the **input filename** (basename without extension, e.g., `docs/specs/reduce-context.md` → `reduce-context`). Do NOT derive it from the document body — the body is not loaded into the orchestrator prompt.
      - For **todo inputs**, derive from the todo title.
      - For **freeform inputs**, derive from the task text.
