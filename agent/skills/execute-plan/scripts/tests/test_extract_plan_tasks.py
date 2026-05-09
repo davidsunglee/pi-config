@@ -995,5 +995,84 @@ Low.
         self.assertIn("npm test", data["test_command"])
 
 
+class TestAmbiguousNestedFence(unittest.TestCase):
+    """Verify that ambiguous nested fences emit ambiguous_nested_fence instead of missing_required_section."""
+
+    def _result(self):
+        return run_script("--plan", str(FIXTURES / "plan-ambiguous-nested-fence.md"))
+
+    def test_exits_nonzero(self):
+        self.assertNotEqual(self._result().returncode, 0)
+
+    def test_emits_ambiguous_nested_fence_error(self):
+        errors = json.loads(self._result().stderr)["errors"]
+        kinds = [e["kind"] for e in errors]
+        self.assertIn("ambiguous_nested_fence", kinds)
+
+    def test_does_not_emit_missing_required_section(self):
+        errors = json.loads(self._result().stderr)["errors"]
+        kinds = [e["kind"] for e in errors]
+        self.assertNotIn("missing_required_section", kinds)
+
+    def test_error_has_required_fields(self):
+        errors = json.loads(self._result().stderr)["errors"]
+        fence_errors = [e for e in errors if e["kind"] == "ambiguous_nested_fence"]
+        self.assertTrue(len(fence_errors) > 0)
+        e = fence_errors[0]
+        for field in ("line", "marker", "outer_fence_length", "inner_fence_length", "hint"):
+            self.assertIn(field, e, f"Missing field: {field}")
+
+    def test_error_hint_contains_remediation(self):
+        errors = json.loads(self._result().stderr)["errors"]
+        fence_errors = [e for e in errors if e["kind"] == "ambiguous_nested_fence"]
+        self.assertTrue(any(e.get("hint") for e in fence_errors), "hint field is empty")
+
+
+class TestSafeTildeOuterFence(unittest.TestCase):
+    """Verify that a plan with ~~~ outer fence containing nested ``` parses successfully."""
+
+    def setUp(self):
+        self.result = run_script("--plan", str(FIXTURES / "plan-safe-tilde-outer-fence.md"))
+        self.data = json.loads(self.result.stdout) if self.result.returncode == 0 else None
+
+    def test_exits_zero(self):
+        self.assertEqual(self.result.returncode, 0, f"Parser failed: {self.result.stderr}")
+
+    def test_has_tasks(self):
+        self.assertIsNotNone(self.data)
+        self.assertGreater(len(self.data["tasks"]), 0)
+
+    def test_has_waves(self):
+        self.assertIsNotNone(self.data)
+        self.assertIn("waves", self.data)
+
+    def test_model_recommendation_parsed(self):
+        self.assertIsNotNone(self.data)
+        self.assertEqual(self.data["tasks"][0]["model_recommendation"], "standard")
+
+
+class TestSafeLongBacktickOuterFence(unittest.TestCase):
+    """Verify that a plan with ```` outer fence containing nested ``` parses successfully."""
+
+    def setUp(self):
+        self.result = run_script("--plan", str(FIXTURES / "plan-safe-long-backtick-outer-fence.md"))
+        self.data = json.loads(self.result.stdout) if self.result.returncode == 0 else None
+
+    def test_exits_zero(self):
+        self.assertEqual(self.result.returncode, 0, f"Parser failed: {self.result.stderr}")
+
+    def test_has_tasks(self):
+        self.assertIsNotNone(self.data)
+        self.assertGreater(len(self.data["tasks"]), 0)
+
+    def test_has_waves(self):
+        self.assertIsNotNone(self.data)
+        self.assertIn("waves", self.data)
+
+    def test_model_recommendation_parsed(self):
+        self.assertIsNotNone(self.data)
+        self.assertEqual(self.data["tasks"][0]["model_recommendation"], "standard")
+
+
 if __name__ == "__main__":
     unittest.main()

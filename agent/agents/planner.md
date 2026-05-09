@@ -204,6 +204,8 @@ When tasks create files with specific format requirements (YAML frontmatter, JSO
 1. **The required structure** — what the format looks like
 2. **Constraints that would break it** — common mistakes that cause failures
 
+**Fenced example authoring rule:** When an example payload in a task step or acceptance criterion contains triple backticks (` ``` `), prefer `~~~` for the outer fence — this eliminates premature-closure ambiguity because tilde fences and backtick fences do not terminate each other. If the payload already contains `~~~` runs (making `~~~` an ambiguous outer fence too), choose a backtick fence strictly longer than the longest backtick run inside the payload (e.g., use ```` ```` ```` when the payload contains ` ``` `).
+
 Example: Instead of just "file must have YAML frontmatter", write:
 - "File must begin with YAML frontmatter between `---` delimiters"
 - "Frontmatter must be the very first content in the file — do not place comments, blank lines, or any other content before the opening `---`"

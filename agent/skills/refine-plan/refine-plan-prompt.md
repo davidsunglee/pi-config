@@ -190,7 +190,13 @@ When the outcome is `Not approved` and the budget is not exhausted:
 
 4. **Verify the plan file** at `{PLAN_PATH}` still exists and is non-empty after the planner returns. If not, emit `STATUS: failed` with reason `input artifact missing or empty: plan file after planner edit pass` and exit.
 
-5. **Increment the iteration counter** and loop back to Per-Iteration Full Review step 1.
+5. **Harden the plan against ambiguous fenced examples.** Run:
+   ```
+   python3 agent/skills/_shared/scripts/plan_fence_hardening.py --plan "{PLAN_PATH}" --rewrite-in-place
+   ```
+   On non-zero exit, emit `STATUS: failed` with reason `fence hardening failed after planner edit pass` and exit. On exit 0, continue.
+
+6. **Increment the iteration counter** and loop back to Per-Iteration Full Review step 1.
 
 ## Output Format
 

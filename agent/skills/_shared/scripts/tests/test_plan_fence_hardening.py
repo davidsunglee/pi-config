@@ -8,6 +8,12 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from plan_fence_hardening import detect_ambiguous_nested_fences, rewrite_ambiguous_nested_fences
 
 SCRIPT = os.path.join(os.path.dirname(__file__), "..", "plan_fence_hardening.py")
+EXTRACT_SCRIPT = os.path.abspath(
+    os.path.join(
+        os.path.dirname(__file__),
+        "..", "..", "..", "execute-plan", "scripts", "extract-plan-tasks.py",
+    )
+)
 
 # --- Fixtures ---
 
@@ -143,6 +149,60 @@ MULTIPLE_AMBIGUOUS_REWRITTEN = (
     "bar()\n"
     "```\n"
     "~~~\n"
+)
+
+
+# Minimal complete plan with an ambiguous fence in the Goal body.
+# The outer ``` at line 4 (0-indexed) is prematurely closed by the ``` at line 7
+# (the ```bash inner closer), leaving the ``` at line 8 as an unclosed opener.
+# compute_in_fence_lines marks lines 9+ as in-fence, causing ## Architecture summary
+# and subsequent required sections to be invisible to extract-plan-tasks.py.
+# After plan_fence_hardening.py --rewrite-in-place, lines 4 and 8 become ~~~,
+# the sections are no longer in-fence, and extract-plan-tasks.py succeeds.
+MINIMAL_PLAN_WITH_AMBIGUOUS_FENCE = (
+    "## Goal\n"
+    "\n"
+    "Plan for fence hardening smoke test.\n"
+    "\n"
+    "```\n"
+    "```bash\n"
+    "tool --help\n"
+    "```\n"
+    "```\n"
+    "\n"
+    "## Architecture summary\n"
+    "\n"
+    "Uses existing modules with no structural changes.\n"
+    "\n"
+    "## Tech stack\n"
+    "\n"
+    "Python 3.\n"
+    "\n"
+    "## File Structure\n"
+    "\n"
+    "- `example.py` (Modify) — example file.\n"
+    "\n"
+    "### Task 1: Update example\n"
+    "\n"
+    "**Files:**\n"
+    "- Modify: `example.py`\n"
+    "\n"
+    "**Steps:**\n"
+    "- [ ] **Step 1** — Write the failing test.\n"
+    "- [ ] **Step 2** — Implement the update.\n"
+    "\n"
+    "**Acceptance criteria:**\n"
+    "\n"
+    "- The example file is updated correctly.\n"
+    "  Verify: run `grep 'example' example.py` and confirm at least one match.\n"
+    "\n"
+    "**Model recommendation:** cheap\n"
+    "\n"
+    "## Dependencies\n"
+    "\n"
+    "## Risk Assessment\n"
+    "\n"
+    "Low risk; no external dependencies.\n"
 )
 
 
@@ -295,6 +355,48 @@ class TestCLI(unittest.TestCase):
     def test_cli_missing_file_errors(self):
         result = self._run("--plan", "/nonexistent/path.md", "--rewrite-in-place")
         self.assertNotEqual(result.returncode, 0)
+
+
+class TestRewriteThenParseSmoke(unittest.TestCase):
+    """Smoke test: rewrite a malformed plan in place, then verify extract-plan-tasks.py succeeds."""
+
+    def _run_script(self, script, *args):
+        return subprocess.run(
+            [sys.executable, script, *args],
+            capture_output=True,
+            text=True,
+        )
+
+    def test_rewrite_in_place_then_extract_plan_tasks_succeeds(self):
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:
+            f.write(MINIMAL_PLAN_WITH_AMBIGUOUS_FENCE)
+            tmp = f.name
+        try:
+            # Confirm the malformed plan is NOT parseable before hardening.
+            pre = self._run_script(EXTRACT_SCRIPT, "--plan", tmp)
+            self.assertNotEqual(
+                pre.returncode,
+                0,
+                msg="Expected extract-plan-tasks.py to fail on the ambiguous plan before hardening",
+            )
+
+            # Rewrite the plan in place.
+            rewrite = self._run_script(SCRIPT, "--plan", tmp, "--rewrite-in-place")
+            self.assertEqual(
+                rewrite.returncode,
+                0,
+                msg=f"plan_fence_hardening.py --rewrite-in-place failed: {rewrite.stderr}",
+            )
+
+            # Confirm the hardened plan IS parseable.
+            post = self._run_script(EXTRACT_SCRIPT, "--plan", tmp)
+            self.assertEqual(
+                post.returncode,
+                0,
+                msg=f"extract-plan-tasks.py failed after hardening: {post.stderr}",
+            )
+        finally:
+            os.unlink(tmp)
 
 
 if __name__ == "__main__":

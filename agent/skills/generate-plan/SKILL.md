@@ -76,6 +76,12 @@ On non-zero exit, surface its stderr output byte-equal (canonical Templates (1)�
 
 4. Validate the planner's marker handoff. Write `results[0].finalMessage` to a temp file and run `python3 agent/skills/_shared/scripts/parse-artifact-handoff.py --marker PLAN_ARTIFACT --final-message <temp-file> --expected-path <{OUTPUT_PATH} from Step 3 (absolute path)> --check-existence --check-non-empty`. On non-zero exit, surface the script's stderr (a JSON blob with a `failure` field) verbatim to the user, prefix it with `generate-plan: planner artifact handoff failed —`, and stop the skill. Do NOT proceed to Step 4 (refine-plan handoff). On exit 0, read `.path` from stdout JSON; this is the validated plan path used by Step 4.
 
+5. Harden the validated plan against ambiguous fenced examples. Run:
+   ```
+   python3 agent/skills/_shared/scripts/plan_fence_hardening.py --plan "<validated plan path>" --rewrite-in-place
+   ```
+   On non-zero exit, surface the error to the user, prefix it with `generate-plan: fence hardening failed —`, and stop the skill. Do NOT proceed to Step 4 (refine-plan handoff). On exit 0, continue.
+
 ## Step 4: Refine the plan
 
 After Step 3 produces the initial plan, invoke the `refine-plan` skill to run the review-edit loop and commit gate. `refine-plan` owns reviewer/editor dispatch, on-disk review artifacts, finding extraction, and version tracking — `generate-plan` does none of that itself.

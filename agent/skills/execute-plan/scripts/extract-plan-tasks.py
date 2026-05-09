@@ -30,6 +30,9 @@ Output shape (stdout, exit 0):
   }
 
 Protocol-error kinds (stderr JSON, exit non-zero):
+  ambiguous_nested_fence    — an outer fence contains an inner fenced block whose closer
+                              prematurely terminates the outer fence; fields: line, marker,
+                              outer_fence_length, inner_fence_length, hint
   missing_required_section  — a required top-level section is absent or has empty body;
                               section names: goal, architecture_summary, tech_stack,
                               file_structure, numbered_tasks, dependencies, risk_assessment
@@ -57,6 +60,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "_shared", "scripts"))
 from fence_aware import compute_in_fence_lines, FENCE_RE  # noqa: E402
+from plan_fence_hardening import detect_ambiguous_nested_fences  # noqa: E402
 
 
 VALID_MODELS = {"cheap", "standard", "capable"}
@@ -215,7 +219,24 @@ def parse_plan(text, max_parallel_hard_cap=MAX_PARALLEL_HARD_CAP):
     lines = text.splitlines(keepends=True)
     errors = []
 
-    # Section validation first; skip task parsing if any section is missing
+    # Ambiguous-fence check first: premature fence termination is the root cause,
+    # not the downstream missing-section symptom it produces.
+    fence_issues = detect_ambiguous_nested_fences(text)
+    if fence_issues:
+        fence_errors = [
+            {
+                "kind": "ambiguous_nested_fence",
+                "line": issue["line"],
+                "marker": issue["marker"],
+                "outer_fence_length": issue["outer_fence_length"],
+                "inner_fence_length": issue["inner_run_length"],
+                "hint": issue["hint"],
+            }
+            for issue in fence_issues
+        ]
+        return {"goal": None, "test_command": None, "tasks": []}, fence_errors
+
+    # Section validation; skip task parsing if any section is missing
     section_errors = validate_required_sections(text)
     if section_errors:
         return {"goal": None, "test_command": None, "tasks": []}, section_errors
