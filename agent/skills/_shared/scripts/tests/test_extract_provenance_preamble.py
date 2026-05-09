@@ -13,6 +13,7 @@ SPEC_CLEAN = os.path.join(FIXTURES, "preamble-spec-clean.md")
 BRIEF_CLEAN = os.path.join(FIXTURES, "preamble-brief-clean.md")
 MALFORMED_SHA = os.path.join(FIXTURES, "preamble-malformed-sha.md")
 NO_PROVENANCE = os.path.join(FIXTURES, "preamble-no-provenance.md")
+SPEC_FENCED_HEADING = os.path.join(FIXTURES, "preamble-spec-fenced-heading.md")
 
 
 def run(args):
@@ -151,6 +152,91 @@ class TestExtractProvenancePreamble(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             data = json.loads(result.stdout)
             self.assertEqual(data["git_sha"], "1234567890abcdef1234567890abcdef12345678")
+        finally:
+            os.unlink(path)
+
+
+class TestSpecModeFencedHeading(unittest.TestCase):
+
+    def test_fenced_heading_does_not_terminate_scan_real_before_fence(self):
+        result = run(["--file", SPEC_FENCED_HEADING, "--mode", "spec"])
+        self.assertEqual(result.returncode, 0)
+        data = json.loads(result.stdout)
+        self.assertEqual(data["source_todo"], "TODO-12345678")
+        self.assertEqual(data["scout_brief"], "docs/briefs/sample.md")
+
+    def test_fenced_heading_does_not_terminate_scan_real_after_fence(self):
+        content = (
+            "# Title\n"
+            "\n"
+            "Some intro text.\n"
+            "\n"
+            "```markdown\n"
+            "## Fake Heading Inside Fence\n"
+            "```\n"
+            "\n"
+            "Source: TODO-12345678\n"
+            "\n"
+            "Scout brief: docs/briefs/sample.md\n"
+            "\n"
+            "## Real Heading\n"
+            "\n"
+            "Content.\n"
+        )
+        path = write_tmp(content)
+        try:
+            result = run(["--file", path, "--mode", "spec"])
+            self.assertEqual(result.returncode, 0)
+            data = json.loads(result.stdout)
+            self.assertEqual(data["source_todo"], "TODO-12345678")
+            self.assertEqual(data["scout_brief"], "docs/briefs/sample.md")
+        finally:
+            os.unlink(path)
+
+    def test_fenced_fake_provenance_inside_fence_is_ignored(self):
+        content = (
+            "# Title\n"
+            "\n"
+            "Some intro text.\n"
+            "\n"
+            "```markdown\n"
+            "Source: TODO-aaaaaaaa\n"
+            "Scout brief: docs/briefs/fake.md\n"
+            "```\n"
+            "\n"
+            "More text.\n"
+            "\n"
+            "## Real Heading\n"
+        )
+        path = write_tmp(content)
+        try:
+            result = run(["--file", path, "--mode", "spec"])
+            self.assertEqual(result.returncode, 0)
+            data = json.loads(result.stdout)
+            self.assertIsNone(data["source_todo"])
+            self.assertIsNone(data["scout_brief"])
+        finally:
+            os.unlink(path)
+
+    def test_fenced_git_sha_inside_brief_mode_is_ignored(self):
+        real_sha = "aabbccdd1122334455667788990011aabbccddee"
+        fake_sha = "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
+        content = (
+            "# Brief\n"
+            f"Git SHA: {real_sha}\n"
+            "Line 3\n"
+            "```\n"
+            f"Git SHA: {fake_sha}\n"
+            "```\n"
+            "Line 6\n"
+            "Line 7\n"
+        )
+        path = write_tmp(content)
+        try:
+            result = run(["--file", path, "--mode", "brief"])
+            self.assertEqual(result.returncode, 0)
+            data = json.loads(result.stdout)
+            self.assertEqual(data["git_sha"], real_sha)
         finally:
             os.unlink(path)
 

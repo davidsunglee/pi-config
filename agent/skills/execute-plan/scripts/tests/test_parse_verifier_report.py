@@ -639,5 +639,135 @@ class TestPerCriterionReason(unittest.TestCase):
         self.assertIn("non-zero exit", c2["reason"])
 
 
+class TestFencedPayload(unittest.TestCase):
+    def _run_fixture(self):
+        return run_script(
+            "--report", fixture("verifier-report-fenced-payload.md"),
+            "--criteria-count", "1",
+        )
+
+    def test_fenced_payload_exit_0(self):
+        rc, _, _, _ = self._run_fixture()
+        self.assertEqual(rc, 0)
+
+    def test_fenced_payload_verdict_pass(self):
+        _, data, _, _ = self._run_fixture()
+        self.assertIsNotNone(data)
+        self.assertEqual(data["verdict"], "PASS")
+
+    def test_fenced_payload_one_evidence_block(self):
+        _, data, _, _ = self._run_fixture()
+        self.assertIsNotNone(data)
+        self.assertEqual(list(data["phase1_evidence"].keys()), ["1"])
+
+    def test_fenced_payload_stdout_preserved_verbatim(self):
+        _, data, _, _ = self._run_fixture()
+        self.assertIsNotNone(data)
+        stdout = data["phase1_evidence"]["1"]["stdout"]
+        self.assertIn("## Per-Criterion Verdicts", stdout)
+        self.assertIn("[Evidence for Criterion 99]", stdout)
+        self.assertIn("[Criterion 99] PASS", stdout)
+        self.assertIn("VERDICT: FAIL", stdout)
+
+    def test_fenced_payload_no_fake_criterion_99(self):
+        _, data, _, _ = self._run_fixture()
+        self.assertIsNotNone(data)
+        # No fake criterion 99 leaked into per_criterion or evidence keys.
+        self.assertNotIn("99", data["phase1_evidence"])
+        self.assertFalse(
+            any(c["criterion"] == 99 for c in data["per_criterion"]),
+            "fake [Criterion 99] inside fenced payload must not be parsed",
+        )
+
+    def test_fenced_payload_one_criterion_pass(self):
+        _, data, _, _ = self._run_fixture()
+        self.assertIsNotNone(data)
+        self.assertEqual(len(data["per_criterion"]), 1)
+        self.assertEqual(data["per_criterion"][0]["verdict"], "PASS")
+
+    def test_fenced_payload_no_protocol_errors(self):
+        _, data, _, _ = self._run_fixture()
+        self.assertIsNotNone(data)
+        self.assertEqual(data["protocol_errors"], [])
+
+
+class TestFencedSectionDelimiter(unittest.TestCase):
+    def test_fenced_h2_does_not_split_section(self):
+        """A fenced ``## Fake Section`` line inside Per-Criterion Verdicts must
+        not start a new top-level section, and the surrounding criterion under
+        the real section is still discovered."""
+        content = (
+            "## Phase 1 Evidence\n\n"
+            "## Per-Criterion Verdicts\n\n"
+            "[Criterion 1] PASS\n"
+            "reason: ok\n\n"
+            "```\n"
+            "## Fake Section\n"
+            "[Criterion 2] FAIL\n"
+            "```\n\n"
+            "## Overall Verdict\n\n"
+            "VERDICT: PASS\n"
+        )
+        path = write_temp_report(content)
+        try:
+            rc, data, _, _ = run_script(
+                "--report", path, "--criteria-count", "1"
+            )
+            self.assertEqual(rc, 0, f"Expected PASS exit; got data={data}")
+            self.assertEqual(data["verdict"], "PASS")
+            # Real criterion 1 still discovered.
+            self.assertEqual(len(data["per_criterion"]), 1)
+            self.assertEqual(data["per_criterion"][0]["criterion"], 1)
+            self.assertEqual(data["per_criterion"][0]["verdict"], "PASS")
+            # Fake [Criterion 2] inside fence must not leak.
+            self.assertFalse(
+                any(c["criterion"] == 2 for c in data["per_criterion"]),
+                "fake [Criterion 2] inside fence must not be parsed",
+            )
+            self.assertEqual(data["protocol_errors"], [])
+        finally:
+            os.unlink(path)
+
+
+class TestFencedReasonExtraction(unittest.TestCase):
+    def test_fenced_reason_does_not_yield_fake_criterion(self):
+        """A fenced reason: block containing fake [Criterion 2] FAIL lines must
+        not be picked up as a second criterion. With --criteria-count 2, the
+        only protocol error should be the genuinely-missing criterion 2."""
+        content = (
+            "## Phase 1 Evidence\n\n"
+            "## Per-Criterion Verdicts\n\n"
+            "[Criterion 1] PASS\n"
+            "reason:\n"
+            "```\n"
+            "[Criterion 2] FAIL\n"
+            "embedded fake content\n"
+            "```\n\n"
+            "## Overall Verdict\n\n"
+            "VERDICT: PASS\n"
+        )
+        path = write_temp_report(content)
+        try:
+            rc, data, _, _ = run_script(
+                "--report", path, "--criteria-count", "2"
+            )
+            self.assertNotEqual(rc, 0)
+            self.assertIsNotNone(data)
+            # Fake criterion 2 must not be reported as parsed.
+            self.assertEqual(len(data["per_criterion"]), 1)
+            self.assertEqual(data["per_criterion"][0]["criterion"], 1)
+            errors = data["protocol_errors"]
+            # Missing criterion 2 must be reported.
+            self.assertTrue(
+                any(
+                    "missing criterion header" in e and "[Criterion 2]" in e
+                    for e in errors
+                ),
+                f"Expected missing-criterion-2 protocol error: {errors}",
+            )
+        finally:
+            os.unlink(path)
+
+
 if __name__ == "__main__":
     unittest.main()

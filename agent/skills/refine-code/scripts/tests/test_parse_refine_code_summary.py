@@ -293,5 +293,82 @@ class TestRemainingIssuesDocumentedHeading(unittest.TestCase):
         self.assertEqual(err["failure"], "unexpected_remaining_issues")
 
 
+class TestFencedH2InRemainingIssues(unittest.TestCase):
+    """Fenced ## lines inside ## Remaining Issues must not split the section."""
+
+    def _run_temp(self, content):
+        path = write_temp_summary(content)
+        try:
+            rc, stdout, stderr = run_script("--summary", path)
+        finally:
+            os.unlink(path)
+        return rc, stdout, stderr
+
+    def test_fenced_h2_preserved_and_real_review_file_parsed(self):
+        content = (
+            "STATUS: not_approved_within_budget\n\n"
+            "## Summary\n"
+            "Iterations: 1\n"
+            "Issues found: 2 (1 Critical, 1 Important, 0 Minor)\n"
+            "Issues fixed: 0\n"
+            "Issues remaining: 2\n\n"
+            "## Remaining Issues\n"
+            "[Critical] tests/foo.py:42 — flaky test\n\n"
+            "```markdown\n"
+            "## Review File\n"
+            "docs/reviews/fake.md\n"
+            "```\n\n"
+            "[Important] tests/bar.py:13 — missing assertion\n\n"
+            "## Review File\n"
+            "docs/reviews/sample-code-review-v3.md\n"
+        )
+        rc, stdout, stderr = self._run_temp(content)
+        self.assertEqual(rc, 0, stderr)
+        data = parse_stdout(stdout)
+        self.assertIn("[Critical] tests/foo.py:42", data["remaining_issues"])
+        self.assertIn("[Important] tests/bar.py:13", data["remaining_issues"])
+        self.assertIn("## Review File", data["remaining_issues"])
+        self.assertEqual(data["review_file"], "docs/reviews/sample-code-review-v3.md")
+
+
+class TestFencedH2InSummary(unittest.TestCase):
+    """Fenced ## lines inside ## Summary must not break field parsing."""
+
+    def _run_temp(self, content):
+        path = write_temp_summary(content)
+        try:
+            rc, stdout, stderr = run_script("--summary", path)
+        finally:
+            os.unlink(path)
+        return rc, stdout, stderr
+
+    def test_fenced_h2_in_summary_does_not_break_parser(self):
+        content = (
+            "STATUS: approved\n\n"
+            "## Summary\n"
+            "Iterations: 2\n"
+            "Issues found: 3 (1 Critical, 1 Important, 1 Minor)\n"
+            "Issues fixed: 2\n"
+            "Issues remaining: 1\n\n"
+            "```markdown\n"
+            "## Review File\n"
+            "docs/reviews/fake-embedded.md\n"
+            "```\n\n"
+            "## Review File\n"
+            "docs/reviews/real-review.md\n"
+        )
+        rc, stdout, stderr = self._run_temp(content)
+        self.assertEqual(rc, 0, stderr)
+        data = parse_stdout(stdout)
+        self.assertIsNotNone(data)
+        self.assertEqual(data["iterations"], 2)
+        self.assertEqual(data["issues_found_critical"], 1)
+        self.assertEqual(data["issues_found_important"], 1)
+        self.assertEqual(data["issues_found_minor"], 1)
+        self.assertEqual(data["issues_fixed"], 2)
+        self.assertEqual(data["issues_remaining"], 1)
+        self.assertEqual(data["review_file"], "docs/reviews/real-review.md")
+
+
 if __name__ == "__main__":
     unittest.main()

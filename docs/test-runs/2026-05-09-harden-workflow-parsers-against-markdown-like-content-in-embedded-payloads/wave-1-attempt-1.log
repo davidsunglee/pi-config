@@ -1,0 +1,58 @@
+PHASE: wave-1-attempt-1
+COMMAND: cd agent && npm run test:helpers
+WORKING_DIRECTORY: /Users/david/Code/pi-config
+EXIT_CODE: 0
+TIMESTAMP: 2026-05-09T17:29:32Z
+FAILING_IDENTIFIERS_COUNT: 0
+FAILING_IDENTIFIERS:
+END_FAILING_IDENTIFIERS
+NON_RECONCILABLE_COUNT: 0
+NON_RECONCILABLE_FAILURES:
+END_NON_RECONCILABLE_FAILURES
+
+--- RAW RUN OUTPUT BELOW ---
+
+> test:helpers
+> python3 -m unittest discover -s skills/_shared/scripts/tests -p "test_*.py" && python3 -m unittest discover -s skills/execute-plan/scripts/tests -p "test_*.py" && python3 -m unittest discover -s skills/refine-code/scripts/tests -p "test_*.py" && python3 -m unittest discover -s skills/refine-plan/scripts/tests -p "test_*.py" && python3 -m unittest discover -s skills/define-spec/scripts/tests -p "test_*.py"
+
+................................................................................................................................................................................
+----------------------------------------------------------------------
+Ran 176 tests in 6.938s
+
+OK
+..........................................................................................................................................................................
+----------------------------------------------------------------------
+Ran 170 tests in 5.437s
+
+OK
+...................................................
+----------------------------------------------------------------------
+Ran 51 tests in 1.395s
+
+OK
+/opt/homebrew/Cellar/python@3.14/3.14.4_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/tempfile.py:484: ResourceWarning: Implicitly cleaning up <_TemporaryFileWrapper file=<_io.TextIOWrapper name='/var/folders/32/33v_wbcd6rv1sqvqs6v7qcvw0000gp/T/tmp2ivjkjcg.md' mode='w' encoding='UTF-8'>>
+  _warnings.warn(self.warn_message, ResourceWarning)
+./opt/homebrew/Cellar/python@3.14/3.14.4_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/tempfile.py:484: ResourceWarning: Implicitly cleaning up <_TemporaryFileWrapper file=<_io.TextIOWrapper name='/var/folders/32/33v_wbcd6rv1sqvqs6v7qcvw0000gp/T/tmp5ohuy36k.md' mode='w' encoding='UTF-8'>>
+  _warnings.warn(self.warn_message, ResourceWarning)
+./opt/homebrew/Cellar/python@3.14/3.14.4_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/tempfile.py:484: ResourceWarning: Implicitly cleaning up <_TemporaryFileWrapper file=<_io.TextIOWrapper name='/var/folders/32/33v_wbcd6rv1sqvqs6v7qcvw0000gp/T/tmpnbmel1nt.md' mode='w' encoding='UTF-8'>>
+  _warnings.warn(self.warn_message, ResourceWarning)
+../opt/homebrew/Cellar/python@3.14/3.14.4_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/tempfile.py:484: ResourceWarning: Implicitly cleaning up <_TemporaryFileWrapper file=<_io.TextIOWrapper name='/var/folders/32/33v_wbcd6rv1sqvqs6v7qcvw0000gp/T/tmplgvrd0qr.md' mode='w' encoding='UTF-8'>>
+  _warnings.warn(self.warn_message, ResourceWarning)
+./opt/homebrew/Cellar/python@3.14/3.14.4_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/tempfile.py:484: ResourceWarning: Implicitly cleaning up <_TemporaryFileWrapper file=<_io.TextIOWrapper name='/var/folders/32/33v_wbcd6rv1sqvqs6v7qcvw0000gp/T/tmpfhdcircl.md' mode='w' encoding='UTF-8'>>
+  _warnings.warn(self.warn_message, ResourceWarning)
+./opt/homebrew/Cellar/python@3.14/3.14.4_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/tempfile.py:484: ResourceWarning: Implicitly cleaning up <_TemporaryFileWrapper file=<_io.TextIOWrapper name='/var/folders/32/33v_wbcd6rv1sqvqs6v7qcvw0000gp/T/tmpu4r0jzk0.md' mode='w' encoding='UTF-8'>>
+  _warnings.warn(self.warn_message, ResourceWarning)
+../opt/homebrew/Cellar/python@3.14/3.14.4_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/tempfile.py:484: ResourceWarning: Implicitly cleaning up <_TemporaryFileWrapper file=<_io.TextIOWrapper name='/var/folders/32/33v_wbcd6rv1sqvqs6v7qcvw0000gp/T/tmp0k0av9cp.md' mode='w' encoding='UTF-8'>>
+  _warnings.warn(self.warn_message, ResourceWarning)
+./opt/homebrew/Cellar/python@3.14/3.14.4_1/Frameworks/Python.framework/Versions/3.14/lib/python3.14/tempfile.py:484: ResourceWarning: Implicitly cleaning up <_TemporaryFileWrapper file=<_io.TextIOWrapper name='/var/folders/32/33v_wbcd6rv1sqvqs6v7qcvw0000gp/T/tmpxa3m1cor.md' mode='w' encoding='UTF-8'>>
+  _warnings.warn(self.warn_message, ResourceWarning)
+.............
+----------------------------------------------------------------------
+Ran 22 tests in 0.626s
+
+OK
+.............................
+----------------------------------------------------------------------
+Ran 29 tests in 0.535s
+
+OK

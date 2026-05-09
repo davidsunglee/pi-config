@@ -367,7 +367,7 @@ Python 3 (`re`, `argparse`, `json`, `os`, `sys`, `unittest`, `tempfile`), Bash (
 **Acceptance criteria:**
 
 - The in-file fence helper is removed and the shared module is used.
-  Verify: `grep -n "def get_fence_aware_lines" agent/skills/execute-plan/scripts/extract-plan-tasks.py` returns zero matches AND `grep -n "from fence_aware import" agent/skills/execute-plan/scripts/extract-plan-tasks.py` returns at least one match.
+  Verify: `! grep -n "def get_fence_aware_lines" agent/skills/execute-plan/scripts/extract-plan-tasks.py && grep -n "from fence_aware import" agent/skills/execute-plan/scripts/extract-plan-tasks.py` exits 0.
 - `## Test Command` accepts an unlabeled backtick fence.
   Verify: run `cd agent && python3 -m unittest skills/execute-plan/scripts/tests/test_extract_plan_tasks.py -v` and confirm the `test_test_command_unlabeled_fence` case passes with exit code 0.
 - `## Test Command` accepts a tilde fence and follows the shared closer rules.

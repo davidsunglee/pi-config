@@ -4,7 +4,7 @@
 Output shape (stdout, exit 0):
   {
     "goal": "<first paragraph of ## Goal section>",
-    "test_command": "<contents of ```bash block under ## Test Command>",
+    "test_command": "<contents of the first fenced block under ## Test Command, regardless of info string>",
     "tasks": [
       {
         "number": 1,
@@ -51,8 +51,12 @@ Options:
 
 import argparse
 import json
+import os
 import re
 import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "_shared", "scripts"))
+from fence_aware import compute_in_fence_lines, FENCE_RE  # noqa: E402
 
 
 VALID_MODELS = {"cheap", "standard", "capable"}
@@ -60,8 +64,6 @@ VALID_MODELS = {"cheap", "standard", "capable"}
 TASK_HEADING_RE = re.compile(r"^### Task (\d+):\s*(.*)")
 SECTION_HEADING_RE = re.compile(r"^## ")
 DEP_LINE_RE = re.compile(r"^-\s+Task\s+(\d+)\s+depends\s+on:\s*(.+)")
-FENCE_MARKER_RE = re.compile(r"^(\s*)(`{3,}|~{3,})(.*?)$")
-FENCE_MARKERS = {"`", "~"}
 
 MAX_PARALLEL_HARD_CAP = 8
 
@@ -76,78 +78,12 @@ SECTION_RULES = [
 ]
 
 
-def get_fence_aware_lines(lines):
-    """Return a set of line indices that are inside code fences.
-
-    A fence is opened by ``` or ~~~ with 3+ markers, optionally with an info string.
-    A fence is closed by the same marker type with 3+ (at least as many as opener),
-    with only whitespace allowed after the markers (no info string).
-    Indentation is allowed for fence markers.
-    """
-    in_fence_set = set()
-    i = 0
-    n = len(lines)
-
-    def is_fence_closer(line, expected_marker_type, min_count):
-        """Check if a line is a valid fence closer."""
-        m = FENCE_MARKER_RE.match(line)
-        if not m:
-            return False
-        indent = m.group(1)
-        markers = m.group(2)
-        after = m.group(3)
-
-        marker_type = markers[0]
-        marker_count = len(markers)
-
-        # For a closer: same marker type, at least as many markers, and only whitespace after
-        return (marker_type == expected_marker_type and
-                marker_count >= min_count and
-                after.strip() == "")
-
-    while i < n:
-        line = lines[i].rstrip("\n")
-        m = FENCE_MARKER_RE.match(line)
-        if m:
-            indent = m.group(1)
-            markers = m.group(2)
-            marker_type = markers[0]
-            marker_count = len(markers)
-
-            # Mark the opener line itself as outside the fence (it's the boundary)
-            fence_start = i + 1
-            i += 1
-
-            # Look for a closing fence
-            found_closer = False
-            while i < n:
-                close_line = lines[i].rstrip("\n")
-                if is_fence_closer(close_line, marker_type, marker_count):
-                    # Closer line itself is not in fence; mark everything between as fenced
-                    for fenced_idx in range(fence_start, i):
-                        in_fence_set.add(fenced_idx)
-                    found_closer = True
-                    i += 1
-                    break
-                i += 1
-
-            # If no closer found, everything from opener+1 to EOF is in the fence
-            if not found_closer:
-                for fenced_idx in range(fence_start, n):
-                    in_fence_set.add(fenced_idx)
-                break
-        else:
-            i += 1
-
-    return in_fence_set
-
-
 def validate_required_sections(text):
     """Return list of missing_required_section errors for absent/empty sections."""
     lines = text.splitlines()
     errors = []
 
-    in_fence = get_fence_aware_lines(lines)
+    in_fence = compute_in_fence_lines(lines)
 
     def check_section(patterns, requires_body):
         compiled = [re.compile(p) for p in patterns]
@@ -289,7 +225,7 @@ def parse_plan(text, max_parallel_hard_cap=MAX_PARALLEL_HARD_CAP):
     dep_raw = {}  # task_number -> list of dep numbers
     section = None
 
-    in_fence = get_fence_aware_lines(lines)
+    in_fence = compute_in_fence_lines(lines)
 
     # First pass: identify task boundaries and sections
     i = 0
@@ -394,7 +330,7 @@ def parse_plan(text, max_parallel_hard_cap=MAX_PARALLEL_HARD_CAP):
             break
         i += 1
 
-    # Parse test_command: ## Test Command -> next ```bash block
+    # Parse test_command: ## Test Command -> next fenced block (any info string)
     i = 0
     while i < n:
         if i not in in_fence and lines[i].rstrip("\n") == "## Test Command":
@@ -403,11 +339,25 @@ def parse_plan(text, max_parallel_hard_cap=MAX_PARALLEL_HARD_CAP):
                 if i in in_fence:
                     i += 1
                     continue
-                stripped = lines[i].strip()
-                if stripped.startswith("```bash"):
+                line_no_nl = lines[i].rstrip("\n")
+                m = FENCE_RE.match(line_no_nl)
+                if m:
+                    marker_char = m.group(2)[0]
+                    opener_len = len(m.group(2))
                     i += 1
                     cmd_lines = []
-                    while i < n and not lines[i].strip().startswith("```"):
+                    found_closer = False
+                    while i < n:
+                        close_line = lines[i].rstrip("\n")
+                        cm = FENCE_RE.match(close_line)
+                        if cm:
+                            c_char = cm.group(2)[0]
+                            c_len = len(cm.group(2))
+                            c_after = cm.group(3)
+                            if c_char == marker_char and c_len >= opener_len and not c_after.strip():
+                                found_closer = True
+                                i += 1
+                                break
                         cmd_lines.append(lines[i].rstrip("\n"))
                         i += 1
                     test_command = "\n".join(cmd_lines).strip()
@@ -457,7 +407,7 @@ def parse_plan(text, max_parallel_hard_cap=MAX_PARALLEL_HARD_CAP):
         model_recommendation = None
 
         # Get fence awareness for this task block
-        block_in_fence = get_fence_aware_lines(block_lines)
+        block_in_fence = compute_in_fence_lines(block_lines)
 
         state = "header"
         j = 0

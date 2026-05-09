@@ -894,5 +894,106 @@ test
                             "Unclosed fence suppressing content should cause validation errors")
 
 
+class TestTestCommandFence(unittest.TestCase):
+    """Test that ## Test Command accepts any fenced block, not just ```bash."""
+
+    def _plan_with_test_command(self, test_cmd_section):
+        return f"""## Goal
+Test fence behavior in test command section.
+
+## Architecture summary
+Test.
+
+## Tech stack
+Python.
+
+## File Structure
+- test.py
+
+### Task 1: Simple task
+
+**Files:**
+- Create: test.py
+
+**Steps:**
+- [ ] **Step 1:** Do something
+
+**Acceptance criteria:**
+- Test passes.
+  Verify: run it.
+
+**Model recommendation:** cheap
+
+## Dependencies
+
+## Risk Assessment
+Low.
+
+## Test Command
+{test_cmd_section}
+"""
+
+    def _parse_plan_str(self, content):
+        import tempfile
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:
+            f.write(content)
+            temp_plan = f.name
+        try:
+            result = run_script("--plan", temp_plan)
+            return result, json.loads(result.stdout) if result.returncode == 0 else None
+        finally:
+            Path(temp_plan).unlink(missing_ok=True)
+
+    def test_test_command_unlabeled_fence(self):
+        """Unlabeled backtick fence should be accepted."""
+        content = self._plan_with_test_command("```\nnpm test\n```\n")
+        result, data = self._parse_plan_str(content)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(data["test_command"], "npm test")
+
+    def test_test_command_tilde_fence(self):
+        """Tilde fence should be accepted."""
+        content = self._plan_with_test_command("~~~\nnpm test\n~~~\n")
+        result, data = self._parse_plan_str(content)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(data["test_command"], "npm test")
+
+    def test_test_command_long_fence(self):
+        """Four-backtick opener and closer should be accepted."""
+        content = self._plan_with_test_command("````\nnpm test\n````\n")
+        result, data = self._parse_plan_str(content)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(data["test_command"], "npm test")
+
+    def test_test_command_indented_fence(self):
+        """Opener and closer indented two spaces should be accepted."""
+        content = self._plan_with_test_command("  ```\n  npm test\n  ```\n")
+        result, data = self._parse_plan_str(content)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(data["test_command"], "npm test")
+
+    def test_test_command_longer_closer(self):
+        """Closer with more markers than opener should close the fence."""
+        content = self._plan_with_test_command("```\nnpm test\n`````\n")
+        result, data = self._parse_plan_str(content)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(data["test_command"], "npm test")
+
+    def test_test_command_closer_with_info_string_does_not_close(self):
+        """A line with an info string after markers should NOT close the fence."""
+        content = self._plan_with_test_command("```\nnpm test\n```bash\nmore\n")
+        result, data = self._parse_plan_str(content)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("npm test", data["test_command"])
+        self.assertIn("more", data["test_command"])
+
+    def test_test_command_unclosed_fence(self):
+        """Unclosed fence: everything after opener through EOF is captured."""
+        content = self._plan_with_test_command("```\nnpm test\n")
+        result, data = self._parse_plan_str(content)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("npm test", data["test_command"])
+
+
 if __name__ == "__main__":
     unittest.main()

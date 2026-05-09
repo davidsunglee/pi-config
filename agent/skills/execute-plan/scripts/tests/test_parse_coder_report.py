@@ -208,5 +208,177 @@ None.
             os.unlink(tmp)
 
 
+class TestFencedH2InCompleted(unittest.TestCase):
+    """Fenced ## lines inside ## Completed must not truncate that section."""
+
+    def test_fenced_heading_stays_in_completed_and_real_tests_found(self):
+        import tempfile
+
+        content = (
+            "STATUS: DONE\n"
+            "\n"
+            "## Completed\n"
+            "Implemented foo.\n"
+            "\n"
+            "```markdown\n"
+            "## Tests\n"
+            "Fake nested heading inside a fence.\n"
+            "```\n"
+            "\n"
+            "More text after the fence.\n"
+            "\n"
+            "## Tests\n"
+            "Real tests block.\n"
+            "\n"
+            "## Files Changed\n"
+            "- `path/to/real.py`\n"
+            "\n"
+            "## Self-Review Findings\n"
+            "None.\n"
+        )
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:
+            f.write(content)
+            tmp = f.name
+
+        try:
+            rc, data, _, _, _ = run_script("--report", tmp)
+            self.assertEqual(rc, 0)
+            self.assertIn("Implemented foo.", data["completed_block"])
+            self.assertIn("More text after the fence.", data["completed_block"])
+            self.assertIn("## Tests", data["completed_block"])
+            self.assertEqual(data["tests_block"].strip(), "Real tests block.")
+        finally:
+            os.unlink(tmp)
+
+
+class TestFencedH2InSelfReview(unittest.TestCase):
+    """Fenced ## lines inside ## Self-Review Findings must not truncate that section."""
+
+    def test_fenced_concerns_heading_stays_in_self_review(self):
+        import tempfile
+
+        content = (
+            "STATUS: DONE\n"
+            "\n"
+            "## Completed\n"
+            "Done.\n"
+            "\n"
+            "## Tests\n"
+            "Pass.\n"
+            "\n"
+            "## Files Changed\n"
+            "- `real/file.py`\n"
+            "\n"
+            "## Self-Review Findings\n"
+            "Looks good.\n"
+            "\n"
+            "```\n"
+            "## Concerns / Needs / Blocker\n"
+            "Fake concern inside a fence.\n"
+            "```\n"
+            "\n"
+            "More self-review text.\n"
+            "\n"
+            "## Concerns / Needs / Blocker\n"
+            "Real concern here.\n"
+        )
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:
+            f.write(content)
+            tmp = f.name
+
+        try:
+            rc, data, _, _, _ = run_script("--report", tmp)
+            self.assertEqual(rc, 0)
+            self.assertIn("## Concerns / Needs / Blocker", data["self_review_block"])
+            self.assertEqual(data["concerns_block"].strip(), "Real concern here.")
+        finally:
+            os.unlink(tmp)
+
+
+class TestFencedH2InConcerns(unittest.TestCase):
+    """Fenced ## lines inside ## Concerns / Needs / Blocker must not truncate that section."""
+
+    def test_fenced_files_changed_stays_in_concerns(self):
+        import tempfile
+
+        content = (
+            "STATUS: DONE_WITH_CONCERNS\n"
+            "\n"
+            "## Completed\n"
+            "Done.\n"
+            "\n"
+            "## Tests\n"
+            "Pass.\n"
+            "\n"
+            "## Files Changed\n"
+            "- `real/file.py`\n"
+            "\n"
+            "## Self-Review Findings\n"
+            "None.\n"
+            "\n"
+            "## Concerns / Needs / Blocker\n"
+            "Some concern.\n"
+            "\n"
+            "```\n"
+            "## Files Changed\n"
+            "- `fake/path.py`\n"
+            "```\n"
+            "\n"
+            "More concern text.\n"
+        )
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:
+            f.write(content)
+            tmp = f.name
+
+        try:
+            rc, data, _, _, _ = run_script("--report", tmp)
+            self.assertEqual(rc, 0)
+            self.assertIn("## Files Changed", data["concerns_block"])
+            self.assertEqual(data["files_changed"], ["real/file.py"])
+        finally:
+            os.unlink(tmp)
+
+
+class TestFencedH2InTests(unittest.TestCase):
+    """Fenced ## lines inside ## Tests must not truncate that section."""
+
+    def test_fenced_self_review_heading_stays_in_tests(self):
+        import tempfile
+
+        content = (
+            "STATUS: DONE\n"
+            "\n"
+            "## Completed\n"
+            "Done.\n"
+            "\n"
+            "## Tests\n"
+            "All passed.\n"
+            "\n"
+            "```\n"
+            "## Self-Review Findings\n"
+            "Fake heading in pytest output.\n"
+            "```\n"
+            "\n"
+            "More test output.\n"
+            "\n"
+            "## Files Changed\n"
+            "- `real/file.py`\n"
+            "\n"
+            "## Self-Review Findings\n"
+            "Real self-review text.\n"
+        )
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:
+            f.write(content)
+            tmp = f.name
+
+        try:
+            rc, data, _, _, _ = run_script("--report", tmp)
+            self.assertEqual(rc, 0)
+            self.assertIn("## Self-Review Findings", data["tests_block"])
+            self.assertEqual(data["self_review_block"].strip(), "Real self-review text.")
+        finally:
+            os.unlink(tmp)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -13,11 +13,19 @@ Failure labels emitted by this script (to stderr as JSON):
   unexpected_remaining_issues
   unexpected_failure_reason
   missing_failure_reason
+
+Section bodies are extracted with the shared fence-aware H2 splitter; embedded
+fenced `## ` lines (e.g., copied reviewer markdown inside `## Remaining Issues`)
+are not mistaken for real section boundaries.
 """
 import argparse
 import json
+import os
 import re
 import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "_shared", "scripts"))
+from fence_aware import split_h2_sections
 
 VALID_STATUSES = {"approved", "approved_with_concerns", "not_approved_within_budget", "failed"}
 
@@ -32,26 +40,6 @@ def fail(label, detail=None):
         err["detail"] = detail
     print(json.dumps(err), file=sys.stderr)
     sys.exit(1)
-
-
-def parse_sections(text):
-    """Split content after the STATUS line into H2-keyed sections."""
-    sections = {}
-    current = None
-    buf = []
-    for line in text.splitlines(keepends=True):
-        m = re.match(r"^## (.+)$", line.rstrip())
-        if m:
-            if current is not None:
-                sections[current] = "".join(buf)
-            current = m.group(1).strip()
-            buf = []
-        else:
-            if current is not None:
-                buf.append(line)
-    if current is not None:
-        sections[current] = "".join(buf)
-    return sections
 
 
 def parse_summary_block(block_text):
@@ -194,7 +182,7 @@ Failure labels (emitted as JSON to stderr on non-zero exit):
 
     # Reconstruct the content after the STATUS line for section parsing
     body = "\n".join(lines[status_line_idx + 1:])
-    sections = parse_sections(body)
+    sections = split_h2_sections(body)
 
     # Validate required ## Summary block
     if "Summary" not in sections:

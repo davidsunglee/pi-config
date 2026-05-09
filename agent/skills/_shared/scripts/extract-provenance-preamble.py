@@ -8,7 +8,12 @@ Supported line shapes (scanned within the bounded preamble region):
 
 Bound modes:
   --mode spec   : scan lines[0:min(first_h2_index, 40)]; first H2 is the
-                  first line starting with '## '
+                  first line starting with '## ' that is NOT inside a fenced
+                  code block, or line 40.
+                  Fenced `## ` lines (backticks or tildes, length 3+, indented
+                  or not) inside the bounded preamble do not terminate the
+                  scan, and `Source:` / `Scout brief:` / `Git SHA:` lines that
+                  appear inside fenced blocks are ignored for extraction.
   --mode brief  : scan lines[0:8]
 
 A malformed Git SHA: line (value not exactly 40 lowercase hex chars) causes
@@ -19,6 +24,9 @@ import argparse
 import json
 import re
 import sys
+
+# colocated with this script in the same scripts directory
+from fence_aware import compute_in_fence_lines
 
 
 _RE_SOURCE = re.compile(r"^Source: (TODO-[0-9a-f]{8})$")
@@ -38,7 +46,7 @@ def main():
         required=True,
         choices=["spec", "brief"],
         help=(
-            "--mode spec scans up to the first '## ' heading or line 40; "
+            "--mode spec scans up to the first '## ' heading (not inside a fence) or line 40; "
             "--mode brief scans the first 8 lines"
         ),
     )
@@ -56,9 +64,13 @@ def main():
                     line = raw.decode("utf-8")
                 except UnicodeDecodeError as exc:
                     raise OSError(f"utf-8 decode failed in bounded preamble: {exc}") from exc
-                if args.mode == "spec" and line.startswith("## "):
-                    break
                 region.append(line)
+        if args.mode == "spec":
+            in_fence = compute_in_fence_lines(region)
+            for i, line in enumerate(region):
+                if line.startswith("## ") and i not in in_fence:
+                    region = region[:i]
+                    break
     except OSError as exc:
         json.dump(
             {
@@ -76,7 +88,11 @@ def main():
     scout_brief = None
     git_sha = None
 
-    for raw in region:
+    in_fence_for_extraction = compute_in_fence_lines(region)
+
+    for idx, raw in enumerate(region):
+        if idx in in_fence_for_extraction:
+            continue
         line = raw.rstrip("\n")
 
         m = _RE_SOURCE.match(line)

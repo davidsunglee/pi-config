@@ -20,38 +20,35 @@ Protocol-error labels (emitted to stderr as JSON, exit 1):
 
 Warning labels (included in protocol_warnings in stdout JSON, exit 0):
   concerns_block_missing — DONE_WITH_CONCERNS but ## Concerns / Needs / Blocker is empty
+
+Section bodies are extracted with the shared fence-aware H2 splitter; `## `-prefixed lines
+inside fenced code blocks are treated as opaque content and do not truncate the surrounding
+section.
 """
 import argparse
 import json
+import os
 import re
 import sys
+
+sys.path.insert(
+    0,
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "_shared", "scripts"),
+)
+from fence_aware import split_h2_sections
 
 VALID_STATUSES = {"DONE", "DONE_WITH_CONCERNS", "BLOCKED", "NEEDS_CONTEXT"}
 
 
-def _section(name, text):
-    """Return text under ## <name> up to the next ## heading or EOF, stripped of trailing newlines."""
-    lines = text.splitlines(keepends=True)
-    in_section = False
-    buf = []
-    heading = f"## {name}"
-    for line in lines:
-        stripped = line.rstrip("\n")
-        if in_section:
-            if re.match(r"^## ", stripped):
-                break
-            buf.append(line)
-        else:
-            if stripped == heading:
-                in_section = True
-    return "".join(buf).rstrip("\n")
+def _get_section(sections, name):
+    """Return the named section body from a precomputed sections dict, stripped of trailing newlines."""
+    return sections.get(name, "").rstrip("\n")
 
 
-def _extract_files_changed(text):
-    """Extract backtick-delimited paths from ## Files Changed bullets."""
-    section = _section("Files Changed", text)
+def _extract_files_changed(section_body):
+    """Extract backtick-delimited paths from a precomputed ## Files Changed section body."""
     paths = []
-    for line in section.splitlines():
+    for line in section_body.splitlines():
         m = re.match(r"^- `(?P<path>[^`]+)`", line)
         if m:
             paths.append(m.group("path"))
@@ -112,10 +109,12 @@ Warning label (in stdout JSON protocol_warnings, exit 0):
 
     status = token
 
-    tests_block = _section("Tests", text)
-    completed_block = _section("Completed", text)
-    self_review_block = _section("Self-Review Findings", text)
-    concerns_block = _section("Concerns / Needs / Blocker", text)
+    sections = split_h2_sections(text)
+
+    tests_block = _get_section(sections, "Tests")
+    completed_block = _get_section(sections, "Completed")
+    self_review_block = _get_section(sections, "Self-Review Findings")
+    concerns_block = _get_section(sections, "Concerns / Needs / Blocker")
 
     blocker_text = concerns_block if status == "BLOCKED" else None
     needs_text = concerns_block if status == "NEEDS_CONTEXT" else None
@@ -124,7 +123,7 @@ Warning label (in stdout JSON protocol_warnings, exit 0):
     if status == "DONE_WITH_CONCERNS" and concerns_block.strip() == "":
         protocol_warnings.append("concerns_block_missing")
 
-    files_changed = _extract_files_changed(text)
+    files_changed = _extract_files_changed(_get_section(sections, "Files Changed"))
 
     result = {
         "status": status,

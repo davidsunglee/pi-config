@@ -6,34 +6,26 @@ Protocol-error labels emitted by this script:
   verifier phase-1 evidence block malformed at criterion N: <specific check>
   verifier missing evidence block for command-style criterion N
   verifier ran command not matching any phase-1 recipe: <command>
+
+Captured stdout/stderr payloads wrapped in code fences are preserved verbatim.
+Heading-like lines, evidence-block delimiters, criterion headers, field labels,
+and `VERDICT:` lines that appear inside such fences are treated as opaque
+payload, not as report structure.
 """
 import argparse
 import json
+import os
 import re
 import sys
 
+sys.path.insert(
+    0,
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "_shared", "scripts"),
+)
+from fence_aware import compute_in_fence_lines, split_h2_sections, FENCE_RE
+
 
 EVIDENCE_FIELDS = ("command:", "exit_code:", "stdout:", "stderr:")
-
-
-def parse_sections(text):
-    """Split report text into the three expected top-level sections."""
-    sections = {}
-    current = None
-    buf = []
-    for line in text.splitlines(keepends=True):
-        m = re.match(r"^## (.+)$", line.rstrip())
-        if m:
-            if current is not None:
-                sections[current] = "".join(buf)
-            current = m.group(1).strip()
-            buf = []
-        else:
-            if current is not None:
-                buf.append(line)
-    if current is not None:
-        sections[current] = "".join(buf)
-    return sections
 
 
 def parse_evidence_blocks(section_text):
@@ -45,18 +37,23 @@ def parse_evidence_blocks(section_text):
     blocks = {}
     errors = []
     lines = section_text.splitlines()
+    in_fence = compute_in_fence_lines(lines)
     i = 0
     while i < len(lines):
+        if i in in_fence:
+            i += 1
+            continue
         m = re.match(r"^\[Evidence for Criterion (\d+)\]$", lines[i].strip())
         if m:
             n = int(m.group(1))
             i += 1
             block_lines = []
             while i < len(lines):
-                if re.match(r"^\[Evidence for Criterion \d+\]$", lines[i].strip()):
-                    break
-                if re.match(r"^## ", lines[i]):
-                    break
+                if i not in in_fence:
+                    if re.match(r"^\[Evidence for Criterion \d+\]$", lines[i].strip()):
+                        break
+                    if re.match(r"^## ", lines[i]):
+                        break
                 block_lines.append(lines[i])
                 i += 1
             parsed, errs = parse_evidence_fields(n, block_lines)
@@ -75,10 +72,14 @@ def parse_evidence_fields(n, lines):
     errors = []
     field_order = ["command:", "exit_code:", "stdout:", "stderr:"]
     found = {}
+    in_fence = compute_in_fence_lines(lines)
 
     i = 0
     field_idx = 0
     while i < len(lines):
+        if i in in_fence:
+            i += 1
+            continue
         line = lines[i]
         stripped = line.strip()
         if not stripped:
@@ -102,6 +103,29 @@ def parse_evidence_fields(n, lines):
             buf = [value]
             i += 1
             while i < len(lines):
+                # Fenced payload: consume opener+interior+closer verbatim, then
+                # continue scanning for further value content past the closer.
+                if i not in in_fence and FENCE_RE.match(lines[i].rstrip("\n")):
+                    opener_match = FENCE_RE.match(lines[i].rstrip("\n"))
+                    marker_str = opener_match.group(2)
+                    marker_char = marker_str[0]
+                    opener_len = len(marker_str)
+                    i += 1  # skip opener (interior only, per spec)
+                    while i < len(lines):
+                        cm = FENCE_RE.match(lines[i].rstrip("\n"))
+                        if cm:
+                            c_marker = cm.group(2)
+                            c_after = cm.group(3)
+                            if (
+                                c_marker[0] == marker_char
+                                and len(c_marker) >= opener_len
+                                and not c_after.strip()
+                            ):
+                                i += 1  # skip past closer
+                                break
+                        buf.append(lines[i])
+                        i += 1
+                    continue
                 next_stripped = lines[i].strip()
                 is_next_field = any(
                     next_stripped.startswith(lbl) for lbl in field_order
@@ -127,11 +151,19 @@ def parse_evidence_fields(n, lines):
     return found, errors
 
 
-def _extract_reason(block_lines):
-    """Extract the `reason:` field text (possibly multi-line) from a criterion block."""
+def _extract_reason(block_lines, start_idx, in_fence):
+    """Extract the `reason:` field text (possibly multi-line) from a criterion block.
+
+    Lines whose absolute index (start_idx + relative offset) is in `in_fence`
+    are treated as opaque payload and skipped — they cannot start or terminate
+    the reason and cannot pose as a `[Criterion N]` header.
+    """
     reason_parts = []
     in_reason = False
-    for line in block_lines:
+    for offset, line in enumerate(block_lines):
+        abs_idx = start_idx + offset
+        if abs_idx in in_fence:
+            continue
         stripped = line.strip()
         if not in_reason:
             m = re.match(r"^reason:\s*(.*)$", stripped, re.IGNORECASE)
@@ -158,10 +190,13 @@ def parse_per_criterion_verdicts(section_text, k):
     errors = []
     seen = {}
     lines = section_text.splitlines()
+    in_fence = compute_in_fence_lines(lines)
 
     # First pass: collect header positions so we can scope each block.
-    header_positions = []  # list of (line_idx, n, token)
+    header_positions = []  # list of (line_idx, n, token, trailing)
     for idx, line in enumerate(lines):
+        if idx in in_fence:
+            continue
         stripped = line.strip()
         m_bad = re.match(r"^\[Criterion (\d+)\]\s+verdict:\s*(.+)$", stripped)
         if m_bad:
@@ -179,7 +214,7 @@ def parse_per_criterion_verdicts(section_text, k):
     for hi, (idx, n, token, trailing) in enumerate(header_positions):
         end = header_positions[hi + 1][0] if hi + 1 < len(header_positions) else len(lines)
         block_lines = lines[idx + 1:end]
-        reason = _extract_reason(block_lines)
+        reason = _extract_reason(block_lines, idx + 1, in_fence)
 
         if token not in ("PASS", "FAIL"):
             errors.append(
@@ -217,7 +252,11 @@ def parse_per_criterion_verdicts(section_text, k):
 def parse_overall_verdict(section_text):
     """Parse VERDICT: PASS|FAIL line. Returns (verdict_str or None, errors)."""
     errors = []
-    for line in section_text.splitlines():
+    lines = section_text.splitlines()
+    in_fence = compute_in_fence_lines(lines)
+    for idx, line in enumerate(lines):
+        if idx in in_fence:
+            continue
         stripped = line.strip()
         m = re.match(r"^VERDICT:\s+(\S+)$", stripped)
         if m:
@@ -348,7 +387,7 @@ Protocol-error labels:
             print(json.dumps(result, indent=2))
             sys.exit(1)
 
-    sections = parse_sections(text)
+    sections = split_h2_sections(text)
 
     evidence_section = sections.get("Phase 1 Evidence", "")
     criteria_section = sections.get("Per-Criterion Verdicts", "")
