@@ -21,7 +21,6 @@
     "~/Code/pi-interactive-subagent",
     "npm:pi-ghostty",
     "npm:pi-mcp-adapter",
-    "npm:pi-token-burden",
     "npm:pi-web-access",
     "npm:@aliou/pi-processes"
   ],
