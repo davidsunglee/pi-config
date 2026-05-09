@@ -1,4 +1,0 @@
-[
-  "agent/skills/execute-plan/scripts/extract-plan-tasks.py",
-  "agent/skills/execute-plan/scripts/tests/test_extract_plan_tasks.py"
-]

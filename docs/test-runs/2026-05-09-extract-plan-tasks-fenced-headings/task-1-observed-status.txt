@@ -1,5 +1,0 @@
- M agent/skills/execute-plan/scripts/extract-plan-tasks.py
- M agent/skills/execute-plan/scripts/tests/test_extract_plan_tasks.py
-?? agent/skills/execute-plan/scripts/tests/fixtures/plan-fenced-fake-section.md
-?? agent/skills/execute-plan/scripts/tests/fixtures/plan-fenced-headings-minimal.md
-?? agent/skills/execute-plan/scripts/tests/fixtures/plan-fenced-headings-realistic.md
