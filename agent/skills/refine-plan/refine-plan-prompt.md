@@ -86,15 +86,17 @@ When the file is overwritten in place across iterations within one era, the revi
 When `{CARRY_OVER_REVIEW}` is non-empty, perform a planner edit pass against that review file's findings BEFORE entering the Per-Iteration Full Review loop:
 
 1. Read the carry-over review file at `{CARRY_OVER_REVIEW}`.
-2. Extract Critical + Important findings (skip Minor — non-blocking, same rule as the in-loop Planner Edit Pass).
-3. Dispatch `planner` (edit mode) per the existing Planner Edit Pass procedure with `{REVIEW_FINDINGS}` populated from the extracted findings and `{OUTPUT_PATH} = {PLAN_PATH}`.
-4. After the planner returns, verify the plan file still exists and is non-empty (same check as the in-loop Planner Edit Pass step 4). If missing or empty, emit `STATUS: failed` with reason `input artifact missing or empty: plan file after carry-over edit pass`.
-5. **Harden the plan against ambiguous fenced examples.** Run:
+2. Build a temp final-message file whose exact last non-empty line is `REVIEW_ARTIFACT: {CARRY_OVER_REVIEW}` and read the carry-over review file's first non-empty line as the expected reviewer-provenance string.
+3. Run `python3 agent/skills/refine-plan/scripts/validate-and-parse-plan-review.py --final-message <temp-final-message-path> --expected-path "{CARRY_OVER_REVIEW}" --reviewer-provenance "<first-non-empty-line-from-carry-over-review>" --allowed-tiers crossProvider.capable,capable`. On non-zero exit, map the helper's stderr JSON `failure` field into the existing `reviewer artifact handoff failed: <specific check>` taxonomy and exit. On exit 0, use `.blocking_findings_markdown` as the carry-over blocking findings (Critical + Important only).
+4. Run `python3 agent/skills/refine-plan/scripts/prepare-plan-edit-prompt.py --review-findings <path-or-stdin-for-blocking-findings> --plan-path "{PLAN_PATH}" --task-artifact "{TASK_ARTIFACT line or empty}" --source-todo "{SOURCE_TODO line or empty}" --source-spec "{SOURCE_SPEC line or empty}" --scout-brief "{SCOUT_BRIEF line or empty}" --original-spec-inline <path-or-stdin> --output-path "{PLAN_PATH}"`. On non-zero exit, emit `STATUS: failed` with reason `worker dispatch failed: planner-edit-pass` and exit. Read `.prompt_path` from stdout JSON and use that filled prompt for the planner dispatch.
+5. Dispatch `planner` (edit mode) per the existing Planner Edit Pass procedure using the helper-prepared prompt.
+6. After the planner returns, verify the plan file still exists and is non-empty (same check as the in-loop Planner Edit Pass step 3). If missing or empty, emit `STATUS: failed` with reason `input artifact missing or empty: plan file after carry-over edit pass`.
+7. **Harden the plan against ambiguous fenced examples.** Run:
    ```
    python3 agent/skills/_shared/scripts/plan_fence_hardening.py --plan "{PLAN_PATH}" --rewrite-in-place
    ```
    On non-zero exit, emit `STATUS: failed` with reason `fence hardening failed after carry-over edit pass` and exit. On exit 0, continue.
-6. Begin Per-Iteration Full Review at iteration 1. The carry-over edit pass does NOT consume an iteration of the new era's `{MAX_ITERATIONS}` budget.
+8. Begin Per-Iteration Full Review at iteration 1. The carry-over edit pass does NOT consume an iteration of the new era's `{MAX_ITERATIONS}` budget.
 
 When `{CARRY_OVER_REVIEW}` is empty (first-era runs, etc.), skip the carry-over edit pass entirely and begin Per-Iteration Full Review at iteration 1 as today.
 
@@ -102,58 +104,41 @@ When `{CARRY_OVER_REVIEW}` is empty (first-era runs, etc.), skip the carry-over 
 
 1. **Verify the plan file** at `{PLAN_PATH}` exists and is non-empty. If the file is missing or empty, emit `STATUS: failed` with reason `input artifact missing or empty: plan file at iteration start` and exit immediately.
 
-2. **Read the review template** at `~/.pi/agent/skills/generate-plan/review-plan-prompt.md`.
+2. **Resolve the primary reviewer dispatch** by running `resolve-model-dispatch.py --tier crossProvider.capable --agent plan-reviewer`.
 
-3. **Fill placeholders** in the review template:
-   - `{PLAN_ARTIFACT}` — `Plan artifact: {PLAN_PATH}`
-   - `{TASK_ARTIFACT}` — from the Provenance block above
-   - `{SOURCE_TODO}` — from the Provenance block above
-   - `{SOURCE_SPEC}` — from the Provenance block above
-   - `{SCOUT_BRIEF}` — from the Provenance block above
-   - `{ORIGINAL_SPEC_INLINE}` — from the Original Spec block above
-   - `{STRUCTURAL_ONLY_NOTE}` — from the Structural-Only Mode block above
-   - `{REVIEW_OUTPUT_PATH}` — the absolute path `{WORKING_DIR}/{REVIEW_OUTPUT_PATH}-v<CURRENT_ERA>.md` (concatenate `{WORKING_DIR}` and the relative review-output base path supplied above, then append `-v<CURRENT_ERA>.md`). Use the SAME path each iteration in this era — the file is overwritten in place by the reviewer.
-   - `{REVIEWER_PROVENANCE}` — the verbatim line `**Reviewer:** <provider>/<model> via <cli>` constructed from the EXACT `model` and `cli` you will pass to THIS iteration's `subagent_run_serial` task in Step 4. Reconstruct per iteration if the model or cli changes (e.g., primary → fallback).
+3. **Prepare the primary review prompt** by running `python3 agent/skills/refine-plan/scripts/prepare-plan-review-prompt.py --plan-path "{PLAN_PATH}" --task-artifact "{TASK_ARTIFACT line or empty}" --source-todo "{SOURCE_TODO line or empty}" --source-spec "{SOURCE_SPEC line or empty}" --scout-brief "{SCOUT_BRIEF line or empty}" --original-spec-inline <path-or-stdin> --structural-only-note <path-or-stdin> --review-output-path "{REVIEW_OUTPUT_PATH}" --working-dir "{WORKING_DIR}" --current-era <CURRENT_ERA> --reviewer-model <primary model> --reviewer-cli <primary cli>`. On non-zero exit, emit `STATUS: failed` with reason `worker dispatch failed: plan-reviewer` and exit. Read `.prompt_path`, `.review_path`, and `.reviewer_provenance` from stdout JSON. The helper owns temp-file creation, absolute review-path construction (`{WORKING_DIR}/{REVIEW_OUTPUT_PATH}-v<CURRENT_ERA>.md`), and the exact `**Reviewer:** <provider>/<model> via <cli>` line.
 
-4. **Dispatch `plan-reviewer`** via `subagent_run_serial`: run `resolve-model-dispatch.py --tier crossProvider.capable --agent plan-reviewer`; use the `model` and `cli` from the JSON output and `task: <filled review prompt>` (using the primary `{REVIEWER_PROVENANCE}` from Step 3).
+4. **Dispatch `plan-reviewer`** via `subagent_run_serial` using the helper-prepared prompt at `.prompt_path`.
 
-   On dispatch error, retry **once** with the fallback tier `capable`. The fallback MUST NOT reuse the primary task prompt verbatim — its embedded `{REVIEWER_PROVENANCE}` would still name the primary model and would fail Step 5d's exact-equality check. Perform these substeps in order:
+   On dispatch error, retry **once** with the fallback tier `capable`. The fallback MUST NOT reuse the primary helper output because the embedded reviewer-provenance line would still name the primary model. Perform these substeps in order:
 
-   - **4a. Reconstruct `{REVIEWER_PROVENANCE}`.** Run `resolve-model-dispatch.py --tier capable --agent plan-reviewer`. Build a fresh verbatim line `**Reviewer:** <provider>/<model> via <cli>` using the JSON `model` and `cli` fields. Discard the primary line entirely.
-   - **4b. Re-fill the review template.** Run `fill-template.py --template ~/.pi/agent/skills/generate-plan/review-plan-prompt.md --placeholders-json <placeholders> --output <filled-prompt> --require-all-replaced`, substituting the freshly reconstructed fallback `{REVIEWER_PROVENANCE}`. Every other placeholder retains the same value as the primary attempt (same `{REVIEW_OUTPUT_PATH}`). On non-zero exit, emit `STATUS: failed` with reason `worker dispatch failed: plan-reviewer` and exit.
-   - **4c. Dispatch the fallback** with the `model` and `cli` from step 4a and `task: <newly filled review prompt from 4b>`.
+   - **4a. Resolve the fallback reviewer dispatch.** Run `resolve-model-dispatch.py --tier capable --agent plan-reviewer`.
+   - **4b. Re-run `prepare-plan-review-prompt.py`** with the fallback `model` and `cli`, keeping every non-reviewer input identical (same current era, same review-output base path). On non-zero exit, emit `STATUS: failed` with reason `worker dispatch failed: plan-reviewer` and exit.
+   - **4c. Dispatch the fallback** with the helper's fresh `.prompt_path` and `.reviewer_provenance`.
 
    If both dispatches fail, emit `STATUS: failed` with reason `worker dispatch failed: plan-reviewer` and exit.
 
-5. **Extract and validate the reviewer's artifact handoff.** Read `results[0].finalMessage`. Perform these steps in order, each producing its own `STATUS: failed` reason on failure:
-
-   - **5a–5c. Marker, path, and existence checks.** Run `parse-artifact-handoff.py --marker REVIEW_ARTIFACT --final-message <finalMessage> --expected-path <REVIEW_OUTPUT_PATH> --check-existence --check-non-empty`. On non-zero exit, map the `failure` field from stderr JSON to the `reviewer artifact handoff failed:` reason string (e.g. `"missing REVIEW_ARTIFACT marker"` → `reviewer artifact handoff failed: missing REVIEW_ARTIFACT marker`; `"path mismatch: ..."` → `reviewer artifact handoff failed: path mismatch: ...`; `"missing or empty at ..."` → `reviewer artifact handoff failed: missing or empty at ...`) and exit. Capture `path` from stdout JSON as `<reviewer_path>`.
-   - **5d. On-disk first-line provenance check.** Find the first non-empty line of `<reviewer_path>`. Primary check: the line must be BYTE-EQUAL to the EXACT `{REVIEWER_PROVENANCE}` string you supplied to the reviewer in Step 3 for THIS iteration's dispatch (on a fallback retry this MUST be the freshly reconstructed fallback line, never the primary's line); if it fails, emit `STATUS: failed` with reason `reviewer artifact handoff failed: provenance malformed at <reviewer_path>: does not match supplied REVIEWER_PROVENANCE` and exit. As defense-in-depth, run `validate-review-provenance.py --review-file <reviewer_path> --allowed-tiers crossProvider.capable,capable`; on non-zero exit, map the `failure` field from stderr JSON to the `<specific check>` sub-label and emit `STATUS: failed` with `reviewer artifact handoff failed: provenance malformed at <reviewer_path>: <specific check>`.
-   - **5e. Read the file as the authoritative review.** On all checks passing, treat the on-disk file content as the authoritative review for verdict parsing, severity counting, planner-edit-pass `{REVIEW_FINDINGS}` construction, and the `## Review Notes` append. Do NOT use `finalMessage` content beyond the marker line.
+5. **Validate and parse the review artifact** by running `python3 agent/skills/refine-plan/scripts/validate-and-parse-plan-review.py --final-message <finalMessage> --expected-path <review_path from Step 3 or 4b> --reviewer-provenance <reviewer_provenance from Step 3 or 4b> --allowed-tiers crossProvider.capable,capable`. On non-zero exit, map the helper's stderr JSON `failure` field into the existing `reviewer artifact handoff failed: <specific check>` taxonomy and exit. On exit 0, consume `.review_path`, `.verdict`, `.critical_count`, `.important_count`, `.minor_count`, and `.blocking_findings_markdown`. Treat the on-disk file at `.review_path` as the authoritative review and do NOT use `finalMessage` beyond the handoff marker.
 
    Do NOT improvise the review file or perform an inline review on any failure above (Hard rule 3).
 
-6. **Parse the review file for the reviewer verdict.** Find the line in the on-disk review file that begins with `**Verdict:**` (inside the `### Outcome` section). Extract the verdict label — it MUST be exactly one of `Approved`, `Approved with concerns`, or `Not approved`. If no `**Verdict:**` line is found, or the label does not match one of the three expected values, emit `STATUS: failed` with reason `reviewer artifact handoff failed: provenance malformed at <reviewer_path>: missing or unrecognized Verdict label` and exit.
-
-7. **Count findings by severity** — count Critical, Important, and Minor findings from the on-disk review. Findings appear under the H4 sub-headings `#### Critical (Must Fix)`, `#### Important (Should Fix)`, and `#### Minor (Nice to Have)` per `review-plan-prompt.md`'s Output Format. An empty sub-section renders as `_None._` and contributes zero to its count.
-
-8. **If outcome is `Approved`** (zero Critical AND zero Important findings):
+6. **If outcome is `Approved`** (`.verdict == "Approved"`, zero Critical, zero Important):
    - Do NOT append a `## Review Notes` section to the plan.
    - Emit `STATUS: approved` with the summary block and exit.
 
-9. **If outcome is `Approved with concerns`** (zero Critical AND one or more Important findings the reviewer waived):
+7. **If outcome is `Approved with concerns`** (`.verdict == "Approved with concerns"`, zero Critical, one or more Important findings the reviewer waived):
    - Append a `## Review Notes` section to the plan using the format documented in [Review Notes Append Format](#review-notes-append-format) below. Source the per-bullet waiver rationale from the reviewer's `### Outcome` section `**Reasoning:**` line — one bullet per waived Important finding, with the reviewer's rationale transcribed alongside.
    - Emit `STATUS: approved_with_concerns` with the summary block and exit.
 
-10. **If outcome is `Not approved`** (one or more Critical findings, OR one or more Important findings the reviewer judged as needing real remediation) AND the current iteration count is less than `{MAX_ITERATIONS}`: continue to the [Planner Edit Pass](#planner-edit-pass).
+8. **If outcome is `Not approved`** (`.verdict == "Not approved"`) AND the current iteration count is less than `{MAX_ITERATIONS}`: continue to the [Planner Edit Pass](#planner-edit-pass) using `.blocking_findings_markdown` from Step 5.
 
-11. **Otherwise** (outcome is `Not approved` AND budget exhausted): emit `STATUS: not_approved_within_budget` with the summary block and exit.
+9. **Otherwise** (`.verdict == "Not approved"` AND budget exhausted): emit `STATUS: not_approved_within_budget` with the summary block and exit.
 
 Minor findings are never blocking. The reviewer's `Approved with concerns` decision is final for that review pass — the refiner does NOT iterate to remediate Important findings the reviewer has waived.
 
 ### Review Notes Append Format
 
-When the `approved_with_concerns` path is taken (step 9), append the following markdown to the END of the plan file. The leading blank line is required to separate from any prior content. Append once — never insert elsewhere.
+When the `approved_with_concerns` path is taken (step 7), append the following markdown to the END of the plan file. The leading blank line is required to separate from any prior content. Append once — never insert elsewhere.
 
 Do NOT append a `## Review Notes` section on the `approved`, `not_approved_within_budget`, or `failed` paths. Do NOT include Minor findings in the append (they live in the review file only).
 
@@ -174,34 +159,24 @@ _Approved with concerns by plan reviewer. Full review: `<path-to-review-file>`._
 
 When the outcome is `Not approved` and the budget is not exhausted:
 
-1. **Read the edit template** at `~/.pi/agent/skills/generate-plan/edit-plan-prompt.md`.
+1. **Prepare the planner edit prompt** by running `python3 agent/skills/refine-plan/scripts/prepare-plan-edit-prompt.py --review-findings <temp-file-or-stdin-with-blocking-findings-markdown-from-Step-5> --plan-path "{PLAN_PATH}" --task-artifact "{TASK_ARTIFACT line or empty}" --source-todo "{SOURCE_TODO line or empty}" --source-spec "{SOURCE_SPEC line or empty}" --scout-brief "{SCOUT_BRIEF line or empty}" --original-spec-inline <path-or-stdin> --output-path "{PLAN_PATH}"`. The `--review-findings` input is `.blocking_findings_markdown` from Per-Iteration Full Review Step 5 (Critical + Important findings only; Minor findings are non-blocking and must not feed the edit pass). On non-zero exit, emit `STATUS: failed` with reason `worker dispatch failed: planner-edit-pass` and exit. Read `.prompt_path` from stdout JSON and use that filled prompt for the planner dispatch.
 
-2. **Fill placeholders** in the edit template:
-   - `{REVIEW_FINDINGS}` — the full text of all Critical findings AND all Important findings concatenated from the on-disk review artifact (read in Per-Iteration Full Review Step 5e). The planner edit pass addresses the findings the reviewer judged blocking under `Not approved`. Do NOT include Minor findings — they are non-blocking and do not feed the edit pass.
-   - `{PLAN_ARTIFACT}` — `Plan artifact: {PLAN_PATH}`
-   - `{TASK_ARTIFACT}` — from the Provenance block above
-   - `{SOURCE_TODO}` — from the Provenance block above
-   - `{SOURCE_SPEC}` — from the Provenance block above
-   - `{SCOUT_BRIEF}` — from the Provenance block above
-   - `{ORIGINAL_SPEC_INLINE}` — from the Original Spec block above
-   - `{OUTPUT_PATH}` — `{PLAN_PATH}`
-
-3. **Dispatch `planner`** via `subagent_run_serial` with:
+2. **Dispatch `planner`** via `subagent_run_serial` with:
    - `model: <capable from model matrix>`
    - `cli: <dispatch lookup for capable>`
-   - `task: <filled edit prompt>`
+   - `task: <filled edit prompt at .prompt_path>`
 
    On dispatch failure, emit `STATUS: failed` with reason `worker dispatch failed: planner-edit-pass` and exit.
 
-4. **Verify the plan file** at `{PLAN_PATH}` still exists and is non-empty after the planner returns. If not, emit `STATUS: failed` with reason `input artifact missing or empty: plan file after planner edit pass` and exit.
+3. **Verify the plan file** at `{PLAN_PATH}` still exists and is non-empty after the planner returns. If not, emit `STATUS: failed` with reason `input artifact missing or empty: plan file after planner edit pass` and exit.
 
-5. **Harden the plan against ambiguous fenced examples.** Run:
+4. **Harden the plan against ambiguous fenced examples.** Run:
    ```
    python3 agent/skills/_shared/scripts/plan_fence_hardening.py --plan "{PLAN_PATH}" --rewrite-in-place
    ```
    On non-zero exit, emit `STATUS: failed` with reason `fence hardening failed after planner edit pass` and exit. On exit 0, continue.
 
-6. **Increment the iteration counter** and loop back to Per-Iteration Full Review step 1.
+5. **Increment the iteration counter** and loop back to Per-Iteration Full Review step 1.
 
 ## Output Format
 
