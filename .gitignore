@@ -11,3 +11,7 @@ agent/sessions
 
 # node
 agent/node_modules/
+
+# python
+__pycache__/
+*.py[cod]
