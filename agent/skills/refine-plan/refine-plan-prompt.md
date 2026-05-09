@@ -89,7 +89,12 @@ When `{CARRY_OVER_REVIEW}` is non-empty, perform a planner edit pass against tha
 2. Extract Critical + Important findings (skip Minor — non-blocking, same rule as the in-loop Planner Edit Pass).
 3. Dispatch `planner` (edit mode) per the existing Planner Edit Pass procedure with `{REVIEW_FINDINGS}` populated from the extracted findings and `{OUTPUT_PATH} = {PLAN_PATH}`.
 4. After the planner returns, verify the plan file still exists and is non-empty (same check as the in-loop Planner Edit Pass step 4). If missing or empty, emit `STATUS: failed` with reason `input artifact missing or empty: plan file after carry-over edit pass`.
-5. Begin Per-Iteration Full Review at iteration 1. The carry-over edit pass does NOT consume an iteration of the new era's `{MAX_ITERATIONS}` budget.
+5. **Harden the plan against ambiguous fenced examples.** Run:
+   ```
+   python3 agent/skills/_shared/scripts/plan_fence_hardening.py --plan "{PLAN_PATH}" --rewrite-in-place
+   ```
+   On non-zero exit, emit `STATUS: failed` with reason `fence hardening failed after carry-over edit pass` and exit. On exit 0, continue.
+6. Begin Per-Iteration Full Review at iteration 1. The carry-over edit pass does NOT consume an iteration of the new era's `{MAX_ITERATIONS}` budget.
 
 When `{CARRY_OVER_REVIEW}` is empty (first-era runs, etc.), skip the carry-over edit pass entirely and begin Per-Iteration Full Review at iteration 1 as today.
 

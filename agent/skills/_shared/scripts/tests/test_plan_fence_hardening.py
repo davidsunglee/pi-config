@@ -163,6 +163,82 @@ AMBIGUOUS_TWO_NESTED_SNIPPETS_REWRITTEN = (
 )
 
 
+# Ambiguous: outer ``` (3) contains an UNLABELED longer same-marker inner fence (4).
+# CommonMark sees the first 4-backtick run as a valid outer closer (>= 3, no info),
+# prematurely terminating the outer at line 1. The next 4-backtick run is then a new
+# unclosed opener, and the trailing 3-backtick run cannot close it (3 < 4) — so
+# everything after is in-fence. Intended structure: outer ``` opens, inner ```` is a
+# nested snippet closed by the second ````, and the trailing ``` closes the outer.
+AMBIGUOUS_LONGER_SAME_MARKER_INNER = (
+    "Before.\n"
+    "```\n"
+    "````\n"
+    "content\n"
+    "````\n"
+    "```\n"
+    "After.\n"
+)
+
+AMBIGUOUS_LONGER_SAME_MARKER_INNER_REWRITTEN = (
+    "Before.\n"
+    "~~~\n"
+    "````\n"
+    "content\n"
+    "````\n"
+    "~~~\n"
+    "After.\n"
+)
+
+# Same pattern embedded in a complete plan: required sections after the malformed
+# fence are hidden by the unclosed inner-opener parse, so extract-plan-tasks.py
+# fails until the rewrite repairs the outer fences.
+MINIMAL_PLAN_WITH_LONGER_SAME_MARKER_INNER = (
+    "## Goal\n"
+    "\n"
+    "Plan demonstrating an unlabeled longer same-marker inner fence.\n"
+    "\n"
+    "```\n"
+    "````\n"
+    "tool --help\n"
+    "````\n"
+    "```\n"
+    "\n"
+    "## Architecture summary\n"
+    "\n"
+    "Uses existing modules with no structural changes.\n"
+    "\n"
+    "## Tech stack\n"
+    "\n"
+    "Python 3.\n"
+    "\n"
+    "## File Structure\n"
+    "\n"
+    "- `example.py` (Modify) — example file.\n"
+    "\n"
+    "### Task 1: Update example\n"
+    "\n"
+    "**Files:**\n"
+    "- Modify: `example.py`\n"
+    "\n"
+    "**Steps:**\n"
+    "- [ ] **Step 1** — Write the failing test.\n"
+    "- [ ] **Step 2** — Implement the update.\n"
+    "\n"
+    "**Acceptance criteria:**\n"
+    "\n"
+    "- The example file is updated correctly.\n"
+    "  Verify: run `grep 'example' example.py` and confirm at least one match.\n"
+    "\n"
+    "**Model recommendation:** cheap\n"
+    "\n"
+    "## Dependencies\n"
+    "\n"
+    "## Risk Assessment\n"
+    "\n"
+    "Low risk; no external dependencies.\n"
+)
+
+
 MULTIPLE_AMBIGUOUS_REWRITTEN = (
     "~~~\n"
     "```python\n"
@@ -284,6 +360,15 @@ class TestDetectAmbiguousNestedFences(unittest.TestCase):
         issues = detect_ambiguous_nested_fences(MULTIPLE_AMBIGUOUS)
         self.assertEqual(len(issues), 2)
 
+    def test_detects_unlabeled_longer_same_marker_inner_fence(self):
+        # Outer ``` with no-info inner ```` (longer) same-marker run.
+        # CommonMark prematurely closes the outer at the first ````, hiding
+        # everything after. Detector must flag this as ambiguous.
+        issues = detect_ambiguous_nested_fences(AMBIGUOUS_LONGER_SAME_MARKER_INNER)
+        self.assertEqual(len(issues), 1, msg=f"got: {issues}")
+        self.assertEqual(issues[0]["marker"], "`")
+        self.assertEqual(issues[0]["outer_fence_length"], 3)
+
     def test_safe_tilde_inside_backtick_not_ambiguous(self):
         # Outer backtick with tilde inner block — tildes don't close backtick outer.
         text = "```\n~~~\nblock\n~~~\ncontent\n```\n"
@@ -336,6 +421,10 @@ class TestRewriteAmbiguousNestedFences(unittest.TestCase):
         # All inner snippet fences must be byte-for-byte preserved.
         self.assertIn("```python\nfoo()\n```\n", result)
         self.assertIn('```json\n{"a": 1}\n```\n', result)
+
+    def test_rewrite_unlabeled_longer_same_marker_inner_fence(self):
+        result = rewrite_ambiguous_nested_fences(AMBIGUOUS_LONGER_SAME_MARKER_INNER)
+        self.assertEqual(result, AMBIGUOUS_LONGER_SAME_MARKER_INNER_REWRITTEN)
 
     def test_rewrite_inner_tilde_only_uses_longer_backtick(self):
         # Inner payload has only ~~~ (no backtick runs). Spec says prefer ~~~ when
@@ -401,6 +490,32 @@ class TestRewriteThenParseSmoke(unittest.TestCase):
             capture_output=True,
             text=True,
         )
+
+    def test_rewrite_in_place_then_extract_plan_tasks_succeeds_longer_inner(self):
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:
+            f.write(MINIMAL_PLAN_WITH_LONGER_SAME_MARKER_INNER)
+            tmp = f.name
+        try:
+            pre = self._run_script(EXTRACT_SCRIPT, "--plan", tmp)
+            self.assertNotEqual(
+                pre.returncode,
+                0,
+                msg="Expected extract-plan-tasks.py to fail on the malformed plan before hardening",
+            )
+            rewrite = self._run_script(SCRIPT, "--plan", tmp, "--rewrite-in-place")
+            self.assertEqual(
+                rewrite.returncode,
+                0,
+                msg=f"plan_fence_hardening.py --rewrite-in-place failed: {rewrite.stderr}",
+            )
+            post = self._run_script(EXTRACT_SCRIPT, "--plan", tmp)
+            self.assertEqual(
+                post.returncode,
+                0,
+                msg=f"extract-plan-tasks.py failed after hardening: {post.stderr}",
+            )
+        finally:
+            os.unlink(tmp)
 
     def test_rewrite_in_place_then_extract_plan_tasks_succeeds(self):
         with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:

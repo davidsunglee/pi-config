@@ -38,7 +38,10 @@ def _find_intended_outer_closer(lines, opener_idx, outer_char, outer_len):
     Find the intended outer closer for an outer fence by walking past inner fenced blocks.
 
     Skips past every inner opener/closer pair, so a bare same-marker fence that is
-    actually an inner snippet's closer is not mistaken for the outer closer.
+    actually an inner snippet's closer is not mistaken for the outer closer. A bare
+    same-marker fence whose run is strictly longer than the outer opener is also
+    treated as a candidate inner opener when a matching same-length closer exists
+    later, since such a pattern represents an unlabeled longer same-marker example.
     """
     i = opener_idx + 1
     while i < len(lines):
@@ -46,12 +49,20 @@ def _find_intended_outer_closer(lines, opener_idx, outer_char, outer_len):
         if f:
             c_char, c_len, c_info = f
             if c_info:
-                # Inner opener: skip over its body to its matching closer.
+                # Info-bearing inner opener: skip over its body to its matching closer.
                 inner_closer = _find_first_closer(lines, i + 1, c_char, c_len)
                 if inner_closer is None:
                     return None
                 i = inner_closer + 1
                 continue
+            if c_char == outer_char and c_len > outer_len:
+                # Unlabeled same-marker fence that's strictly longer than the outer
+                # opener — treat as a candidate inner opener if it has a matching
+                # closer; otherwise fall through and treat as outer closer.
+                inner_closer = _find_first_closer(lines, i + 1, c_char, c_len)
+                if inner_closer is not None:
+                    i = inner_closer + 1
+                    continue
             if c_char == outer_char and c_len >= outer_len:
                 return i
         i += 1
@@ -103,9 +114,14 @@ def detect_ambiguous_nested_fences(text):
         p_idx = _find_first_closer(lines, i + 1, outer_char, outer_len)
         if p_idx is None:
             break  # unclosed, nothing more to parse
-        # Check if there's an unclosed inner fence in the body [i+1, p_idx)
+        i_idx = _find_intended_outer_closer(lines, i, outer_char, outer_len)
+        # Ambiguous when either an info-bearing inner opener has no closer in the
+        # premature outer body, OR the intended outer closer (computed by walking
+        # past inner blocks, including unlabeled longer same-marker pairs) lands
+        # past the apparent premature closer.
         unclosed, _ = _has_unclosed_inner_fence(lines, i + 1, p_idx)
-        if unclosed:
+        ambiguous = unclosed or (i_idx is not None and i_idx != p_idx)
+        if ambiguous:
             pf = _fence_match(lines[p_idx])
             inner_run_len = pf[1] if pf else outer_len
             hint = (
@@ -120,7 +136,6 @@ def detect_ambiguous_nested_fences(text):
                 "hint": hint,
             })
             # Skip past I (the intended outer closer) so it isn't re-parsed as an opener.
-            i_idx = _find_intended_outer_closer(lines, i, outer_char, outer_len)
             i = (i_idx + 1) if i_idx is not None else (p_idx + 1)
         else:
             i = p_idx + 1
@@ -209,17 +224,20 @@ def rewrite_ambiguous_nested_fences(text):
         if p_idx is None:
             break
 
-        # Check if there is an unclosed inner fence in body [i+1, p_idx)
-        unclosed, _ = _has_unclosed_inner_fence(lines, i + 1, p_idx)
-        if not unclosed:
-            i = p_idx + 1
-            continue
-
         # Find intended outer closer I by walking past inner fenced blocks from O.
         # The next bare same-marker fence after P may be an inner snippet's closer
-        # (when the outer body contains multiple nested snippets), so we cannot use
-        # _find_first_closer here.
+        # (when the outer body contains multiple nested snippets, including
+        # unlabeled longer same-marker pairs), so we cannot use _find_first_closer
+        # here.
         i_idx = _find_intended_outer_closer(lines, i, outer_char, outer_len)
+
+        # Ambiguous when either an info-bearing inner opener has no closer in the
+        # premature outer body, OR the intended outer closer differs from the
+        # apparent premature closer.
+        unclosed, _ = _has_unclosed_inner_fence(lines, i + 1, p_idx)
+        if not unclosed and (i_idx is None or i_idx == p_idx):
+            i = p_idx + 1
+            continue
         if i_idx is None:
             # Can't determine intended structure; skip
             i = p_idx + 1
