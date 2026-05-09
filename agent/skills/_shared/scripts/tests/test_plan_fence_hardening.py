@@ -135,6 +135,34 @@ MULTIPLE_AMBIGUOUS = (
     "```\n"
 )
 
+# Ambiguous: ONE outer ``` example contains TWO inner fenced snippets (```python, ```json).
+# The first bare ``` after the outer opener is the inner1 closer (premature). The next
+# bare ``` after that is the inner2 closer — NOT the intended outer closer. The real
+# outer closer is the bare ``` after inner2's closer. Rewrite must change only the
+# outer opener and the real outer closer, leaving every inner snippet fence intact.
+AMBIGUOUS_TWO_NESTED_SNIPPETS = (
+    "```\n"
+    "```python\n"
+    "foo()\n"
+    "```\n"
+    "```json\n"
+    '{"a": 1}\n'
+    "```\n"
+    "```\n"
+)
+
+AMBIGUOUS_TWO_NESTED_SNIPPETS_REWRITTEN = (
+    "~~~\n"
+    "```python\n"
+    "foo()\n"
+    "```\n"
+    "```json\n"
+    '{"a": 1}\n'
+    "```\n"
+    "~~~\n"
+)
+
+
 MULTIPLE_AMBIGUOUS_REWRITTEN = (
     "~~~\n"
     "```python\n"
@@ -301,6 +329,13 @@ class TestRewriteAmbiguousNestedFences(unittest.TestCase):
         result = rewrite_ambiguous_nested_fences(AMBIGUOUS_BACKTICK)
         self.assertIn("Before text.", result)
         self.assertIn("After text.", result)
+
+    def test_rewrite_outer_with_two_nested_snippets_keeps_inner_intact(self):
+        result = rewrite_ambiguous_nested_fences(AMBIGUOUS_TWO_NESTED_SNIPPETS)
+        self.assertEqual(result, AMBIGUOUS_TWO_NESTED_SNIPPETS_REWRITTEN)
+        # All inner snippet fences must be byte-for-byte preserved.
+        self.assertIn("```python\nfoo()\n```\n", result)
+        self.assertIn('```json\n{"a": 1}\n```\n', result)
 
     def test_rewrite_inner_tilde_only_uses_longer_backtick(self):
         # Inner payload has only ~~~ (no backtick runs). Spec says prefer ~~~ when

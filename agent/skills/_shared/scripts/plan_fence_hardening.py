@@ -33,6 +33,31 @@ def _find_first_closer(lines, start, outer_char, outer_len):
     return None
 
 
+def _find_intended_outer_closer(lines, opener_idx, outer_char, outer_len):
+    """
+    Find the intended outer closer for an outer fence by walking past inner fenced blocks.
+
+    Skips past every inner opener/closer pair, so a bare same-marker fence that is
+    actually an inner snippet's closer is not mistaken for the outer closer.
+    """
+    i = opener_idx + 1
+    while i < len(lines):
+        f = _fence_match(lines[i])
+        if f:
+            c_char, c_len, c_info = f
+            if c_info:
+                # Inner opener: skip over its body to its matching closer.
+                inner_closer = _find_first_closer(lines, i + 1, c_char, c_len)
+                if inner_closer is None:
+                    return None
+                i = inner_closer + 1
+                continue
+            if c_char == outer_char and c_len >= outer_len:
+                return i
+        i += 1
+    return None
+
+
 def _has_unclosed_inner_fence(lines, start, end):
     """Return (True, opener_idx) if there is a fence opener in [start, end) with no closer within range."""
     i = start
@@ -95,7 +120,7 @@ def detect_ambiguous_nested_fences(text):
                 "hint": hint,
             })
             # Skip past I (the intended outer closer) so it isn't re-parsed as an opener.
-            i_idx = _find_first_closer(lines, p_idx + 1, outer_char, outer_len)
+            i_idx = _find_intended_outer_closer(lines, i, outer_char, outer_len)
             i = (i_idx + 1) if i_idx is not None else (p_idx + 1)
         else:
             i = p_idx + 1
@@ -190,8 +215,11 @@ def rewrite_ambiguous_nested_fences(text):
             i = p_idx + 1
             continue
 
-        # Find intended outer closer I: next bare same-marker line after P
-        i_idx = _find_first_closer(lines, p_idx + 1, outer_char, outer_len)
+        # Find intended outer closer I by walking past inner fenced blocks from O.
+        # The next bare same-marker fence after P may be an inner snippet's closer
+        # (when the outer body contains multiple nested snippets), so we cannot use
+        # _find_first_closer here.
+        i_idx = _find_intended_outer_closer(lines, i, outer_char, outer_len)
         if i_idx is None:
             # Can't determine intended structure; skip
             i = p_idx + 1
