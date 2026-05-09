@@ -4,7 +4,7 @@ import subprocess
 import sys
 import unittest
 
-from .conftest_path_stubs import make_stub_dir
+from conftest_path_stubs import make_stub_dir
 
 SCRIPT = os.path.join(
     os.path.dirname(__file__), "..", "detect-mux-backend.py"
