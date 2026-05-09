@@ -368,6 +368,8 @@ if __name__ == "__main__":
 - Modify: `agent/agents/planner.md`
 - Modify: `agent/skills/generate-plan/README.md`
 
+**Model recommendation:** standard
+
 **Steps:**
 - [ ] **Step 1: Add `## Completion contract` section to generate-plan-prompt.md** — In `agent/skills/generate-plan/generate-plan-prompt.md`, after the existing `## Output` section (currently lines 26-30), append a new level-2 section. The new section reads exactly:
 
