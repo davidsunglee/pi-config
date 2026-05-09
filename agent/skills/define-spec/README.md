@@ -36,8 +36,10 @@ If no mux is available, or if the user asks for `--no-subagent` / `inline`, the 
 For mux runs, the subagent must end with:
 
 ```text
-SPEC_WRITTEN: <absolute path>
+SPEC_ARTIFACT: <absolute path>
 ```
+
+The subagent emits this line on both the final assistant message and via `subagent_done(message="SPEC_ARTIFACT: <absolute path>")` for robust handoff.
 
 The orchestrator validates that path before presenting it for review. It also has a conservative transcript-backed recovery path for the known case where the subagent successfully wrote exactly one `docs/specs/*.md` file but exited before emitting the final line.
 

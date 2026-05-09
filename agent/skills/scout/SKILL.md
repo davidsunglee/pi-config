@@ -102,7 +102,7 @@ Evaluate `results[0]` from the dispatch in this exact order. The first matching 
 
 **(a) `exitCode != 0`:** surface the failure verbatim, include `transcriptPath` when available, and stop. Do not retry.
 
-**(b)–(c) Marker / path / existence check:** run `agent/skills/_shared/scripts/parse-artifact-handoff.py --marker BRIEF_WRITTEN --final-message <path-to-finalMessage> --expected-path <{OUTPUT_PATH}> --check-existence --check-non-empty`. If the script exits non-zero, surface its output verbatim with `transcriptPath` when available and stop. Do not retry.
+**(b)–(c) Marker / path / existence check:** run `agent/skills/_shared/scripts/parse-artifact-handoff.py --marker BRIEF_ARTIFACT --final-message <path-to-finalMessage> --expected-path <{OUTPUT_PATH}> --check-existence --check-non-empty`. If the script exits non-zero, surface its output verbatim with `transcriptPath` when available and stop. Do not retry.
 
 **(success):** all three checks pass — proceed to Step 7.
 

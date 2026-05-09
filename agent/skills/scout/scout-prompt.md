@@ -85,12 +85,14 @@ Additional rules:
 After the brief write succeeds, your final assistant message MUST end with a single anchored line on its own line as the very last line of output:
 
 ```
-BRIEF_WRITTEN: {OUTPUT_PATH}
+BRIEF_ARTIFACT: {OUTPUT_PATH}
 ```
 
 Requirements for this line:
 - No surrounding backticks on the line itself.
 - No trailing commentary on the same line.
 - The path is character-for-character identical to the supplied `{OUTPUT_PATH}` above.
+
+In addition to the final-assistant-message marker line above, call `subagent_done(message="BRIEF_ARTIFACT: {OUTPUT_PATH}")` as your terminal tool action. The two strings — the final-assistant-message marker line and the `subagent_done` message — must be byte-equal. The orchestrator's watcher prefers the `subagent_done` sentinel when present, then falls back to the transcript's last assistant message; emitting both ensures the marker reaches the parent regardless of which channel the watcher reads.
 
 The orchestrator parses this line to drive its review-and-commit gate. The file write tool result alone is insufficient — the marker line in your final assistant message is required.

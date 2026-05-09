@@ -27,7 +27,7 @@ The agent executes three passes:
 2. **Task-focused deep dive** — read files implicated by the task body, trace imports and call paths, identify interfaces, types, registrations, dispatch sites, and tests.
 3. **Disconfirmation** — explicitly check whether files named in the task body are incomplete or misleading; search for adjacent implementations and alternate call paths; record contradictions between task framing and code reality.
 
-The findings from these three passes flow into the consumer-shaped output sections. The orchestrator validates the agent's `BRIEF_WRITTEN: <absolute path>` completion marker as the last line of the agent's final assistant message.
+The findings from these three passes flow into the consumer-shaped output sections. The orchestrator validates the agent's `BRIEF_ARTIFACT: <absolute path>` completion marker as the last line of the agent's final assistant message.
 
 ## Brief format
 

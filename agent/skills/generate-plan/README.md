@@ -26,7 +26,7 @@ This preserves orchestrator context and keeps the artifact itself as the source 
 1. Determine the input shape and provenance.
 2. Read `~/.pi/agent/model-tiers.json` and resolve the capable planning model plus dispatch CLI.
 3. Read `generate-plan-prompt.md` and fill placeholders for task description or artifact path, working directory, output path, and provenance.
-4. Dispatch the `planner` subagent synchronously.
+4. Dispatch the `planner` subagent synchronously and validate its PLAN_ARTIFACT marker handoff via parse-artifact-handoff.py before treating the plan as written.
 5. Invoke `refine-plan` with the generated plan and the correct coverage source.
 6. Report the compact `refine-plan` summary and offer to run `execute-plan`.
 

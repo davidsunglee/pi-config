@@ -58,31 +58,31 @@ Read `results[0].finalMessage`, `results[0].exitCode`, `results[0].state`, `resu
 
 Treat the body of `spec-design-procedure.md` (read in Step 2) as if it were addressed to you, the orchestrator. Execute Steps 1 through 8 of the procedure in this session. The user's raw input is the seed for the procedure's Step 1 input-shape detection.
 
-When you reach the procedure's Step 9, follow the **inline branch** subsection of that step: do **not** emit `SPEC_WRITTEN: <path>` and do **not** exit. Capture the absolute path of the spec file you just wrote and return here. The completion line and process exit at the end of Step 9 are for the subagent / mux branch only; on the inline branch you are the orchestrator, so emitting the line and exiting would skip the review-and-commit gate below.
+When you reach the procedure's Step 9, follow the **inline branch** subsection of that step: do **not** emit `SPEC_ARTIFACT: <path>` and do **not** exit. Capture the absolute path of the spec file you just wrote and return here. The completion line and process exit at the end of Step 9 are for the subagent / mux branch only; on the inline branch you are the orchestrator, so emitting the line and exiting would skip the review-and-commit gate below.
 
 Skip Step 4 of this orchestrator (it parses the subagent's `finalMessage`) and jump straight to Step 5 with the absolute path you just captured.
 
-## Step 4: Validate `SPEC_WRITTEN:` (mux branch only)
+## Step 4: Validate `SPEC_ARTIFACT:` (mux branch only)
 
 Evaluate the subagent's `finalMessage`, `exitCode`, `state`, `error`, and `transcriptPath` from `results[0]` in the order below. The first matching case wins, except case (2) may perform conservative transcript-backed recovery and proceed to Step 5. Do not retry. Do not surface the Step 5 review choices during validation — they are only for the user review gate.
 
-With `exitCode == 0`, write `results[0].finalMessage` to a temp file and run `agent/skills/_shared/scripts/parse-artifact-handoff.py --marker SPEC_WRITTEN --final-message <temp-file> --check-existence`. Exit 0: read `.path` from stdout JSON and proceed to Step 5. `missing SPEC_WRITTEN marker` → case (2). `missing or empty at <path>` → report `Spec design reported SPEC_WRITTEN: <path> but <path> does not exist on disk. Transcript: <transcriptPath>. No commit attempted.` and stop.
+With `exitCode == 0`, write `results[0].finalMessage` to a temp file and run `agent/skills/_shared/scripts/parse-artifact-handoff.py --marker SPEC_ARTIFACT --final-message <temp-file> --check-existence --check-non-empty --require-path-suffix .md --require-path-prefix <working-dir>/docs/specs/`. The helper now performs four checks atomically — marker presence, file existence, non-empty content, path-shape (`.md` suffix + `<working-dir>/docs/specs/` prefix). On any check failing, the helper exits non-zero with a JSON `failure` field on stderr; surface the failure verbatim and stop. Exit 0: read `.path` from stdout JSON and proceed to Step 5. `missing SPEC_ARTIFACT marker` → case (2). `missing or empty at <path>` → report `Spec design reported SPEC_ARTIFACT: <path> but <path> does not exist on disk. Transcript: <transcriptPath>. No commit attempted.` and stop. `path suffix mismatch: ...` or `path prefix mismatch: ...` → report `Spec design reported SPEC_ARTIFACT: <path> but the path is not a valid docs/specs/*.md path under <working-dir>. Transcript: <transcriptPath>. No commit attempted.` and stop. Do not perform transcript-backed recovery on path-shape failures — the marker emission was malformed (wrong path shape), not missing. Recovery is only for case (2) missing SPEC_ARTIFACT marker.
 
-Transcript-backed recovery is a narrow salvage path for the known failure mode where the subagent successfully wrote the spec but ended its session on the write/edit tool call instead of sending the final `SPEC_WRITTEN:` text message. It must never scan for the newest file in `docs/specs/` or guess from filesystem state alone. It may recover only from successful write/edit evidence in `transcriptPath`, and it still proceeds through the normal user review gate before any commit.
+Transcript-backed recovery is a narrow salvage path for the known failure mode where the subagent successfully wrote the spec but ended its session on the write/edit tool call instead of sending the final `SPEC_ARTIFACT:` text message. It must never scan for the newest file in `docs/specs/` or guess from filesystem state alone. It may recover only from successful write/edit evidence in `transcriptPath`, and it still proceeds through the normal user review gate before any commit.
 
 Cases (evaluated in this order):
 
 - **(1) `exitCode != 0`.** Report:
   > Spec design failed (`exitCode: <N>`, `state: <state>`<if `error` is non-empty, append `, error: <error>`>). Transcript: `<transcriptPath>`. No commit attempted.
 
-  If a `SPEC_WRITTEN: <path>` line is also present in `finalMessage`, append `Reported path: <path> (commit not attempted because the subagent exited with a nonzero status).` so the user can see the partial output. Then stop.
+  If a `SPEC_ARTIFACT: <path>` line is also present in `finalMessage`, append `Reported path: <path> (commit not attempted because the subagent exited with a nonzero status).` so the user can see the partial output. Then stop.
 
   Checking exit code first ensures dispatch failures (process crash, signal, runtime error) are surfaced with the exit code and error text the runtime captured, instead of being misreported as a missing completion line.
 
-- **(2) `finalMessage` lacks a `SPEC_WRITTEN:` line (and `exitCode == 0`).** Attempt **Transcript-backed recovery**:
+- **(2) `finalMessage` lacks a `SPEC_ARTIFACT:` line (and `exitCode == 0`).** Attempt **Transcript-backed recovery**:
 
   1. Read `transcriptPath`. If it is missing or unreadable, report:
-     > Spec design did not complete: `spec-designer` exited without emitting `SPEC_WRITTEN: <path>`, and transcript-backed recovery could not read `<transcriptPath>`. No validated spec path, no commit attempted.
+     > Spec design did not complete: `spec-designer` exited without emitting `SPEC_ARTIFACT: <path>`, and transcript-backed recovery could not read `<transcriptPath>`. No validated spec path, no commit attempted.
 
      Stop.
 
@@ -94,12 +94,12 @@ Cases (evaluated in this order):
      - Freeform input: no provenance line is required.
 
   4. If recovery succeeds, surface:
-     > `spec-designer` exited without emitting `SPEC_WRITTEN: <path>`, but the transcript shows it successfully wrote `<path>`. Treating that as the candidate spec. Review before commit.
+     > `spec-designer` exited without emitting `SPEC_ARTIFACT: <path>`, but the transcript shows it successfully wrote `<path>`. Treating that as the candidate spec. Review before commit.
 
      Then proceed to Step 5 with the recovered absolute path.
 
   5. If recovery finds zero candidates, multiple candidates, a candidate outside the repo's `docs/specs/`, an empty/missing file, or a provenance/path mismatch, report:
-     > Spec design did not complete: `spec-designer` exited without emitting `SPEC_WRITTEN: <path>`, and transcript-backed recovery did not find exactly one valid written spec path. Transcript: `<transcriptPath>`. No validated spec path, no commit attempted.
+     > Spec design did not complete: `spec-designer` exited without emitting `SPEC_ARTIFACT: <path>`, and transcript-backed recovery did not find exactly one valid written spec path. Transcript: `<transcriptPath>`. No validated spec path, no commit attempted.
 
      Stop.
 
@@ -131,7 +131,7 @@ If the `commit` skill fails, report the error verbatim and stop. Leave the file 
 
 Behavior per choice:
 
-- **(r) Refine:** invoke `/define-spec <path>` recursively, passing the captured spec path as-is (typically the absolute path from the original `SPEC_WRITTEN: <absolute path>` line). The procedure's input-shape detector accepts both relative `docs/specs/<name>.md` and absolute paths containing `/docs/specs/`, so the existing-spec branch fires on the recursive run and overwrites the draft with preamble preservation. On the recursive run, the same orchestrator probe + dispatch + validate + commit-gate flow applies.
+- **(r) Refine:** invoke `/define-spec <path>` recursively, passing the captured spec path as-is (typically the absolute path from the original `SPEC_ARTIFACT: <absolute path>` line). The procedure's input-shape detector accepts both relative `docs/specs/<name>.md` and absolute paths containing `/docs/specs/`, so the existing-spec branch fires on the recursive run and overwrites the draft with preamble preservation. On the recursive run, the same orchestrator probe + dispatch + validate + commit-gate flow applies.
 - **(x) Stop:** emit `Leaving <path> uncommitted. Edit and commit yourself.` and stop.
 
 ## Step 8: Offer `generate-plan`
@@ -149,6 +149,6 @@ If yes, invoke `generate-plan` with `<path>`. If no, stop.
 - **Mux probe wrong (false positive / false negative).** The probe is aligned with the runtime's `selectBackend()` / `cmux.ts` checks (env var + command available), so divergence requires either (a) the env var being set without the matching CLI on PATH, or (b) the runtime's check changing in a future `pi-interactive-subagent` release. A false-negative probe (probe says no mux, mux actually available) drops the user into the inline branch — functionally correct but uses orchestrator context unnecessarily. A false-positive probe (probe says mux, runtime then disagrees) routes `subagent_run_serial` to the headless backend, which can't host an interactive session — `spec-designer` would receive its task without a user-driven Q&A surface. Mitigation: keep the probe rules in lockstep with `cmux.ts`; if a future change drifts, users can force the inline branch with `PI_SUBAGENT_MODE=headless` or one of the override phrases.
 - **User-input override false positive.** If the user's input contains "subagent" without meaning override (e.g. "build a subagent thing"), the substring match will trigger inline mode. Mitigation is the specific phrase set in Step 1b. Residual risk is documented; users wanting subagent dispatch can rephrase.
 - **Inline-branch session terminated mid-procedure.** No spec written, no commit, nothing to recover. User re-runs `/define-spec`. If a partial spec was written before termination, it stays on disk; user can delete or edit manually.
-- **Subagent wrote a spec but missed `SPEC_WRITTEN:`.** Step 4 case (2) covers this with conservative transcript-backed recovery. Recovery is allowed only from successful write/edit evidence in the transcript and only when exactly one valid `docs/specs/*.md` path can be validated; otherwise fail closed with no commit.
+- **Subagent wrote a spec but missed `SPEC_ARTIFACT:`.** Step 4 case (2) covers this with conservative transcript-backed recovery. Recovery is allowed only from successful write/edit evidence in the transcript and only when exactly one valid `docs/specs/*.md` path can be validated; otherwise fail closed with no commit.
 - **`commit` skill failure.** Step 6 covers this. Report and stop; user resolves the underlying issue.
 - **Multi-subsystem input, user insists on a single spec.** The procedure's Step 3 scope-decomposition check handles this — user override is honored, an Open Question is recorded, and the spec is written. Downstream `generate-plan` may produce a coarse plan.

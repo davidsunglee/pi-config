@@ -227,10 +227,18 @@ Fix issues inline. If a requirement has no task, add the task.
 
 ## Output
 
-After saving the plan, report:
-```
-Plan saved to `docs/plans/<filename>`.
-Use the `execute-plan` skill to run it.
-```
+This output contract applies to the **initial-generation pass only** — when you are dispatched with the `generate-plan-prompt.md` task body. Edit-mode dispatches (driven by `edit-plan-prompt.md`) do NOT emit a marker; the `PLAN_ARTIFACT` from initial generation already names the file and edit mode reuses it.
 
-Do NOT ask about execution mode, pacing, or wave configuration — that is `execute-plan`'s responsibility.
+After saving the plan in initial-generation mode:
+
+1. End your final assistant message with a single anchored line on its own line, as the very last line of your output:
+
+   ```
+   PLAN_ARTIFACT: <absolute path>
+   ```
+
+   Where `<absolute path>` is character-for-character identical to the `{OUTPUT_PATH}` supplied in your task prompt. No surrounding backticks, no trailing commentary on the same line.
+
+2. Call `subagent_done(message="PLAN_ARTIFACT: <absolute path>")` as your terminal tool action. The `message` argument must be byte-equal to the final-assistant-message marker line.
+
+The orchestrator validates the marker via `parse-artifact-handoff.py --marker PLAN_ARTIFACT --expected-path <absolute output path> --check-existence --check-non-empty` before handing off to refine-plan. Do NOT ask about execution mode, pacing, or wave configuration — that is `execute-plan`'s responsibility.
