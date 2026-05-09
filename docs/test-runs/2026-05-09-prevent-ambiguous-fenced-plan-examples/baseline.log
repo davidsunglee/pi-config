@@ -1,0 +1,18 @@
+PHASE: baseline
+COMMAND: cd agent && python3 -m unittest discover -s skills/_shared/scripts/tests -p "test_plan_fence_hardening.py" -v && python3 -m unittest discover -s skills/execute-plan/scripts/tests -p "test_extract_plan_tasks.py" -v
+WORKING_DIRECTORY: /Users/david/Code/pi-config
+EXIT_CODE: 0
+TIMESTAMP: 2026-05-09T20:36:07Z
+FAILING_IDENTIFIERS_COUNT: 0
+FAILING_IDENTIFIERS:
+END_FAILING_IDENTIFIERS
+NON_RECONCILABLE_COUNT: 0
+NON_RECONCILABLE_FAILURES:
+END_NON_RECONCILABLE_FAILURES
+
+--- RAW RUN OUTPUT BELOW ---
+
+----------------------------------------------------------------------
+Ran 0 tests in 0.000s
+
+NO TESTS RAN
