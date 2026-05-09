@@ -252,7 +252,7 @@ Nine local agent definitions live in `agent/agents/`. All run with fresh context
 
 ### `scout.md`
 
-Non-interactive task-scoped reconnaissance agent dispatched by the `scout` skill. Performs broad orientation, task-focused deep dive, and disconfirmation passes, then writes a single structured brief to the orchestrator-supplied path under `docs/briefs/` — its only allowed write. No shell access. Ends its turn with an anchored `BRIEF_WRITTEN: <absolute path>` line that the orchestrator validates byte-equal against the requested output path. Tools: `read, write, grep, find, ls`. Thinking: `high`.
+Non-interactive task-scoped reconnaissance agent dispatched by the `scout` skill. Performs broad orientation, task-focused deep dive, and disconfirmation passes, then writes a single structured brief to the orchestrator-supplied path under `docs/briefs/` — its only allowed write. No shell access. Ends its turn with an anchored `BRIEF_ARTIFACT: <absolute path>` line (and a matching subagent_done(message="BRIEF_ARTIFACT: <absolute path>") call) that the orchestrator validates byte-equal against the requested output path. Tools: `read, write, grep, find, ls`. Thinking: `high`.
 
 ### `planner.md`
 
@@ -268,7 +268,7 @@ Coordinator for one era of the plan review-edit loop. Dispatches `plan-reviewer`
 
 ### `spec-designer.md`
 
-Interactive spec-design subagent. Receives the spec-design procedure as an appended system prompt at dispatch time and conducts the Q&A directly with the user in its own multiplexer pane. Writes the spec to `docs/specs/` and ends its turn with a `SPEC_WRITTEN: <absolute path>` line. Tools: `read, write, grep, find, ls`. Thinking: `xhigh`.
+Interactive spec-design subagent. Receives the spec-design procedure as an appended system prompt at dispatch time and conducts the Q&A directly with the user in its own multiplexer pane. Writes the spec to `docs/specs/` and ends its turn with a `SPEC_ARTIFACT: <absolute path>` line and a matching subagent_done(message="SPEC_ARTIFACT: <absolute path>") call. Tools: `read, write, grep, find, ls`. Thinking: `xhigh`.
 
 ### `coder.md`
 
