@@ -1,0 +1,14 @@
+[
+  {
+    "text": "All three affected structure-detection paths are fence-aware.",
+    "verify": "the new regression tests pass for task discovery, task block boundaries, and required-section validation."
+  },
+  {
+    "text": "Post-fence task content is still parsed normally.",
+    "verify": "assert the parser still captures `model_recommendation == \"standard\"` when that line appears after a fenced block."
+  },
+  {
+    "text": "Existing parser behavior outside fenced blocks remains intact.",
+    "verify": "run the existing `test_extract_plan_tasks.py` suite and confirm it stays green."
+  }
+]
