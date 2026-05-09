@@ -1,0 +1,401 @@
+diff --git a/Users/david/Code/pi-config/agent/skills/execute-plan/scripts/tests/fixtures/plan-fenced-headings-minimal.md b/Users/david/Code/pi-config/agent/skills/execute-plan/scripts/tests/fixtures/plan-fenced-headings-minimal.md
+new file mode 100644
+index 0000000..a898941
+--- /dev/null
++++ b/Users/david/Code/pi-config/agent/skills/execute-plan/scripts/tests/fixtures/plan-fenced-headings-minimal.md
+@@ -0,0 +1,61 @@
++## Goal
++
++Test that fenced code blocks with heading-like content inside do not create spurious tasks.
++
++## Architecture summary
++
++Simple plan with one real task containing a fenced block with fake task headings.
++
++## Tech stack
++
++Python 3, unittest, markdown
++
++## File Structure
++
++- scripts/test-fenced.py
++
++### Task 1: Real task with fenced fake content
++
++**Files:**
++- Create: scripts/test-fenced.py
++
++**Steps:**
++- [ ] **Step 1:** Create a test file
++
++Here is a fenced block with fake task content inside:
++
++```markdown
++## Completion contract
++
++This is just documentation about the contract.
++
++### Task 999: Not a real task
++
++This is fake content inside the fence and should not be parsed as a real task.
++
++More fake content.
++```
++
++Here is real content after the fence:
++
++- [ ] **Step 2:** Verify post-fence content is included
++
++**Acceptance criteria:**
++- The parser only extracts one real task (Task 1) when Task 999 is inside a fence.
++  Verify: run the parser and confirm the output contains exactly one task with `number: 1`.
++- Content after the fence is included in the task.
++  Verify: assert the `task_spec` for Task 1 contains `**Step 2:**`.
++
++**Model recommendation:** cheap
++
++## Dependencies
++
++## Risk Assessment
++
++Low risk, this is purely a regression test fixture.
++
++## Test Command
++
++```bash
++python3 -m unittest agent.skills.execute_plan.scripts.tests.test_extract_plan_tasks -v
++```
+diff --git a/Users/david/Code/pi-config/agent/skills/execute-plan/scripts/tests/fixtures/plan-fenced-headings-realistic.md b/Users/david/Code/pi-config/agent/skills/execute-plan/scripts/tests/fixtures/plan-fenced-headings-realistic.md
+new file mode 100644
+index 0000000..78cef53
+--- /dev/null
++++ b/Users/david/Code/pi-config/agent/skills/execute-plan/scripts/tests/fixtures/plan-fenced-headings-realistic.md
+@@ -0,0 +1,67 @@
++## Goal
++
++Test fence-aware parsing with realistic markdown content inside code blocks.
++
++## Architecture summary
++
++A plan with a task that documents markdown structure in a fenced code block, with the model recommendation appearing after the fence closure.
++
++## Tech stack
++
++Python 3, unittest, markdown
++
++## File Structure
++
++- scripts/doc-example.py
++
++### Task 1: Document markdown structure
++
++**Files:**
++- Create: scripts/doc-example.py
++
++**Steps:**
++- [ ] **Step 1:** Implement the markdown structure documentation
++
++Here is an example of the markdown structure we need to parse:
++
++```markdown
++## Main Section
++
++This is the content of the main section.
++
++### Subsection
++
++Content here.
++
++### Another Subsection
++
++More content.
++
++## Second Section
++
++And so on.
++```
++
++The above block demonstrates how our parser handles nested markdown.
++
++**Acceptance criteria:**
++- The task is parsed correctly despite the fenced markdown block.
++  Verify: run the parser and confirm Task 1 is extracted completely.
++- Content after the fence is still parsed.
++  Verify: assert the `task_spec` contains `The above block demonstrates` and the model recommendation line.
++
++**Model recommendation:** standard
++
++## Dependencies
++
++None.
++
++## Risk Assessment
++
++Low, this is a regression test fixture showing real-world markdown inside code fences.
++
++## Test Command
++
++```bash
++python3 -m unittest agent.skills.execute_plan.scripts.tests.test_extract_plan_tasks -v
++```
+diff --git a/agent/skills/execute-plan/scripts/tests/test_extract_plan_tasks.py b/agent/skills/execute-plan/scripts/tests/test_extract_plan_tasks.py
+index d3cf54a..089cc39 100644
+--- a/agent/skills/execute-plan/scripts/tests/test_extract_plan_tasks.py
++++ b/agent/skills/execute-plan/scripts/tests/test_extract_plan_tasks.py
+@@ -438,5 +438,461 @@ class TestMaxParallelHardCapOverride(unittest.TestCase):
+         self.assertGreaterEqual(len(waves), 3, f"Expected at least 3 subwaves with cap 4, got {waves}")
+ 
+ 
++class TestFencedHeadingsMinimal(unittest.TestCase):
++    """Verify that fenced headings do not create spurious tasks."""
++
++    def setUp(self):
++        self.result = run_script("--plan", str(FIXTURES / "plan-fenced-headings-minimal.md"))
++        if self.result.returncode == 0:
++            self.data = json.loads(self.result.stdout)
++        else:
++            self.data = None
++
++    def test_exits_zero(self):
++        self.assertEqual(self.result.returncode, 0, f"Parser failed: {self.result.stderr}")
++
++    def test_only_one_real_task(self):
++        self.assertIsNotNone(self.data)
++        self.assertEqual(len(self.data["tasks"]), 1, f"Expected 1 task, got {len(self.data['tasks'])}")
++
++    def test_no_fake_task_999(self):
++        self.assertIsNotNone(self.data)
++        task_numbers = [t["number"] for t in self.data["tasks"]]
++        self.assertNotIn(999, task_numbers, "Task 999 from inside fence should not be parsed")
++
++    def test_task_1_extracted(self):
++        self.assertIsNotNone(self.data)
++        self.assertEqual(self.data["tasks"][0]["number"], 1)
++        self.assertEqual(self.data["tasks"][0]["title"], "Real task with fenced fake content")
++
++    def test_post_fence_content_included(self):
++        self.assertIsNotNone(self.data)
++        task_spec = self.data["tasks"][0]["task_spec"]
++        self.assertIn("**Step 2:**", task_spec,
++                      "Post-fence content should be included in task_spec")
++
++
++class TestFencedHeadingsRealistic(unittest.TestCase):
++    """Verify that fenced markdown content doesn't break parsing and model recommendation is preserved."""
++
++    def setUp(self):
++        self.result = run_script("--plan", str(FIXTURES / "plan-fenced-headings-realistic.md"))
++        if self.result.returncode == 0:
++            self.data = json.loads(self.result.stdout)
++        else:
++            self.data = None
++
++    def test_exits_zero(self):
++        self.assertEqual(self.result.returncode, 0, f"Parser failed: {self.result.stderr}")
++
++    def test_single_task(self):
++        self.assertIsNotNone(self.data)
++        self.assertEqual(len(self.data["tasks"]), 1)
++
++    def test_model_recommendation_after_fence(self):
++        self.assertIsNotNone(self.data)
++        task = self.data["tasks"][0]
++        self.assertEqual(task["model_recommendation"], "standard",
++                         "Model recommendation after fence should be preserved")
++
++    def test_task_spec_contains_post_fence_text(self):
++        self.assertIsNotNone(self.data)
++        task_spec = self.data["tasks"][0]["task_spec"]
++        self.assertIn("The above block demonstrates", task_spec,
++                      "Text after fence should be in task_spec")
++
++    def test_task_spec_contains_literal_model_recommendation_line(self):
++        self.assertIsNotNone(self.data)
++        task_spec = self.data["tasks"][0]["task_spec"]
++        self.assertIn("**Model recommendation:** standard", task_spec,
++                      "Literal model recommendation line should be in task_spec")
++
++
++class TestFencedFakeRequiredSection(unittest.TestCase):
++    """Verify that fenced section headings do not satisfy required-section validation."""
++
++    def test_fenced_section_does_not_satisfy_requirement(self):
++        """A required section inside a fence should not count toward validation."""
++        result = run_script("--plan", str(FIXTURES / "plan-fenced-fake-section.md"))
++        self.assertNotEqual(result.returncode, 0,
++                           "Parser should fail when required section is only in a fence")
++
++    def test_error_reports_missing_architecture_summary(self):
++        """The error should specifically report architecture_summary as missing."""
++        result = run_script("--plan", str(FIXTURES / "plan-fenced-fake-section.md"))
++        errors = json.loads(result.stderr)["errors"]
++        sections = [e["section"] for e in errors if e.get("kind") == "missing_required_section"]
++        self.assertIn("architecture_summary", sections,
++                     f"Expected 'architecture_summary' error, got: {sections}")
++
++    def test_only_one_missing_section_error(self):
++        """Should report exactly one missing section error for architecture_summary."""
++        result = run_script("--plan", str(FIXTURES / "plan-fenced-fake-section.md"))
++        errors = json.loads(result.stderr)["errors"]
++        section_errors = [e for e in errors if e.get("kind") == "missing_required_section"]
++        self.assertEqual(len(section_errors), 1,
++                        f"Expected 1 section error, got {len(section_errors)}: {section_errors}")
++
++
++class TestFenceBehavior(unittest.TestCase):
++    """Test fence-awareness: backticks, tildes, indentation, closing rules, unclosed."""
++
++    def _parse_inline_fixture(self, content):
++        """Helper to parse a plan string directly."""
++        import tempfile
++        with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:
++            f.write(content)
++            temp_plan = f.name
++        try:
++            result = run_script("--plan", temp_plan)
++            return result, json.loads(result.stdout) if result.returncode == 0 else None
++        finally:
++            Path(temp_plan).unlink(missing_ok=True)
++
++    def test_backtick_fence_suppresses_heading(self):
++        """Backtick fence with 3+ backticks should suppress heading parsing inside."""
++        content = """## Goal
++Test backtick fence suppression.
++
++## Architecture summary
++Test.
++
++## Tech stack
++Python.
++
++## File Structure
++- test.py
++
++### Task 1: Test backticks
++
++**Files:**
++- Create: test.py
++
++**Steps:**
++- [ ] **Step 1:** Do something
++
++```
++## Fake Heading Inside
++```
++
++More content.
++
++**Acceptance criteria:**
++- Test passes.
++  Verify: run it.
++
++**Model recommendation:** cheap
++
++## Dependencies
++
++## Risk Assessment
++Low.
++
++## Test Command
++```bash
+[diff truncated — 934 lines, 28334 bytes total; verifier should note this and fall back to reading the named files for file-inspection criteria whose relevant code may lie in the truncated window]
+@@ -367,13 +456,19 @@ def parse_plan(text, max_parallel_hard_cap=MAX_PARALLEL_HARD_CAP):
+         criteria = []
+         model_recommendation = None
+ 
++        # Get fence awareness for this task block
++        block_in_fence = get_fence_aware_lines(block_lines)
++
+         state = "header"
+         j = 0
+         nb = len(block_lines)
+         has_files_block = False
+ 
+         while j < nb:
+-            line = block_lines[j]
++            if j in block_in_fence:
++                j += 1
++                continue
++            line = block_lines[j].rstrip("\n")
+             stripped = line.strip()
+ 
+             if stripped == "**Files:**":
+@@ -423,11 +518,15 @@ def parse_plan(text, max_parallel_hard_cap=MAX_PARALLEL_HARD_CAP):
+                 criterion_text = stripped[2:].strip()
+                 verify_text = None
+                 if j + 1 < nb:
+-                    next_line = block_lines[j + 1]
+-                    next_stripped = next_line.strip()
+-                    if next_stripped.startswith("Verify:"):
+-                        verify_text = next_stripped[len("Verify:"):].strip()
+-                        j += 1
++                    next_j = j + 1
++                    while next_j < nb and next_j in block_in_fence:
++                        next_j += 1
++                    if next_j < nb:
++                        next_line = block_lines[next_j].rstrip("\n")
++                        next_stripped = next_line.strip()
++                        if next_stripped.startswith("Verify:"):
++                            verify_text = next_stripped[len("Verify:"):].strip()
++                            j = next_j
+ 
+                 criteria.append({"text": criterion_text, "verify": verify_text or ""})
+                 if verify_text is None:
+diff --git a/Users/david/Code/pi-config/agent/skills/execute-plan/scripts/tests/fixtures/plan-fenced-fake-section.md b/Users/david/Code/pi-config/agent/skills/execute-plan/scripts/tests/fixtures/plan-fenced-fake-section.md
+new file mode 100644
+index 0000000..872ea7b
+--- /dev/null
++++ b/Users/david/Code/pi-config/agent/skills/execute-plan/scripts/tests/fixtures/plan-fenced-fake-section.md
+@@ -0,0 +1,52 @@
++## Goal
++
++Test that a required section inside a fence does not satisfy section validation.
++
++## Tech stack
++
++Python 3, unittest, markdown
++
++## File Structure
++
++- scripts/test-fence-section.py
++
++### Task 1: Document architecture with fenced section
++
++**Files:**
++- Create: scripts/test-fence-section.py
++
++**Steps:**
++- [ ] **Step 1:** Create a file that documents the architecture
++
++Here is an example of architecture documentation:
++
++```markdown
++## Architecture summary
++
++This is inside a code fence and should NOT satisfy the real required section validation.
++
++The architecture has these components:
++- Parser
++- Validator
++- Emitter
++```
++
++This task demonstrates that fenced headings should not count toward required section validation.
++
++**Acceptance criteria:**
++- The parser correctly rejects this plan because Architecture summary is inside a fence and doesn't count.
++  Verify: The parser should emit a `missing_required_section` error for `architecture_summary`.
++
++**Model recommendation:** cheap
++
++## Dependencies
++
++## Risk Assessment
++
++Low risk for testing purposes.
++
++## Test Command
++
++```bash
++python3 -m unittest agent.skills.execute_plan.scripts.tests.test_extract_plan_tasks -v
++```

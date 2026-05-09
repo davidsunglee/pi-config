@@ -60,6 +60,8 @@ VALID_MODELS = {"cheap", "standard", "capable"}
 TASK_HEADING_RE = re.compile(r"^### Task (\d+):\s*(.*)")
 SECTION_HEADING_RE = re.compile(r"^## ")
 DEP_LINE_RE = re.compile(r"^-\s+Task\s+(\d+)\s+depends\s+on:\s*(.+)")
+FENCE_MARKER_RE = re.compile(r"^(\s*)(`{3,}|~{3,})(.*?)$")
+FENCE_MARKERS = {"`", "~"}
 
 MAX_PARALLEL_HARD_CAP = 8
 
@@ -74,15 +76,85 @@ SECTION_RULES = [
 ]
 
 
+def get_fence_aware_lines(lines):
+    """Return a set of line indices that are inside code fences.
+
+    A fence is opened by ``` or ~~~ with 3+ markers, optionally with an info string.
+    A fence is closed by the same marker type with 3+ (at least as many as opener),
+    with only whitespace allowed after the markers (no info string).
+    Indentation is allowed for fence markers.
+    """
+    in_fence_set = set()
+    i = 0
+    n = len(lines)
+
+    def is_fence_closer(line, expected_marker_type, min_count):
+        """Check if a line is a valid fence closer."""
+        m = FENCE_MARKER_RE.match(line)
+        if not m:
+            return False
+        indent = m.group(1)
+        markers = m.group(2)
+        after = m.group(3)
+
+        marker_type = markers[0]
+        marker_count = len(markers)
+
+        # For a closer: same marker type, at least as many markers, and only whitespace after
+        return (marker_type == expected_marker_type and
+                marker_count >= min_count and
+                after.strip() == "")
+
+    while i < n:
+        line = lines[i].rstrip("\n")
+        m = FENCE_MARKER_RE.match(line)
+        if m:
+            indent = m.group(1)
+            markers = m.group(2)
+            marker_type = markers[0]
+            marker_count = len(markers)
+
+            # Mark the opener line itself as outside the fence (it's the boundary)
+            fence_start = i + 1
+            i += 1
+
+            # Look for a closing fence
+            found_closer = False
+            while i < n:
+                close_line = lines[i].rstrip("\n")
+                if is_fence_closer(close_line, marker_type, marker_count):
+                    # Closer line itself is not in fence; mark everything between as fenced
+                    for fenced_idx in range(fence_start, i):
+                        in_fence_set.add(fenced_idx)
+                    found_closer = True
+                    i += 1
+                    break
+                i += 1
+
+            # If no closer found, everything from opener+1 to EOF is in the fence
+            if not found_closer:
+                for fenced_idx in range(fence_start, n):
+                    in_fence_set.add(fenced_idx)
+                break
+        else:
+            i += 1
+
+    return in_fence_set
+
+
 def validate_required_sections(text):
     """Return list of missing_required_section errors for absent/empty sections."""
     lines = text.splitlines()
     errors = []
 
+    in_fence = get_fence_aware_lines(lines)
+
     def check_section(patterns, requires_body):
         compiled = [re.compile(p) for p in patterns]
         matches = []
         for idx, raw_line in enumerate(lines):
+            if idx in in_fence:
+                continue
             stripped = raw_line.strip()
             for pat in compiled:
                 m = pat.match(stripped)
@@ -99,6 +171,9 @@ def validate_required_sections(text):
                 return True
             j = idx + 1
             while j < len(lines):
+                if j in in_fence:
+                    j += 1
+                    continue
                 if re.match(r"^#{1,3}\s", lines[j]):
                     break
                 if lines[j].strip():
@@ -214,6 +289,8 @@ def parse_plan(text, max_parallel_hard_cap=MAX_PARALLEL_HARD_CAP):
     dep_raw = {}  # task_number -> list of dep numbers
     section = None
 
+    in_fence = get_fence_aware_lines(lines)
+
     # First pass: identify task boundaries and sections
     i = 0
     n = len(lines)
@@ -222,29 +299,32 @@ def parse_plan(text, max_parallel_hard_cap=MAX_PARALLEL_HARD_CAP):
     while i < n:
         line = lines[i].rstrip("\n")
 
-        m = TASK_HEADING_RE.match(line)
-        if m:
-            task_starts.append((i, int(m.group(1)), m.group(2).strip()))
-            i += 1
-            continue
+        if i not in in_fence:
+            m = TASK_HEADING_RE.match(line)
+            if m:
+                task_starts.append((i, int(m.group(1)), m.group(2).strip()))
+                i += 1
+                continue
 
-        if SECTION_HEADING_RE.match(line):
-            section = line.strip()
+            if SECTION_HEADING_RE.match(line):
+                section = line.strip()
 
         i += 1
 
     # Compute task raw blocks
     section_starts = []
     for idx, line_str in enumerate(lines):
-        s = line_str.rstrip("\n")
-        if SECTION_HEADING_RE.match(s):
-            section_starts.append(idx)
+        if idx not in in_fence:
+            s = line_str.rstrip("\n")
+            if SECTION_HEADING_RE.match(s):
+                section_starts.append(idx)
 
     def find_block_end(start_idx):
         for j in range(start_idx + 1, n):
-            s = lines[j].rstrip("\n")
-            if TASK_HEADING_RE.match(s) or SECTION_HEADING_RE.match(s):
-                return j
+            if j not in in_fence:
+                s = lines[j].rstrip("\n")
+                if TASK_HEADING_RE.match(s) or SECTION_HEADING_RE.match(s):
+                    return j
         return n
 
     task_blocks = []
@@ -285,13 +365,16 @@ def parse_plan(text, max_parallel_hard_cap=MAX_PARALLEL_HARD_CAP):
     # Parse goal: first paragraph of ## Goal or inline **Goal**:
     i = 0
     while i < n:
+        if i in in_fence:
+            i += 1
+            continue
         stripped = lines[i].rstrip("\n").strip()
         if stripped == "## Goal":
             i += 1
             while i < n and lines[i].strip() == "":
                 i += 1
             goal_lines = []
-            while i < n and lines[i].strip() != "" and not SECTION_HEADING_RE.match(lines[i]) and not TASK_HEADING_RE.match(lines[i]):
+            while i < n and lines[i].strip() != "" and not SECTION_HEADING_RE.match(lines[i]) and not TASK_HEADING_RE.match(lines[i]) and i not in in_fence:
                 goal_lines.append(lines[i].rstrip("\n"))
                 i += 1
             goal = " ".join(goal_lines).strip()
@@ -304,7 +387,7 @@ def parse_plan(text, max_parallel_hard_cap=MAX_PARALLEL_HARD_CAP):
             else:
                 i += 1
                 goal_lines = []
-                while i < n and lines[i].strip() != "" and not SECTION_HEADING_RE.match(lines[i]) and not TASK_HEADING_RE.match(lines[i].rstrip("\n")):
+                while i < n and lines[i].strip() != "" and not SECTION_HEADING_RE.match(lines[i]) and not TASK_HEADING_RE.match(lines[i].rstrip("\n")) and i not in in_fence:
                     goal_lines.append(lines[i].rstrip("\n"))
                     i += 1
                 goal = " ".join(goal_lines).strip()
@@ -314,9 +397,12 @@ def parse_plan(text, max_parallel_hard_cap=MAX_PARALLEL_HARD_CAP):
     # Parse test_command: ## Test Command -> next ```bash block
     i = 0
     while i < n:
-        if lines[i].rstrip("\n") == "## Test Command":
+        if i not in in_fence and lines[i].rstrip("\n") == "## Test Command":
             i += 1
             while i < n:
+                if i in in_fence:
+                    i += 1
+                    continue
                 stripped = lines[i].strip()
                 if stripped.startswith("```bash"):
                     i += 1
@@ -335,9 +421,12 @@ def parse_plan(text, max_parallel_hard_cap=MAX_PARALLEL_HARD_CAP):
     # Parse dependencies: ## Dependencies section
     i = 0
     while i < n:
-        if lines[i].rstrip("\n") == "## Dependencies":
+        if i not in in_fence and lines[i].rstrip("\n") == "## Dependencies":
             i += 1
             while i < n:
+                if i in in_fence:
+                    i += 1
+                    continue
                 line = lines[i].rstrip("\n")
                 if SECTION_HEADING_RE.match(line) or TASK_HEADING_RE.match(line):
                     break
@@ -359,7 +448,7 @@ def parse_plan(text, max_parallel_hard_cap=MAX_PARALLEL_HARD_CAP):
     # Parse each task block in detail
     def parse_task_block(tb):
         block_text = tb["task_spec"]
-        block_lines = block_text.splitlines()
+        block_lines = block_text.splitlines(keepends=True)
         task_errors = []
 
         files = {"create": [], "modify": [], "test": []}
@@ -367,13 +456,19 @@ def parse_plan(text, max_parallel_hard_cap=MAX_PARALLEL_HARD_CAP):
         criteria = []
         model_recommendation = None
 
+        # Get fence awareness for this task block
+        block_in_fence = get_fence_aware_lines(block_lines)
+
         state = "header"
         j = 0
         nb = len(block_lines)
         has_files_block = False
 
         while j < nb:
-            line = block_lines[j]
+            if j in block_in_fence:
+                j += 1
+                continue
+            line = block_lines[j].rstrip("\n")
             stripped = line.strip()
 
             if stripped == "**Files:**":
@@ -423,11 +518,15 @@ def parse_plan(text, max_parallel_hard_cap=MAX_PARALLEL_HARD_CAP):
                 criterion_text = stripped[2:].strip()
                 verify_text = None
                 if j + 1 < nb:
-                    next_line = block_lines[j + 1]
-                    next_stripped = next_line.strip()
-                    if next_stripped.startswith("Verify:"):
-                        verify_text = next_stripped[len("Verify:"):].strip()
-                        j += 1
+                    next_j = j + 1
+                    while next_j < nb and next_j in block_in_fence:
+                        next_j += 1
+                    if next_j < nb:
+                        next_line = block_lines[next_j].rstrip("\n")
+                        next_stripped = next_line.strip()
+                        if next_stripped.startswith("Verify:"):
+                            verify_text = next_stripped[len("Verify:"):].strip()
+                            j = next_j
 
                 criteria.append({"text": criterion_text, "verify": verify_text or ""})
                 if verify_text is None:

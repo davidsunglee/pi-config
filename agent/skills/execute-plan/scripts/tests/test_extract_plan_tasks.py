@@ -438,5 +438,461 @@ class TestMaxParallelHardCapOverride(unittest.TestCase):
         self.assertGreaterEqual(len(waves), 3, f"Expected at least 3 subwaves with cap 4, got {waves}")
 
 
+class TestFencedHeadingsMinimal(unittest.TestCase):
+    """Verify that fenced headings do not create spurious tasks."""
+
+    def setUp(self):
+        self.result = run_script("--plan", str(FIXTURES / "plan-fenced-headings-minimal.md"))
+        if self.result.returncode == 0:
+            self.data = json.loads(self.result.stdout)
+        else:
+            self.data = None
+
+    def test_exits_zero(self):
+        self.assertEqual(self.result.returncode, 0, f"Parser failed: {self.result.stderr}")
+
+    def test_only_one_real_task(self):
+        self.assertIsNotNone(self.data)
+        self.assertEqual(len(self.data["tasks"]), 1, f"Expected 1 task, got {len(self.data['tasks'])}")
+
+    def test_no_fake_task_999(self):
+        self.assertIsNotNone(self.data)
+        task_numbers = [t["number"] for t in self.data["tasks"]]
+        self.assertNotIn(999, task_numbers, "Task 999 from inside fence should not be parsed")
+
+    def test_task_1_extracted(self):
+        self.assertIsNotNone(self.data)
+        self.assertEqual(self.data["tasks"][0]["number"], 1)
+        self.assertEqual(self.data["tasks"][0]["title"], "Real task with fenced fake content")
+
+    def test_post_fence_content_included(self):
+        self.assertIsNotNone(self.data)
+        task_spec = self.data["tasks"][0]["task_spec"]
+        self.assertIn("**Step 2:**", task_spec,
+                      "Post-fence content should be included in task_spec")
+
+
+class TestFencedHeadingsRealistic(unittest.TestCase):
+    """Verify that fenced markdown content doesn't break parsing and model recommendation is preserved."""
+
+    def setUp(self):
+        self.result = run_script("--plan", str(FIXTURES / "plan-fenced-headings-realistic.md"))
+        if self.result.returncode == 0:
+            self.data = json.loads(self.result.stdout)
+        else:
+            self.data = None
+
+    def test_exits_zero(self):
+        self.assertEqual(self.result.returncode, 0, f"Parser failed: {self.result.stderr}")
+
+    def test_single_task(self):
+        self.assertIsNotNone(self.data)
+        self.assertEqual(len(self.data["tasks"]), 1)
+
+    def test_model_recommendation_after_fence(self):
+        self.assertIsNotNone(self.data)
+        task = self.data["tasks"][0]
+        self.assertEqual(task["model_recommendation"], "standard",
+                         "Model recommendation after fence should be preserved")
+
+    def test_task_spec_contains_post_fence_text(self):
+        self.assertIsNotNone(self.data)
+        task_spec = self.data["tasks"][0]["task_spec"]
+        self.assertIn("The above block demonstrates", task_spec,
+                      "Text after fence should be in task_spec")
+
+    def test_task_spec_contains_literal_model_recommendation_line(self):
+        self.assertIsNotNone(self.data)
+        task_spec = self.data["tasks"][0]["task_spec"]
+        self.assertIn("**Model recommendation:** standard", task_spec,
+                      "Literal model recommendation line should be in task_spec")
+
+
+class TestFencedFakeRequiredSection(unittest.TestCase):
+    """Verify that fenced section headings do not satisfy required-section validation."""
+
+    def test_fenced_section_does_not_satisfy_requirement(self):
+        """A required section inside a fence should not count toward validation."""
+        result = run_script("--plan", str(FIXTURES / "plan-fenced-fake-section.md"))
+        self.assertNotEqual(result.returncode, 0,
+                           "Parser should fail when required section is only in a fence")
+
+    def test_error_reports_missing_architecture_summary(self):
+        """The error should specifically report architecture_summary as missing."""
+        result = run_script("--plan", str(FIXTURES / "plan-fenced-fake-section.md"))
+        errors = json.loads(result.stderr)["errors"]
+        sections = [e["section"] for e in errors if e.get("kind") == "missing_required_section"]
+        self.assertIn("architecture_summary", sections,
+                     f"Expected 'architecture_summary' error, got: {sections}")
+
+    def test_only_one_missing_section_error(self):
+        """Should report exactly one missing section error for architecture_summary."""
+        result = run_script("--plan", str(FIXTURES / "plan-fenced-fake-section.md"))
+        errors = json.loads(result.stderr)["errors"]
+        section_errors = [e for e in errors if e.get("kind") == "missing_required_section"]
+        self.assertEqual(len(section_errors), 1,
+                        f"Expected 1 section error, got {len(section_errors)}: {section_errors}")
+
+
+class TestFenceBehavior(unittest.TestCase):
+    """Test fence-awareness: backticks, tildes, indentation, closing rules, unclosed."""
+
+    def _parse_inline_fixture(self, content):
+        """Helper to parse a plan string directly."""
+        import tempfile
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:
+            f.write(content)
+            temp_plan = f.name
+        try:
+            result = run_script("--plan", temp_plan)
+            return result, json.loads(result.stdout) if result.returncode == 0 else None
+        finally:
+            Path(temp_plan).unlink(missing_ok=True)
+
+    def test_backtick_fence_suppresses_heading(self):
+        """Backtick fence with 3+ backticks should suppress heading parsing inside."""
+        content = """## Goal
+Test backtick fence suppression.
+
+## Architecture summary
+Test.
+
+## Tech stack
+Python.
+
+## File Structure
+- test.py
+
+### Task 1: Test backticks
+
+**Files:**
+- Create: test.py
+
+**Steps:**
+- [ ] **Step 1:** Do something
+
+```
+## Fake Heading Inside
+```
+
+More content.
+
+**Acceptance criteria:**
+- Test passes.
+  Verify: run it.
+
+**Model recommendation:** cheap
+
+## Dependencies
+
+## Risk Assessment
+Low.
+
+## Test Command
+```bash
+test
+```
+"""
+        result, data = self._parse_inline_fixture(content)
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(len(data["tasks"]), 1)
+
+    def test_tilde_fence_suppresses_heading(self):
+        """Tilde fence with 3+ tildes should suppress heading parsing inside."""
+        content = """## Goal
+Test tilde fence suppression.
+
+## Architecture summary
+Test.
+
+## Tech stack
+Python.
+
+## File Structure
+- test.py
+
+### Task 1: Test tildes
+
+**Files:**
+- Create: test.py
+
+**Steps:**
+- [ ] **Step 1:** Do something
+
+~~~
+## Fake Heading Inside
+~~~
+
+More content.
+
+**Acceptance criteria:**
+- Test passes.
+  Verify: run it.
+
+**Model recommendation:** cheap
+
+## Dependencies
+
+## Risk Assessment
+Low.
+
+## Test Command
+```bash
+test
+```
+"""
+        result, data = self._parse_inline_fixture(content)
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(len(data["tasks"]), 1)
+
+    def test_indented_fence_suppresses_heading(self):
+        """Indented fence should still suppress heading parsing inside."""
+        content = """## Goal
+Test indented fence suppression.
+
+## Architecture summary
+Test.
+
+## Tech stack
+Python.
+
+## File Structure
+- test.py
+
+### Task 1: Test indented fences
+
+**Files:**
+- Create: test.py
+
+**Steps:**
+- [ ] **Step 1:** Do something
+
+   ```
+   ## Fake Heading Inside
+   ```
+
+More content.
+
+**Acceptance criteria:**
+- Test passes.
+  Verify: run it.
+
+**Model recommendation:** cheap
+
+## Dependencies
+
+## Risk Assessment
+Low.
+
+## Test Command
+```bash
+test
+```
+"""
+        result, data = self._parse_inline_fixture(content)
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(len(data["tasks"]), 1)
+
+    def test_closing_fence_same_length_as_opener(self):
+        """Closing fence with same marker and length as opener should close the fence."""
+        content = """## Goal
+Test closing fence rules.
+
+## Architecture summary
+Test.
+
+## Tech stack
+Python.
+
+## File Structure
+- test.py
+
+### Task 1: Test closing rules
+
+**Files:**
+- Create: test.py
+
+**Steps:**
+- [ ] **Step 1:** Do something
+
+```
+## Fake Heading Inside
+```
+
+More content.
+
+**Acceptance criteria:**
+- Test passes.
+  Verify: run it.
+
+**Model recommendation:** cheap
+
+## Dependencies
+
+## Risk Assessment
+Low.
+
+## Test Command
+```bash
+test
+```
+"""
+        result, data = self._parse_inline_fixture(content)
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(len(data["tasks"]), 1)
+
+    def test_closing_fence_longer_than_opener(self):
+        """Closing fence with more markers than opener should close the fence."""
+        content = """## Goal
+Test longer closing fence.
+
+## Architecture summary
+Test.
+
+## Tech stack
+Python.
+
+## File Structure
+- test.py
+
+### Task 1: Test longer closing
+
+**Files:**
+- Create: test.py
+
+**Steps:**
+- [ ] **Step 1:** Do something
+
+```
+## Fake Heading Inside
+`````
+
+More content.
+
+**Acceptance criteria:**
+- Test passes.
+  Verify: run it.
+
+**Model recommendation:** cheap
+
+## Dependencies
+
+## Risk Assessment
+Low.
+
+## Test Command
+```bash
+test
+```
+"""
+        result, data = self._parse_inline_fixture(content)
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(len(data["tasks"]), 1)
+
+    def test_mismatched_markers_do_not_close(self):
+        """Closing fence with different marker type should not close the fence."""
+        content = """## Goal
+Test mismatched marker types.
+
+## Architecture summary
+Test.
+
+## Tech stack
+Python.
+
+## File Structure
+- test.py
+
+## Dependencies
+
+## Risk Assessment
+Low.
+
+## Test Command
+```bash
+test
+```
+
+### Task 1: Test mismatched markers
+
+**Files:**
+- Create: test.py
+
+**Steps:**
+- [ ] **Step 1:** Do something
+
+```
+## Fake Heading Still Inside Because Tilde Does Not Close Backtick
+~~~
+
+And we're still in the fence.
+
+More content here inside the fence.
+
+**Acceptance criteria:**
+- Still inside fence.
+  Verify: run it.
+
+**Model recommendation:** cheap
+"""
+        result, data = self._parse_inline_fixture(content)
+        # The fence opens at the ``` and should NOT be closed by the ~~~
+        # (different marker type). Since there's no closing ``` the fence
+        # remains open to EOF, suppressing the parsing of any structure inside it.
+        # Since **Model recommendation:** is inside the unclosed fence, it won't be
+        # parsed, causing the task to fail validation (missing model_recommendation).
+        self.assertNotEqual(result.returncode, 0,
+                            "Unclosed fence suppressing model recommendation should cause validation errors")
+
+    def test_unclosed_fence_suppresses_to_eof(self):
+        """Unclosed fence should suppress structure parsing to EOF."""
+        content = """## Goal
+Test unclosed fence.
+
+## Architecture summary
+Test.
+
+## Tech stack
+Python.
+
+## File Structure
+- test.py
+
+### Task 1: Test unclosed fence
+
+**Files:**
+- Create: test.py
+
+**Steps:**
+- [ ] **Step 1:** Do something
+
+```
+## Fake Heading and Everything Below is Inside This Unclosed Fence
+
+More content here.
+
+**Acceptance criteria:**
+- Still inside fence.
+  Verify: run it.
+
+**Model recommendation:** cheap
+
+## Dependencies
+
+## Risk Assessment
+Low.
+
+## Test Command
+```bash
+test
+```
+"""
+        result, data = self._parse_inline_fixture(content)
+        # With an unclosed fence suppressing all content to EOF,
+        # we should get validation errors for missing sections or model recommendation
+        self.assertNotEqual(result.returncode, 0,
+                            "Unclosed fence suppressing content should cause validation errors")
+
+
 if __name__ == "__main__":
     unittest.main()

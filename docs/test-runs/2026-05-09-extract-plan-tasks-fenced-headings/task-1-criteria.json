@@ -1,0 +1,18 @@
+[
+  {
+    "text": "The minimal fixture parses to the expected real tasks only.",
+    "verify": "run the parser against `plan-fenced-headings-minimal.md` and confirm no task numbered `999` appears."
+  },
+  {
+    "text": "The realistic fixture keeps content after the fenced block inside the real task.",
+    "verify": "assert the parsed task block still contains the post-fence `**Model recommendation:** standard` line and any following task content."
+  },
+  {
+    "text": "Required-section validation ignores heading-like lines inside fenced blocks.",
+    "verify": "add a test that would previously have been misled by a fenced `## ...` line and confirm the section validator reports only real structure."
+  },
+  {
+    "text": "Fence-shape rules are pinned by tests.",
+    "verify": "the new cases cover backticks, tildes, indentation, same-marker closing, longer closing fences, and unclosed fences."
+  }
+]
