@@ -2,9 +2,9 @@
 """
 parse-artifact-handoff.py - Extract artifact path from subagent final message.
 
-Extracts the last <MARKER>: <path> line from a subagent's final assistant message
-and validates the marker family, file existence, non-empty content, and (optionally)
-path shape via --require-path-suffix and --require-path-prefix.
+Extracts the marker only when it appears as the exact last non-empty line of the
+final message, in column 1, with no leading whitespace, quote (`>`), or backtick
+characters. Earlier marker-shaped lines anywhere else in the message are ignored.
 
 Supported markers: BRIEF_ARTIFACT, SPEC_ARTIFACT, PLAN_ARTIFACT, REVIEW_ARTIFACT, TEST_RESULT_ARTIFACT
 
@@ -40,6 +40,12 @@ def fail(message: str) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=__doc__,
+        epilog=(
+            "Marker recognition: only a line of the form `<MARKER>: <path>` that is "
+            "the exact last non-empty line of the final message, anchored at column "
+            "1, is accepted. Indented, quoted (`> `), or backtick-wrapped "
+            "marker-shaped lines are rejected with `missing <MARKER> marker`."
+        ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
@@ -92,13 +98,22 @@ def main() -> None:
         with open(args.final_message, "r") as fh:
             content = fh.read()
 
-    pattern = re.compile(r"^" + re.escape(args.marker) + r": (.+)$", re.MULTILINE)
-    matches = pattern.findall(content)
+    lines = content.split("\n")
+    terminal_line = None
+    for line in reversed(lines):
+        if line.strip() != "":
+            terminal_line = line
+            break
 
-    if not matches:
+    if terminal_line is None:
         fail(f"missing {args.marker} marker")
 
-    path = matches[-1]
+    pattern = re.compile(r"^" + re.escape(args.marker) + r": (.+)$")
+    match = pattern.match(terminal_line)
+    if not match:
+        fail(f"missing {args.marker} marker")
+
+    path = match.group(1)
 
     if args.expected_path is not None and path != args.expected_path:
         fail(f"path mismatch: expected {args.expected_path} got {path}")

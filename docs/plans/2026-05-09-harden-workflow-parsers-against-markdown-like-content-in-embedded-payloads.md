@@ -54,14 +54,14 @@ Python 3 (`re`, `argparse`, `json`, `os`, `sys`, `unittest`, `tempfile`), Bash (
 - [ ] **Step 3: Implement `split_h2_sections(text)`** — Split `text` into lines (`splitlines(keepends=True)`), compute the fenced-line set, then walk each line: a non-fenced line matching `^## (.+)$` (after `rstrip`) opens a new section keyed by the trimmed section name; all subsequent lines (fenced or not) are appended verbatim until the next non-fenced `## ` line or EOF. Lines before the first H2 are discarded. Return a `dict[str, str]` where each value preserves the original line endings of the body.
 - [ ] **Step 4: Add docstrings on both functions** — Each docstring states: input shape, output shape, the exact fence contract reused, and one short note that opener and closer lines are NOT considered fenced.
 - [ ] **Step 5: Create `tests/test_fence_aware.py`** — Add a `unittest.TestCase` subclass `TestComputeInFenceLines` covering: (a) no fences → empty set; (b) one backtick fence → only interior lines fenced; (c) one tilde fence → only interior lines fenced; (d) backtick fence with leading indentation → still fences interior; (e) opener length 4, closer length 4 → closes; (f) opener length 3, closer length 5 → closes; (g) opener length 5, closer length 3 → does NOT close; (h) opener `` ``` ``, closer `~~~` → does NOT close (mismatched marker type); (i) unclosed opener → fences through EOF; (j) two consecutive fences → both interiors fenced, the gap line between them not fenced; (k) closer line with trailing whitespace → still closes; (l) closer line with an info string after the markers → does NOT close. Add a second `TestSplitH2Sections` subclass covering: (a) two real H2s → two keys with verbatim bodies; (b) a fenced `## Fake` line inside a real section → not a new section, body verbatim; (c) preamble before first H2 is discarded; (d) duplicate H2 names → last value wins; (e) section names trimmed of trailing whitespace.
-- [ ] **Step 6: Run the new test file** — `cd agent && python3 -m unittest skills/_shared/scripts/tests/test_fence_aware -v` and confirm all cases pass.
+- [ ] **Step 6: Run the new test file** — `cd agent && python3 -m unittest skills/_shared/scripts/tests/test_fence_aware.py -v` and confirm all cases pass.
 
 **Acceptance criteria:**
 
 - The `fence_aware.py` module exposes both functions importably.
   Verify: run `cd agent && python3 -c "import sys; sys.path.insert(0, 'skills/_shared/scripts'); import fence_aware; print(fence_aware.compute_in_fence_lines.__doc__ is not None and fence_aware.split_h2_sections.__doc__ is not None)"` and confirm stdout is `True` and exit code 0.
 - The fence contract is enforced exactly per spec.
-  Verify: `cd agent && python3 -m unittest skills/_shared/scripts/tests/test_fence_aware -v` exits 0 and prints `OK` and the test summary lists at least 12 tests under `TestComputeInFenceLines` and at least 5 tests under `TestSplitH2Sections`.
+  Verify: `cd agent && python3 -m unittest skills/_shared/scripts/tests/test_fence_aware.py -v` exits 0 and prints `OK` and the test summary lists at least 12 tests under `TestComputeInFenceLines` and at least 5 tests under `TestSplitH2Sections`.
 - The module is pure (no side effects, no CLI).
   Verify: open `agent/skills/_shared/scripts/fence_aware.py` and confirm the file contains no `if __name__ == "__main__":` block, no `argparse` import, and no top-level `print` / `sys.exit` calls.
 
@@ -85,7 +85,7 @@ Python 3 (`re`, `argparse`, `json`, `os`, `sys`, `unittest`, `tempfile`), Bash (
 - [ ] **Step 7: Update module docstring** — Add a short note (one or two sentences) under the existing protocol-error block stating: "Captured stdout/stderr payloads wrapped in code fences are preserved verbatim; heading-like lines, evidence-block delimiters, criterion headers, field labels, and `VERDICT:` lines that appear inside such fences are treated as opaque payload, not as report structure."
 - [ ] **Step 8: Create `verifier-report-fenced-payload.md` fixture** — Use this exact body shape (preserving indentation):
 
-  ```
+  ~~~
   ## Phase 1 Evidence
 
   [Evidence for Criterion 1]
@@ -113,13 +113,13 @@ Python 3 (`re`, `argparse`, `json`, `os`, `sys`, `unittest`, `tempfile`), Bash (
   ## Overall Verdict
 
   VERDICT: PASS
-  ```
+  ~~~
 
   The fenced stdout payload is the bug bait — every "fake" delimiter inside it must be ignored.
 - [ ] **Step 9: Add regression tests in `test_parse_verifier_report.py`** — New `TestFencedPayload` class with these cases: (a) parsing the fixture exits 0 with `verdict == "PASS"`; (b) `phase1_evidence` has exactly one entry keyed `"1"`; (c) `phase1_evidence["1"]["stdout"]` contains `Per-Criterion Verdicts` and `VERDICT: FAIL` (verbatim payload preserved); (d) no `[Evidence for Criterion 99]` or `[Criterion 99]` entries leak into `per_criterion`; (e) `per_criterion` has length 1 with `verdict == "PASS"`; (f) `protocol_errors` is empty.
 - [ ] **Step 10: Add fenced-section regression tests** — Add cases that confirm `## ` lines inside fenced regions of the report body do NOT split sections (e.g., a fenced ` ``` ## Fake Section ``` ` block embedded in `## Per-Criterion Verdicts` does not become a new key in the parsed sections dict, and the surrounding `## Per-Criterion Verdicts` body still contains the fenced lines verbatim). Assert via running the parser end-to-end and checking that the criterion under the real `## Per-Criterion Verdicts` is still discovered.
 - [ ] **Step 11: Add fence-aware reason-extraction test** — Build a temp report where `[Criterion 1] PASS` is followed by a fenced `reason:` block containing fake `[Criterion 2] FAIL` lines; assert no second criterion is detected and `protocol_errors` reports the missing criterion 2 only when `--criteria-count 2` is passed.
-- [ ] **Step 12: Run the full suite** — `cd agent && python3 -m unittest skills/execute-plan/scripts/tests/test_parse_verifier_report -v` and confirm all existing and new tests pass.
+- [ ] **Step 12: Run the full suite** — `cd agent && python3 -m unittest skills/execute-plan/scripts/tests/test_parse_verifier_report.py -v` and confirm all existing and new tests pass.
 
 **Acceptance criteria:**
 
@@ -128,9 +128,9 @@ Python 3 (`re`, `argparse`, `json`, `os`, `sys`, `unittest`, `tempfile`), Bash (
 - Captured fenced payload is preserved verbatim.
   Verify: from the same JSON output above, `phase1_evidence["1"]["stdout"]` contains the substrings `## Per-Criterion Verdicts`, `[Evidence for Criterion 99]`, `[Criterion 99] PASS`, and `VERDICT: FAIL` (i.e., the fake delimiters were captured, not stripped).
 - Fenced `## ` lines inside any report section do not create or terminate sections.
-  Verify: run `cd agent && python3 -m unittest skills/execute-plan/scripts/tests/test_parse_verifier_report.TestFencedPayload -v` and confirm all cases pass with exit code 0.
+  Verify: run `cd agent && python3 -m unittest skills/execute-plan/scripts/tests/test_parse_verifier_report.py -v` and confirm all `TestFencedPayload` cases pass with exit code 0.
 - All existing parse-verifier-report tests still pass.
-  Verify: `cd agent && python3 -m unittest skills/execute-plan/scripts/tests/test_parse_verifier_report -v` exits 0 and the run summary shows zero failures and zero errors.
+  Verify: `cd agent && python3 -m unittest skills/execute-plan/scripts/tests/test_parse_verifier_report.py -v` exits 0 and the run summary shows zero failures and zero errors.
 
 **Model recommendation:** capable
 
@@ -148,7 +148,7 @@ Python 3 (`re`, `argparse`, `json`, `os`, `sys`, `unittest`, `tempfile`), Bash (
 - [ ] **Step 4: Update module docstring** — Append: "Section bodies are extracted with the shared fence-aware H2 splitter; `## `-prefixed lines inside fenced code blocks are treated as opaque content and do not truncate the surrounding section."
 - [ ] **Step 5: Add a regression test for fenced `## ` inside `## Completed`** — Build a temp report whose `## Completed` body contains a fenced markdown block:
 
-  ```
+  ~~~
   STATUS: DONE
 
   ## Completed
@@ -169,22 +169,22 @@ Python 3 (`re`, `argparse`, `json`, `os`, `sys`, `unittest`, `tempfile`), Bash (
 
   ## Self-Review Findings
   None.
-  ```
+  ~~~
 
   Assert that `data["completed_block"]` contains both `Implemented foo.` and `More text after the fence.` and the literal `## Tests` line from inside the fence; assert `data["tests_block"]` equals `Real tests block.` (i.e., the real `## Tests` was found, the fenced one was not).
 - [ ] **Step 6: Add a regression test for fenced `## ` inside `## Self-Review Findings`** — Build a temp report whose `## Self-Review Findings` body contains a fenced block with `## Concerns / Needs / Blocker` inside it. Assert `data["self_review_block"]` contains the literal `## Concerns / Needs / Blocker` line from inside the fence and `data["concerns_block"]` is the body of the real concerns section that follows the fenced block.
 - [ ] **Step 7: Add a regression test for fenced `## ` inside `## Concerns / Needs / Blocker`** — Status `DONE_WITH_CONCERNS`. The concerns body contains a fenced reviewer-quote block holding `## Files Changed`. Assert `data["concerns_block"]` contains the fenced `## Files Changed` line verbatim and `data["files_changed"]` reflects the real `## Files Changed` section that follows.
 - [ ] **Step 8: Add a regression test for fenced `## ` inside `## Tests`** — Build a temp report whose `## Tests` body contains a fenced `pytest` output capture with fake `## Self-Review Findings` lines. Assert `data["tests_block"]` contains the fenced fake heading verbatim and `data["self_review_block"]` is the real one.
-- [ ] **Step 9: Run the full suite** — `cd agent && python3 -m unittest skills/execute-plan/scripts/tests/test_parse_coder_report -v` and confirm all tests pass.
+- [ ] **Step 9: Run the full suite** — `cd agent && python3 -m unittest skills/execute-plan/scripts/tests/test_parse_coder_report.py -v` and confirm all tests pass.
 
 **Acceptance criteria:**
 
 - Fenced `## ` lines inside `## Completed`, `## Tests`, `## Self-Review Findings`, and `## Concerns / Needs / Blocker` do not truncate those sections.
-  Verify: run `cd agent && python3 -m unittest skills/execute-plan/scripts/tests/test_parse_coder_report -v` and confirm the four new regression tests (one per section) all pass and the run summary exits 0 with zero failures and zero errors.
+  Verify: run `cd agent && python3 -m unittest skills/execute-plan/scripts/tests/test_parse_coder_report.py -v` and confirm the four new regression tests (one per section) all pass and the run summary exits 0 with zero failures and zero errors.
 - Section bodies preserve embedded fenced content verbatim.
   Verify: in each new regression test, assert via `assertIn` that the literal fenced heading text (e.g., `## Tests` inside the fence) appears in the captured section body string returned by the parser.
 - All existing parse-coder-report tests still pass.
-  Verify: same `test_parse_coder_report -v` run exits 0; the original tests under `TestDoneReport`, `TestDoneWithConcerns`, `TestBlocked`, `TestNeedsContext`, `TestMissingStatus`, `TestInvalidStatusToken`, `TestConcernsMissing`, and `TestBulletWithoutBackticks` all show as passed in the verbose output.
+  Verify: run `cd agent && python3 -m unittest skills/execute-plan/scripts/tests/test_parse_coder_report.py -v` and confirm the original tests under `TestDoneReport`, `TestDoneWithConcerns`, `TestBlocked`, `TestNeedsContext`, `TestMissingStatus`, `TestInvalidStatusToken`, `TestConcernsMissing`, and `TestBulletWithoutBackticks` all show as passed in the verbose output.
 
 **Model recommendation:** standard
 
@@ -201,7 +201,7 @@ Python 3 (`re`, `argparse`, `json`, `os`, `sys`, `unittest`, `tempfile`), Bash (
 - [ ] **Step 3: Update module docstring** — Append: "Section bodies are extracted with the shared fence-aware H2 splitter; embedded fenced `## ` lines (e.g., copied reviewer markdown inside `## Remaining Issues`) are not mistaken for real section boundaries."
 - [ ] **Step 4: Add a regression test for fenced `## ` inside `## Remaining Issues`** — Build a temp summary with `STATUS: not_approved_within_budget`, a `## Summary` block, a `## Remaining Issues` body whose verbatim text contains a fenced reviewer quote like:
 
-  ```
+  ~~~
   ## Remaining Issues
   [Critical] tests/foo.py:42 — flaky test
 
@@ -214,20 +214,20 @@ Python 3 (`re`, `argparse`, `json`, `os`, `sys`, `unittest`, `tempfile`), Bash (
 
   ## Review File
   docs/reviews/sample-code-review-v3.md
-  ```
+  ~~~
 
   Assert `data["remaining_issues"]` contains both `[Critical] tests/foo.py:42` and `[Important] tests/bar.py:13` AND the literal fenced `## Review File` line verbatim; assert `data["review_file"]` is `docs/reviews/sample-code-review-v3.md` (the real one).
 - [ ] **Step 5: Add a regression test for fenced `## ` inside `## Summary`** — Build a temp summary with `STATUS: approved`, a `## Summary` block whose body has a fenced markdown block containing `## Review File` inside it, followed by the real `## Review File` section. Assert the parser returns successfully and `data["review_file"]` is the real path.
-- [ ] **Step 6: Run the full suite** — `cd agent && python3 -m unittest skills/refine-code/scripts/tests/test_parse_refine_code_summary -v` and confirm all tests pass.
+- [ ] **Step 6: Run the full suite** — `cd agent && python3 -m unittest skills/refine-code/scripts/tests/test_parse_refine_code_summary.py -v` and confirm all tests pass.
 
 **Acceptance criteria:**
 
 - Fenced `## ` lines inside `## Remaining Issues` are preserved verbatim and do not terminate the section.
   Verify: in the new regression test, assert via `assertIn` that the captured `data["remaining_issues"]` string contains the literal fenced `## Review File` line, and assert `data["review_file"]` equals the real review-file path that follows the fence.
 - Fenced `## ` lines inside `## Summary` do not break field parsing.
-  Verify: run `cd agent && python3 -m unittest skills/refine-code/scripts/tests/test_parse_refine_code_summary -v` and confirm the new fenced-summary regression test exits with the parser returning code 0 and producing valid `iterations`, `issues_found_*`, `issues_fixed`, and `issues_remaining` fields.
+  Verify: run `cd agent && python3 -m unittest skills/refine-code/scripts/tests/test_parse_refine_code_summary.py -v` and confirm the new fenced-summary regression test exits with the parser returning code 0 and producing valid `iterations`, `issues_found_*`, `issues_fixed`, and `issues_remaining` fields.
 - All existing parse-refine-code-summary tests still pass.
-  Verify: same `test_parse_refine_code_summary -v` run shows zero failures and zero errors and the original `TestApproved`, `TestApprovedWithConcerns`, `TestNotApproved`, `TestFailed`, `TestFailClosed`, and `TestRemainingIssuesDocumentedHeading` classes all pass.
+  Verify: run `cd agent && python3 -m unittest skills/refine-code/scripts/tests/test_parse_refine_code_summary.py -v` and confirm the original `TestApproved`, `TestApprovedWithConcerns`, `TestNotApproved`, `TestFailed`, `TestFailClosed`, and `TestRemainingIssuesDocumentedHeading` classes all pass with zero failures and zero errors.
 
 **Model recommendation:** standard
 
@@ -262,7 +262,7 @@ Python 3 (`re`, `argparse`, `json`, `os`, `sys`, `unittest`, `tempfile`), Bash (
   - `test_marker_with_trailing_blank_lines_accepted`: feed `final-message-marker-trailing-blanks.txt`; expect exit 0; assert `data["path"] == "/tmp/ok.md"`.
   - `test_existing_multiple_markers_last_wins_still_works`: keep the existing `test_multiple_markers_last_wins` test; confirm it still passes (the actual last non-empty line in that fixture is the second marker, so the tightened logic still accepts it).
 - [ ] **Step 7: Update `_shared/scripts/README.md`** — In the `parse-artifact-handoff.py` entry, replace the opening sentence with: "Extracts a `<MARKER>: <path>` line from a subagent's final assistant message **only when the marker line is the exact last non-empty line, in column 1, with no leading whitespace / quote / backtick characters**, and validates the marker family, file existence, non-empty content, and (optionally) path shape."
-- [ ] **Step 8: Run the full suite** — `cd agent && python3 -m unittest skills/_shared/scripts/tests/test_parse_artifact_handoff -v` and confirm all old + new tests pass.
+- [ ] **Step 8: Run the full suite** — `cd agent && python3 -m unittest skills/_shared/scripts/tests/test_parse_artifact_handoff.py -v` and confirm all old + new tests pass.
 
 **Acceptance criteria:**
 
@@ -281,7 +281,7 @@ Python 3 (`re`, `argparse`, `json`, `os`, `sys`, `unittest`, `tempfile`), Bash (
 - The `_shared/scripts/README.md` `parse-artifact-handoff.py` entry documents the tightened rule.
   Verify: `grep -n "exact last non-empty line" agent/skills/_shared/scripts/README.md` returns at least one match inside the `parse-artifact-handoff.py` bullet.
 - All existing parse-artifact-handoff tests still pass.
-  Verify: `cd agent && python3 -m unittest skills/_shared/scripts/tests/test_parse_artifact_handoff -v` exits 0 with zero failures and zero errors; in particular `test_multiple_markers_last_wins`, `test_marker_brief_artifact`, and the suffix/prefix tests all show as passed.
+  Verify: `cd agent && python3 -m unittest skills/_shared/scripts/tests/test_parse_artifact_handoff.py -v` exits 0 with zero failures and zero errors; in particular `test_multiple_markers_last_wins`, `test_marker_brief_artifact`, and the suffix/prefix tests all show as passed.
 
 **Model recommendation:** capable
 
@@ -300,7 +300,7 @@ Python 3 (`re`, `argparse`, `json`, `os`, `sys`, `unittest`, `tempfile`), Bash (
 - [ ] **Step 3: Update module docstring** — In the spec mode description, replace "stop at the first '## ' heading or line 40" with "stop at the first '## ' heading that is NOT inside a fenced code block, or line 40". Add one short sentence: "Fenced `## ` lines (backticks or tildes, length 3+, indented or not) inside the bounded preamble do not terminate the scan, and `Source:` / `Scout brief:` / `Git SHA:` lines that appear inside fenced blocks are ignored for extraction."
 - [ ] **Step 4: Create `preamble-spec-fenced-heading.md`** — Body:
 
-  ```
+  ~~~
   # Sample Spec Title
 
   Some intro text.
@@ -322,21 +322,21 @@ Python 3 (`re`, `argparse`, `json`, `os`, `sys`, `unittest`, `tempfile`), Bash (
   ## Introduction
 
   Real content.
-  ```
+  ~~~
 
 - [ ] **Step 5: Add regression tests** — In `test_extract_provenance_preamble.py`, add a `TestSpecModeFencedHeading` class with: (a) `test_fenced_heading_does_not_terminate_scan_real_before_fence`: parse `preamble-spec-fenced-heading.md` with `--mode spec`; assert `data["source_todo"] == "TODO-12345678"` and `data["scout_brief"] == "docs/briefs/sample.md"`. The real provenance lines appear BEFORE the fenced fake heading, and the fenced block contains fake `Source: TODO-deadbeef` and `Scout brief: docs/briefs/fake.md` lines AFTER. This case fails without the Step 2.5 fence-skip (last-match-wins would let the fake values win) AND fails without the Step 2 scan-terminator fix (the fenced `## Fake Heading` would terminate the scan before the real `## Introduction`). Both fixes together must make this case pass. (b) `test_fenced_heading_does_not_terminate_scan_real_after_fence`: build a temp fixture inline via `write_tmp(...)` where the fenced fake heading appears first (with no fake provenance inside, or with fake provenance that the fence-skip ignores), then the real provenance lines appear AFTER the fence but before the real `## Introduction`; assert they are still captured (proving the scan didn't terminate at the fenced heading). (c) `test_fenced_fake_provenance_inside_fence_is_ignored`: build a temp fixture where a fenced block contains `Source: TODO-aaaaaaaa` and `Scout brief: docs/briefs/fake.md`, and NO real `Source:` / `Scout brief:` lines appear outside the fence; assert `data["source_todo"] is None` and `data["scout_brief"] is None` (proving fenced provenance lines are skipped, not captured). (d) `test_fenced_git_sha_inside_brief_mode_is_ignored`: build an 8-line brief-mode fixture where `Git SHA: <real 40-hex>` appears outside any fence and a fake `Git SHA: <fake 40-hex>` appears inside a fenced block after the real one; assert `data["git_sha"]` equals the real SHA, not the fake.
-- [ ] **Step 6: Run the full suite** — `cd agent && python3 -m unittest skills/_shared/scripts/tests/test_extract_provenance_preamble -v` and confirm all tests pass.
+- [ ] **Step 6: Run the full suite** — `cd agent && python3 -m unittest skills/_shared/scripts/tests/test_extract_provenance_preamble.py -v` and confirm all tests pass.
 
 **Acceptance criteria:**
 
 - A fenced `## ` line inside the bounded spec-mode preamble does not terminate the scan, AND fenced `Source:` / `Scout brief:` lines inside the preamble are skipped (not captured).
   Verify: `cd agent && python3 skills/_shared/scripts/extract-provenance-preamble.py --file skills/_shared/scripts/tests/fixtures/preamble-spec-fenced-heading.md --mode spec` exits 0 and prints JSON with `"source_todo": "TODO-12345678"` and `"scout_brief": "docs/briefs/sample.md"` (the fenced fake `TODO-deadbeef` and `docs/briefs/fake.md` lines that appear AFTER the real provenance lines must NOT override them).
 - Fenced provenance lines (`Source:`, `Scout brief:`, `Git SHA:`) are ignored for extraction.
-  Verify: run `cd agent && python3 -m unittest skills/_shared/scripts/tests/test_extract_provenance_preamble.TestSpecModeFencedHeading -v` and confirm `test_fenced_fake_provenance_inside_fence_is_ignored` and `test_fenced_git_sha_inside_brief_mode_is_ignored` both pass with exit code 0.
+  Verify: run `cd agent && python3 -m unittest skills/_shared/scripts/tests/test_extract_provenance_preamble.py -v` and confirm `test_fenced_fake_provenance_inside_fence_is_ignored` and `test_fenced_git_sha_inside_brief_mode_is_ignored` both pass with exit code 0.
 - The 40-line bound is still honored.
   Verify: the existing `test_spec_mode_ignores_lines_after_40_lines` test in `test_extract_provenance_preamble.py` continues to pass (the new fence-aware logic does not relax the 40-line cap).
 - Brief-mode behavior is unchanged.
-  Verify: `cd agent && python3 -m unittest skills/_shared/scripts/tests/test_extract_provenance_preamble -v` shows the existing `test_brief_mode_extracts_git_sha`, `test_brief_mode_ignores_lines_after_8_lines`, and `test_brief_mode_does_not_decode_after_bound` tests pass with no modifications.
+  Verify: `cd agent && python3 -m unittest skills/_shared/scripts/tests/test_extract_provenance_preamble.py -v` shows the existing `test_brief_mode_extracts_git_sha`, `test_brief_mode_ignores_lines_after_8_lines`, and `test_brief_mode_does_not_decode_after_bound` tests pass with no modifications.
 - All existing extract-provenance-preamble tests still pass.
   Verify: same `test_extract_provenance_preamble -v` run exits 0 with zero failures and zero errors.
 
@@ -362,18 +362,18 @@ Python 3 (`re`, `argparse`, `json`, `os`, `sys`, `unittest`, `tempfile`), Bash (
   - `test_test_command_longer_closer`: opener `` ``` ``, closer ` ````` ` → `"npm test"`.
   - `test_test_command_closer_with_info_string_does_not_close`: opener `` ``` ``, candidate "closer" line `` ```bash `` (info string after markers) does NOT close → the rest of the file is captured as the command body.
   - `test_test_command_unclosed_fence`: opener with no closer → everything after the opener through EOF is captured as the command body.
-- [ ] **Step 6: Run the full suite** — `cd agent && python3 -m unittest skills/execute-plan/scripts/tests/test_extract_plan_tasks -v` and confirm all existing fence-behavior tests still pass and the new test-command tests pass.
+- [ ] **Step 6: Run the full suite** — `cd agent && python3 -m unittest skills/execute-plan/scripts/tests/test_extract_plan_tasks.py -v` and confirm all existing fence-behavior tests still pass and the new test-command tests pass.
 
 **Acceptance criteria:**
 
 - The in-file fence helper is removed and the shared module is used.
   Verify: `grep -n "def get_fence_aware_lines" agent/skills/execute-plan/scripts/extract-plan-tasks.py` returns zero matches AND `grep -n "from fence_aware import" agent/skills/execute-plan/scripts/extract-plan-tasks.py` returns at least one match.
 - `## Test Command` accepts an unlabeled backtick fence.
-  Verify: run `cd agent && python3 -m unittest skills/execute-plan/scripts/tests/test_extract_plan_tasks.TestFenceBehavior.test_test_command_unlabeled_fence -v` (or the new dedicated class) and confirm exit code 0.
+  Verify: run `cd agent && python3 -m unittest skills/execute-plan/scripts/tests/test_extract_plan_tasks.py -v` and confirm the `test_test_command_unlabeled_fence` case passes with exit code 0.
 - `## Test Command` accepts a tilde fence and follows the shared closer rules.
-  Verify: run `cd agent && python3 -m unittest skills/execute-plan/scripts/tests/test_extract_plan_tasks -v -k test_command` and confirm all of `tilde_fence`, `long_fence`, `indented_fence`, `longer_closer`, `closer_with_info_string_does_not_close`, and `unclosed_fence` cases pass.
+  Verify: run `cd agent && python3 -m unittest skills/execute-plan/scripts/tests/test_extract_plan_tasks.py -v` and confirm all of `tilde_fence`, `long_fence`, `indented_fence`, `longer_closer`, `closer_with_info_string_does_not_close`, and `unclosed_fence` cases pass.
 - All existing extract-plan-tasks tests still pass.
-  Verify: `cd agent && python3 -m unittest skills/execute-plan/scripts/tests/test_extract_plan_tasks -v` exits 0 with zero failures and zero errors; the existing `TestFencedHeadingsMinimal`, `TestFencedHeadingsRealistic`, `TestFencedFakeRequiredSection`, and `TestFenceBehavior` (excluding the new test-command cases) all show as passed.
+  Verify: `cd agent && python3 -m unittest skills/execute-plan/scripts/tests/test_extract_plan_tasks.py -v` exits 0 with zero failures and zero errors; the existing `TestFencedHeadingsMinimal`, `TestFencedHeadingsRealistic`, `TestFencedFakeRequiredSection`, and `TestFenceBehavior` (excluding the new test-command cases) all show as passed.
 
 **Model recommendation:** standard
 

@@ -222,6 +222,46 @@ class TestParseArtifactHandoff(unittest.TestCase):
         data = json.loads(result.stdout)
         self.assertEqual(data["path"], "/tmp/last-brief.md")
 
+    # Marker not on terminal non-empty line → rejected
+    def test_marker_not_on_terminal_line_rejected(self):
+        fixture = os.path.join(FIXTURES, "final-message-marker-not-terminal.txt")
+        result = run_script("--marker", "BRIEF_ARTIFACT", "--final-message", fixture)
+        self.assertNotEqual(result.returncode, 0)
+        data = json.loads(result.stderr)
+        self.assertEqual(data["failure"], "missing BRIEF_ARTIFACT marker")
+
+    # Quoted (`> `) terminal marker line → rejected
+    def test_marker_quoted_terminal_line_rejected(self):
+        fixture = os.path.join(FIXTURES, "final-message-marker-quoted.txt")
+        result = run_script("--marker", "BRIEF_ARTIFACT", "--final-message", fixture)
+        self.assertNotEqual(result.returncode, 0)
+        data = json.loads(result.stderr)
+        self.assertEqual(data["failure"], "missing BRIEF_ARTIFACT marker")
+
+    # Indented terminal marker line → rejected
+    def test_marker_indented_terminal_line_rejected(self):
+        fixture = os.path.join(FIXTURES, "final-message-marker-indented.txt")
+        result = run_script("--marker", "BRIEF_ARTIFACT", "--final-message", fixture)
+        self.assertNotEqual(result.returncode, 0)
+        data = json.loads(result.stderr)
+        self.assertEqual(data["failure"], "missing BRIEF_ARTIFACT marker")
+
+    # Backtick-wrapped terminal marker line → rejected
+    def test_marker_backticked_terminal_line_rejected(self):
+        fixture = os.path.join(FIXTURES, "final-message-marker-backticked.txt")
+        result = run_script("--marker", "BRIEF_ARTIFACT", "--final-message", fixture)
+        self.assertNotEqual(result.returncode, 0)
+        data = json.loads(result.stderr)
+        self.assertEqual(data["failure"], "missing BRIEF_ARTIFACT marker")
+
+    # Valid marker line followed by trailing blank lines → accepted
+    def test_marker_with_trailing_blank_lines_accepted(self):
+        fixture = os.path.join(FIXTURES, "final-message-marker-trailing-blanks.txt")
+        result = run_script("--marker", "BRIEF_ARTIFACT", "--final-message", fixture)
+        self.assertEqual(result.returncode, 0, msg=f"stderr: {result.stderr}")
+        data = json.loads(result.stdout)
+        self.assertEqual(data["path"], "/tmp/ok.md")
+
     # --require-path-suffix: path ends with suffix → success
     def test_require_path_suffix_success(self):
         with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
