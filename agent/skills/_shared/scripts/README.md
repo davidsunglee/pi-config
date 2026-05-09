@@ -16,6 +16,8 @@ The `_shared/scripts/` directory contains deterministic, testable Python helpers
 
 - **extract-provenance-preamble.py** — Extracts `Source: TODO-...`, `Scout brief: docs/briefs/...`, and `Git SHA: <40-hex>` lines from a bounded preamble region of a markdown file. Example: `python3 extract-provenance-preamble.py --file docs/specs/foo.md --mode spec`.
 
+- **fence_aware.py** — Pure Python module (importable, not a CLI) exporting `compute_in_fence_lines(lines) -> set[int]` and `split_h2_sections(text) -> dict[str, str]`. The shared fence contract is: backtick or tilde markers, length 3+, leading indentation allowed, closer must use the same marker character with at least as many markers and only whitespace after, and an unclosed opener keeps the rest of the scanned region inside the fence. Used by `parse-verifier-report.py`, `parse-coder-report.py`, `parse-refine-code-summary.py`, `extract-provenance-preamble.py`, and `extract-plan-tasks.py`.
+
 - **fill-template.py** — Renders a Jinja2 template with provided context, handling conditional blocks and escaping. Example: `python3 fill-template.py --template prompt.jinja --context context.json --output prompt.md`.
 
 - **git-workspace-status.py** — Read-only git workspace probe. Detects whether the directory is a git repo, on a worktree, on a feature branch, in detached HEAD, and reports git status --porcelain output. Example: `python3 git-workspace-status.py --working-dir .`.
