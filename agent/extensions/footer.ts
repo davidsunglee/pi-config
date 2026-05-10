@@ -166,28 +166,6 @@ export function computeVisibility(f: FieldWidths): VisibilityFlags {
 export const THEME_COLORS: Record<string, Partial<FooterColors>> = {
   // Add entries here to override defaults for specific themes, e.g.:
   // "dracula": { modelName: "magenta", cost: "#ffb86c" },
-  carbonfox: {
-    modelName: "#33b1ff", // cyan — accent
-    tokens: "#8cb6ff", // blueBright — consistent with contextUsage blue
-    contextUsage: "#78a9ff", // blue
-    contextWindow: "#7b7c7e", // gray — readable but subtler than contextUsage
-    branch: "#25be6a", // green — success
-    pwd: "#ee5396", // red — pink-red
-    sessionName: "#be95ff", // magenta — soft lavender accent
-    statuses: "#535353", // dimGray — dim
-    symbols: "#484848", // darkGray — borderMuted
-  },
-  everblush: {
-    modelName: "#67b0e8", // blue — primary accent
-    tokens: "#71baf2", // bright blue — a touch brighter than model name
-    contextUsage: "#6cbfbf", // cyan — readable emphasis distinct from tokens
-    contextWindow: "#b3b9b8", // light gray — softer denominator / window size
-    branch: "#8ccf7e", // green — git branch / success
-    pwd: "#e57474", // red — directory path accent from Everblush palette
-    sessionName: "#c47fd5", // magenta — violet accent
-    statuses: "#5c6466", // dim gray — subdued status line
-    symbols: "#5c6466", // dim gray — slightly brighter separators and punctuation
-  },
   nord: {
     provider: "#4c566a", // nord3 — slightly lighter than the dim token (nord2) so the prefix is readable but still subordinate to modelName
     modelName: "#88c0d0", // nord8 — accent blue
@@ -199,7 +177,7 @@ export const THEME_COLORS: Record<string, Partial<FooterColors>> = {
     sessionName: "#ebcb8b", // nord13 — yellow/gold (takes over the old cost accent)
     statuses: "#4c566a", // nord3 — muted
     symbols: "#4c566a", // nord3 — muted
-  },
+  }
 };
 
 // ─── Default theme-token fallbacks ───────────────────────────────────────────

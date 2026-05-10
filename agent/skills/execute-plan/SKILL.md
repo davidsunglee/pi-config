@@ -71,11 +71,11 @@ Plan:  <plan filename>
 Goal:  <plan goal>
 Tasks: <count> across <N> waves
 
-    Workspace:          <see workspace values below>
-    TDD:                enabled
-    Execution:          parallel, pause on failure
-    Integration test:   <see defaults below>
-    Final review:       enabled (max 3 remediation iterations)
+Workspace:          <see workspace values below>
+TDD:                enabled
+Execution:          parallel, pause on failure
+Integration test:   <see defaults below>
+Final review:       enabled (max 3 remediation iterations)
 
 Ready to execute: (s)tart / (c)ustomize / (q)uit
 ```
