@@ -6,7 +6,7 @@
  *
  * Layout:
  *   Line 1: ~/path branch                                 session-name
- *   Line 2: provider model thinking    context%/window ↑in ↓out
+ *   Line 2: provider model thinking    context% used/window
  *   Line 3: extension statuses (optional)
  *
  * Context usage escalation is preserved:
@@ -36,7 +36,6 @@
  *   };
  */
 
-import type { AssistantMessage } from "@mariozechner/pi-ai";
 import {
   type ExtensionAPI,
   type ThemeColor,
@@ -73,13 +72,11 @@ export interface FieldWidths {
   providerWidth: number;
   contextPercentWidth: number;
   contextDenomWidth: number;
-  tokensWidth: number;
   // Flags for which fields are initially present (non-zero width)
   hasBranch: boolean;
   hasSessionName: boolean;
   hasThinking: boolean;
   hasProvider: boolean;
-  hasTokens: boolean;
 }
 
 /** Surviving visibility flags after the priority dropper has run. */
@@ -89,7 +86,6 @@ export interface VisibilityFlags {
   showThinking: boolean;
   showProvider: boolean;
   showContextDenom: boolean;
-  showTokens: boolean;
 }
 
 const MIN_PADDING = 2;
@@ -101,7 +97,6 @@ const MIN_PWD_CHARS_WITH_BRANCH = 4;
  * have been dropped to fit within `width`.
  */
 export function computeVisibility(f: FieldWidths): VisibilityFlags {
-  let showTokens = f.hasTokens;
   let showProvider = f.hasProvider;
   let showContextDenom = true;
   let showSessionName = f.hasSessionName;
@@ -129,13 +124,8 @@ export function computeVisibility(f: FieldWidths): VisibilityFlags {
     let left = f.modelNameWidth;
     if (showThinking) left += f.thinkingWidth;
     if (showProvider) left += f.providerWidth;
-    const rightParts: number[] = [];
-    let ctxW = f.contextPercentWidth;
-    // contextDenomWidth already includes the "/" rendered by
-    // formatContextDenominator — do NOT add the slash-separator width again here.
-    if (showContextDenom) ctxW += f.contextDenomWidth;
-    rightParts.push(ctxW);
-    if (showTokens && f.tokensWidth) rightParts.push(f.tokensWidth);
+    const rightParts: number[] = [f.contextPercentWidth];
+    if (showContextDenom) rightParts.push(f.contextDenomWidth);
     const right =
       rightParts.reduce((a, b) => a + b, 0) +
       METRIC_SEP_WIDTH * Math.max(0, rightParts.length - 1);
@@ -146,7 +136,6 @@ export function computeVisibility(f: FieldWidths): VisibilityFlags {
     return row1CanFit() && row2Needed() <= f.width;
   }
 
-  if (!bothFit() && showTokens) showTokens = false;
   if (!bothFit() && showProvider) showProvider = false;
   if (!bothFit() && showContextDenom) showContextDenom = false;
   if (!bothFit() && showSessionName) showSessionName = false;
@@ -154,7 +143,6 @@ export function computeVisibility(f: FieldWidths): VisibilityFlags {
   if (!bothFit() && showThinking) showThinking = false;
 
   return {
-    showTokens,
     showProvider,
     showContextDenom,
     showSessionName,
@@ -347,18 +335,23 @@ export function getProviderPrefix(
 }
 
 /**
- * Context denominator "/window" segment. Renders "/" (no spaces around the slash)
- * in the symbols/punctuation color, then the formatted context window size in the
- * contextWindow color. The slash glyph itself takes the symbols color so it stays
- * muted relative to the percentage and the window size.
+ * Context token-window segment, rendered separately from the percentage as
+ * "used/window". The token counts use the `tokens` color (the same blue formerly
+ * used for the removed input/output token metrics), while the slash remains muted.
  */
-export function formatContextDenominator(
+export function formatContextTokenWindow(
+  contextTokens: number | null | undefined,
   contextWindow: number,
   colorize: Colorize,
 ): string {
+  const used =
+    contextTokens === null || contextTokens === undefined
+      ? "?"
+      : formatTokens(contextTokens);
   return (
+    colorize("tokens", used) +
     colorize("symbols", "/") +
-    colorize("contextWindow", formatTokens(contextWindow))
+    colorize("tokens", formatTokens(contextWindow))
   );
 }
 
@@ -521,24 +514,10 @@ export default function (pi: ExtensionAPI) {
             contextUsage?.contextWindow ?? ctx.model?.contextWindow ?? 0;
           const contextPercentValue = contextUsage?.percent ?? 0;
           const contextPercent =
-            contextUsage?.percent !== null
-              ? contextPercentValue.toFixed(1)
-              : "?";
-
-          // Token accumulation
-          let totalInput = 0;
-          let totalOutput = 0;
-
-          for (const entry of ctx.sessionManager.getEntries()) {
-            if (
-              entry.type === "message" &&
-              entry.message.role === "assistant"
-            ) {
-              const m = entry.message as AssistantMessage;
-              totalInput += m.usage.input;
-              totalOutput += m.usage.output;
-            }
-          }
+            contextUsage?.percent === null || contextUsage?.percent === undefined
+              ? "?"
+              : contextPercentValue.toFixed(1);
+          const contextTokens = contextUsage?.tokens;
 
           // ── Pre-compute per-field widths for the global priority dropper ──
 
@@ -578,20 +557,12 @@ export default function (pi: ExtensionAPI) {
                 colorize("contextUsage", "%");
           }
           const contextPercentWidth = visibleWidth(contextPercentStr);
-          const contextDenomStr = formatContextDenominator(
+          const contextDenomStr = formatContextTokenWindow(
+            contextTokens,
             contextWindow,
             colorize,
           );
           const contextDenomWidth = visibleWidth(contextDenomStr);
-
-          const tokensStr =
-            totalInput || totalOutput
-              ? colorize("symbols", "↑") +
-                colorize("tokens", formatTokens(totalInput)) +
-                colorize("symbols", " ↓") +
-                colorize("tokens", formatTokens(totalOutput))
-              : "";
-          const tokensWidth = tokensStr ? visibleWidth(tokensStr) : 0;
 
           // ── Global visibility flags (shared across both rows) ─────────────
           // Delegate to the pure priority dropper so tests can exercise the
@@ -608,16 +579,13 @@ export default function (pi: ExtensionAPI) {
             providerWidth,
             contextPercentWidth,
             contextDenomWidth,
-            tokensWidth,
             hasBranch: !!branch,
             hasSessionName: !!sessionName,
             hasThinking: !!thinkingStr,
             hasProvider: !!providerPrefix,
-            hasTokens: !!(totalInput || totalOutput),
           });
 
           const {
-            showTokens,
             showProvider,
             showContextDenom,
             showSessionName,
@@ -676,13 +644,11 @@ export default function (pi: ExtensionAPI) {
           if (showThinking && thinkingStr) row2LeftFinal += thinkingStr;
 
           const metricsFinal: string[] = [];
-          let ctxFinal = contextPercentStr;
-          if (showContextDenom) ctxFinal += contextDenomStr;
           // Invariant: contextPercentStr is never empty — it falls back to a
-          // colorized "?" when usage is unknown — so ctxFinal always carries
-          // content and joinMetrics() will not drop it as an empty entry.
-          metricsFinal.push(ctxFinal);
-          if (showTokens && tokensStr) metricsFinal.push(tokensStr);
+          // colorized "?" when usage is unknown — so joinMetrics() will not drop
+          // it as an empty entry.
+          metricsFinal.push(contextPercentStr);
+          if (showContextDenom) metricsFinal.push(contextDenomStr);
 
           const row2RightFinal = joinMetrics(metricsFinal, colorize);
           const row2LeftFinalWidth = visibleWidth(row2LeftFinal);

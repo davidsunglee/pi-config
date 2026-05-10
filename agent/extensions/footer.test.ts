@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import footerFactory, {
 	computeVisibility,
 	DEFAULT_TOKENS,
-	formatContextDenominator,
+	formatContextTokenWindow,
 	getProviderPrefix,
 	getThinkingLabel,
 	joinMetrics,
@@ -44,12 +44,10 @@ function fw(width: number, overrides: Partial<FieldWidths> = {}): FieldWidths {
 		providerWidth: 0,
 		contextPercentWidth: 0,
 		contextDenomWidth: 0,
-		tokensWidth: 0,
 		hasBranch: false,
 		hasSessionName: false,
 		hasThinking: false,
 		hasProvider: false,
-		hasTokens: false,
 	};
 	return { ...base, ...overrides };
 }
@@ -61,12 +59,10 @@ test("wide terminal: all live fields visible", () => {
 		pwdStrWidth: 20, branchWidth: 9, sessionNameWidth: 10,
 		modelNameWidth: 14, thinkingWidth: 12, providerWidth: 12,
 		contextPercentWidth: 6, contextDenomWidth: 8,
-		tokensWidth: 14,
 		hasBranch: true, hasSessionName: true, hasThinking: true,
-		hasProvider: true, hasTokens: true,
+		hasProvider: true,
 	}));
 
-	assert.ok(flags.showTokens);
 	assert.ok(flags.showProvider);
 	assert.ok(flags.showContextDenom);
 	assert.ok(flags.showSessionName);
@@ -75,21 +71,19 @@ test("wide terminal: all live fields visible", () => {
 	assert.equal("showAutoCompact" in flags, false);
 });
 
-test("tokens drop as a single unit (both arrows + values)", () => {
+test("provider drops before context token window metric", () => {
 	const fields = {
 		pwdStrWidth: 10, branchWidth: 0, sessionNameWidth: 0,
 		modelNameWidth: 14, thinkingWidth: 0, providerWidth: 12,
 		contextPercentWidth: 6, contextDenomWidth: 8,
-		tokensWidth: 14,
 		hasBranch: false, hasSessionName: false, hasThinking: false,
-		hasProvider: true, hasTokens: true,
+		hasProvider: true,
 	};
-	// With tokens: 14 + 12 + 2 + (6 + 8) + 14 + 1*1 = 57
-	const withTokens = 57;
-
-	const flags = computeVisibility(fw(withTokens - 1, fields));
-	assert.ok(!flags.showTokens, "tokens should drop as a unit");
-	assert.ok(flags.showProvider, "provider should still be visible");
+	// With provider: 14 + 12 + 2 + 6 + 1 + 8 = 43.
+	// Without provider: 14 + 2 + 6 + 1 + 8 = 31.
+	const flags = computeVisibility(fw(42, fields));
+	assert.ok(!flags.showProvider, "provider should drop first");
+	assert.ok(flags.showContextDenom, "context token window should remain visible");
 });
 
 test("session name drops before branch on row 1", () => {
@@ -124,9 +118,7 @@ test("model name and context percent are never hidden", () => {
 		pwdStrWidth: 5,
 		modelNameWidth: 10, thinkingWidth: 8, providerWidth: 10,
 		contextPercentWidth: 6, contextDenomWidth: 8,
-		tokensWidth: 14,
 		hasThinking: true, hasProvider: true,
-		hasTokens: true,
 	}));
 	assert.ok(!flags.showThinking, "thinking should be hidden");
 	assert.ok(!flags.showProvider, "provider should be hidden");
@@ -134,24 +126,22 @@ test("model name and context percent are never hidden", () => {
 });
 
 test("long cwd does NOT cause row-2 fields to drop when truncation suffices", () => {
-	// Row 2 full need: 14 + 12 + 2 + (6 + 8) + 14 + 1*1 sep = 57
+	// Row 2 full need: 14 + 12 + 2 + 6 + 1 + 8 = 43
 	const flags = computeVisibility(fw(72, {
 		pwdStrWidth: 100, // very long cwd
 		branchWidth: 9,
 		modelNameWidth: 14, providerWidth: 12,
 		contextPercentWidth: 6, contextDenomWidth: 8,
-		tokensWidth: 14,
 		hasBranch: true, hasProvider: true,
-		hasTokens: true,
 	}));
 
-	assert.ok(flags.showTokens, "tokens should survive when cwd truncation handles row 1");
+	assert.ok(flags.showContextDenom, "context token window should survive when cwd truncation handles row 1");
 	assert.ok(flags.showBranch, "branch should survive when cwd truncation handles row 1");
 });
 
-test("context denominator drops as a unit with / separator", () => {
-	// With denom:    14 + 2 + 6 + 8 = 30
-	// Without denom: 14 + 2 + 6     = 22
+test("context token window drops as a unit with / separator", () => {
+	// With denom:    14 + 2 + 6 + 1 + 8 = 31
+	// Without denom: 14 + 2 + 6         = 22
 	const flags = computeVisibility(fw(25, {
 		pwdStrWidth: 10,
 		modelNameWidth: 14,
@@ -160,18 +150,18 @@ test("context denominator drops as a unit with / separator", () => {
 	assert.ok(!flags.showContextDenom, "context denom + separator should drop as unit");
 });
 
-test("cross-row priority: row-2 tokens drop before row-1 session name", () => {
-	// Row 2 with tokens: 14 + 2 + (6 + 8) + 14 + 1 = 45. Row 2 without tokens: 14 + 2 + (6 + 8) = 30.
-	// With session row 1 needs ellipsis(3) + 4 + branch(9) + padding(2) + sessionName(15) = 33 ≤ 44.
-	// So at width 44 tokens drops and session survives.
-	const flags = computeVisibility(fw(44, {
+test("cross-row priority: context token window drops before row-1 session name", () => {
+	// Row 2 with context token window: 14 + 2 + 6 + 1 + 20 = 43.
+	// Row 2 without context token window: 14 + 2 + 6 = 22.
+	// With session row 1 needs ellipsis(3) + 4 + branch(9) + padding(2) + sessionName(15) = 33 ≤ 40.
+	// So at width 40 context token window drops and session survives.
+	const flags = computeVisibility(fw(40, {
 		pwdStrWidth: 20, branchWidth: 9, sessionNameWidth: 15,
 		modelNameWidth: 14,
-		contextPercentWidth: 6, contextDenomWidth: 8,
-		tokensWidth: 14,
-		hasBranch: true, hasSessionName: true, hasTokens: true,
+		contextPercentWidth: 6, contextDenomWidth: 20,
+		hasBranch: true, hasSessionName: true,
 	}));
-	assert.ok(!flags.showTokens, "tokens should drop");
+	assert.ok(!flags.showContextDenom, "context token window should drop");
 	assert.ok(flags.showSessionName, "session name should survive (higher priority)");
 });
 
@@ -206,11 +196,15 @@ test("blank extension statuses are filtered out", () => {
 	]);
 });
 
-test("context denominator wraps '/' in symbols color (no spaces around slash)", () => {
-	// formatTokens(200000) === "200k"
+test("context token window wraps '/' in symbols color and uses token color for both counts", () => {
+	// formatTokens(9300) === "9.3k" and formatTokens(200000) === "200k"
 	assert.equal(
-		formatContextDenominator(200000, mockColorize),
-		"[symbols:/][contextWindow:200k]",
+		formatContextTokenWindow(9300, 200000, mockColorize),
+		"[tokens:9.3k][symbols:/][tokens:200k]",
+	);
+	assert.equal(
+		formatContextTokenWindow(null, 200000, mockColorize),
+		"[tokens:?][symbols:/][tokens:200k]",
 	);
 });
 
@@ -282,6 +276,148 @@ test("row 1 renders cwd and branch with one literal space separator", async () =
 	assert.equal(line2.includes(" · "), false, "row 2 should remain free of dot separators");
 });
 
+test("row 2 shows context percentage and context token window without input/output arrows", async () => {
+	const handlers = new Map<string, (event: any, ctx: any) => void | Promise<void>>();
+	footerFactory({
+		on(event: string, handler: (event: any, ctx: any) => void | Promise<void>) {
+			handlers.set(event, handler);
+		},
+		getSessionName() {
+			return "";
+		},
+		getThinkingLevel() {
+			return "off";
+		},
+	} as any);
+
+	let footerBuilder: any;
+	const ctx = {
+		cwd: "/repo/main",
+		model: { id: "model", contextWindow: 200000 },
+		getContextUsage() {
+			return { percent: 12.3, tokens: 9300, contextWindow: 200000 };
+		},
+		sessionManager: {
+			getEntries() {
+				return [
+					{
+						type: "message",
+						message: {
+							role: "assistant",
+							usage: { input: 1000, output: 2000 },
+						},
+					},
+				];
+			},
+		},
+		ui: {
+			setFooter(builder: unknown) {
+				footerBuilder = builder;
+			},
+		},
+	};
+	const footerData = {
+		onBranchChange() {
+			return () => {};
+		},
+		getGitBranch() {
+			return "";
+		},
+		getAvailableProviderCount() {
+			return 1;
+		},
+		getExtensionStatuses() {
+			return new Map();
+		},
+	};
+	const theme = {
+		name: "test",
+		getColorMode() {
+			return "truecolor";
+		},
+		fg(_token: string, text: string) {
+			return text;
+		},
+		getThinkingBorderColor() {
+			return (text: string) => text;
+		},
+	};
+
+	await handlers.get("session_start")!({}, ctx);
+	const footer = footerBuilder({ requestRender() {} }, theme, footerData);
+	const [, line2] = footer.render(80);
+
+	assert.ok(line2.endsWith("12.3% 9.3k/200k"));
+	assert.equal(line2.includes("↑"), false);
+	assert.equal(line2.includes("↓"), false);
+});
+
+test("row 2 shows question mark over context window when context tokens are unknown", async () => {
+	const handlers = new Map<string, (event: any, ctx: any) => void | Promise<void>>();
+	footerFactory({
+		on(event: string, handler: (event: any, ctx: any) => void | Promise<void>) {
+			handlers.set(event, handler);
+		},
+		getSessionName() {
+			return "";
+		},
+		getThinkingLevel() {
+			return "off";
+		},
+	} as any);
+
+	let footerBuilder: any;
+	const ctx = {
+		cwd: "/repo/main",
+		model: { id: "model", contextWindow: 200000 },
+		getContextUsage() {
+			return { percent: 12.3, tokens: null, contextWindow: 200000 };
+		},
+		sessionManager: {
+			getEntries() {
+				return [];
+			},
+		},
+		ui: {
+			setFooter(builder: unknown) {
+				footerBuilder = builder;
+			},
+		},
+	};
+	const footerData = {
+		onBranchChange() {
+			return () => {};
+		},
+		getGitBranch() {
+			return "";
+		},
+		getAvailableProviderCount() {
+			return 1;
+		},
+		getExtensionStatuses() {
+			return new Map();
+		},
+	};
+	const theme = {
+		name: "test",
+		getColorMode() {
+			return "truecolor";
+		},
+		fg(_token: string, text: string) {
+			return text;
+		},
+		getThinkingBorderColor() {
+			return (text: string) => text;
+		},
+	};
+
+	await handlers.get("session_start")!({}, ctx);
+	const footer = footerBuilder({ requestRender() {} }, theme, footerData);
+	const [, line2] = footer.render(80);
+
+	assert.ok(line2.endsWith("12.3% ?/200k"));
+});
+
 test("joinMetrics joins present metrics with a single literal space", () => {
 	assert.equal(
 		joinMetrics(["A", "B", "C"], mockColorize),
@@ -297,35 +433,35 @@ test("joinMetrics joins present metrics with a single literal space", () => {
 	);
 });
 
-test("row 2 width budget accounts for 1-char ' ' metric separators", () => {
-	// With 1-char separator between 2 metrics (ctx, tokens), no cost:
+test("row 2 width budget accounts for 1-char ' ' metric separator", () => {
+	// With 1-char separator between 2 metrics (percent, token window):
 	//   left: modelName=14 + provider=12 = 26
 	//   padding: 2
-	//   right: (6 + 8) + 14 + 1*1 = 29
-	//   total: 57
+	//   right: 6 + 1 + 8 = 15
+	//   total: 43
 	const fields = {
 		pwdStrWidth: 10,
 		modelNameWidth: 14, providerWidth: 12,
 		contextPercentWidth: 6, contextDenomWidth: 8,
-		tokensWidth: 14,
-		hasProvider: true, hasTokens: true,
+		hasProvider: true,
 	};
-	const fits = computeVisibility(fw(57, fields));
-	assert.ok(fits.showTokens, "tokens should fit exactly at width 57");
+	const fits = computeVisibility(fw(43, fields));
+	assert.ok(fits.showProvider, "provider should fit exactly at width 43");
+	assert.ok(fits.showContextDenom, "context token window should fit exactly at width 43");
 
-	const justUnder = computeVisibility(fw(56, fields));
-	assert.ok(!justUnder.showTokens, "tokens should drop when row 2 needs 57 but width is 56");
+	const justUnder = computeVisibility(fw(42, fields));
+	assert.ok(!justUnder.showProvider, "provider should drop when row 2 needs 43 but width is 42");
+	assert.ok(justUnder.showContextDenom, "context token window should remain after provider drops");
 });
 
 test("extremely narrow width keeps only model name and context percent", () => {
 	const flags = computeVisibility(fw(20, {
 		pwdStrWidth: 30, branchWidth: 9, sessionNameWidth: 15,
 		modelNameWidth: 10, thinkingWidth: 8, providerWidth: 12,
-		contextPercentWidth: 6, contextDenomWidth: 5, tokensWidth: 14,
+		contextPercentWidth: 6, contextDenomWidth: 5,
 		hasBranch: true, hasSessionName: true, hasThinking: true,
-		hasProvider: true, hasTokens: true,
+		hasProvider: true,
 	}));
-	assert.ok(!flags.showTokens, "tokens drop");
 	assert.ok(!flags.showProvider, "provider drops");
 	assert.ok(!flags.showContextDenom, "context denom drops");
 	assert.ok(!flags.showSessionName, "session name drops");
