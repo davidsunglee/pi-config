@@ -67,6 +67,15 @@ On non-zero exit, surface its stderr output byte-equal (canonical Templates (1)�
    - `{SOURCE_SPEC}` — `Source spec: docs/specs/<filename>` if the input file path is under `docs/specs/`, empty string otherwise.
    - `{SCOUT_BRIEF}` — `Scout brief: docs/briefs/<filename>` if a scout brief was extracted from the file preamble and the brief file exists on disk, empty string otherwise.
 3. Dispatch `planner` agent synchronously:
+
+   **Baseline-capture for the missing-marker fallback.** Immediately before dispatching the planner, capture the pre-dispatch mtime of `{OUTPUT_PATH}` so Step 3.4 can validate that any on-disk plan is fresh even if the marker line is missing. Run:
+
+   ```bash
+   PLAN_BASELINE=$(python3 -c "import os, sys; p=sys.argv[1]; print(os.path.getmtime(p) if os.path.exists(p) else 0)" "{OUTPUT_PATH}")
+   ```
+
+   Hold `PLAN_BASELINE` in skill state across the dispatch. A value of `0` indicates the file did not exist before dispatch; any positive value indicates the file's mtime at dispatch time.
+
    ```
    subagent_run_serial { tasks: [
      { name: "planner", agent: "planner", task: "<filled template>", model: "<model from Step 2>", cli: "<cli from Step 2>" }
@@ -74,7 +83,7 @@ On non-zero exit, surface its stderr output byte-equal (canonical Templates (1)�
    ```
    Read the planner's output from results[0].finalMessage — the planner writes the plan to disk; this result is the return message.
 
-4. Validate the planner's marker handoff. Write `results[0].finalMessage` to a temp file and run `python3 agent/skills/_shared/scripts/parse-artifact-handoff.py --marker PLAN_ARTIFACT --final-message <temp-file> --expected-path <{OUTPUT_PATH} from Step 3 (absolute path)> --check-existence --check-non-empty`. On non-zero exit, surface the script's stderr (a JSON blob with a `failure` field) verbatim to the user, prefix it with `generate-plan: planner artifact handoff failed —`, and stop the skill. Do NOT proceed to Step 4 (refine-plan handoff). On exit 0, read `.path` from stdout JSON; this is the validated plan path used by Step 4.
+4. Validate the planner's marker handoff. Write `results[0].finalMessage` to a temp file and run `python3 agent/skills/_shared/scripts/parse-artifact-handoff.py --marker PLAN_ARTIFACT --final-message <temp-file> --expected-path <{OUTPUT_PATH} from Step 3 (absolute path)> --check-existence --check-non-empty --freshness-baseline <PLAN_BASELINE>`. When `used_fallback` is `true` in the script's stdout JSON, log a one-line warning to the user noting that the on-disk file at `{OUTPUT_PATH}` was used as the plan even though the planner did not emit a `PLAN_ARTIFACT:` terminal marker. On non-zero exit, surface the script's stderr (a JSON blob with a `failure` field) verbatim to the user, prefix it with `generate-plan: planner artifact handoff failed —`, and stop the skill. Do NOT proceed to Step 4 (refine-plan handoff). On exit 0, read `.path` from stdout JSON; this is the validated plan path used by Step 4.
 
 5. Harden the validated plan against ambiguous fenced examples. Run:
    ```
@@ -105,15 +114,19 @@ Invoke `refine-plan` with these arguments:
 
 Run `agent/skills/refine-plan/scripts/parse-refine-plan-summary.py --summary <path-to-finalMessage-or--for-stdin>` against the `refine-plan` summary returned in Step 4. Display the parsed `status`, `commit`, `plan_path`, and `review_paths` fields to the user. When `structural_only == true`, also display the `STRUCTURAL_ONLY: yes` line.
 
-Then offer execute-plan:
+Then, **only when the parsed `status` is `approved` or `approved_with_concerns`**, offer execute-plan:
 
 > Plan written to `<PLAN_PATH>`. Want me to run execute-plan with this plan?
 
-If `COMMIT: left_uncommitted` (which can happen only in standalone-style runs; auto-commit mode always commits on the approved path), prepend this note to the offer:
+If `COMMIT: left_uncommitted` (which can happen on the approved paths only in standalone-style runs; auto-commit mode always commits on the approved path), prepend this note to the offer:
 
 > Note: plan was left uncommitted. Proceeding with an uncommitted plan means edits made by execute-plan will land on top of an unstaged plan file.
 
 Require explicit user confirmation before invoking execute-plan in that case. Do not auto-invoke execute-plan.
+
+**When the parsed `status` is `not_approved_within_budget`** (whether `COMMIT: committed` from `(r) Save plan for manual review` or `COMMIT: left_uncommitted` from `(x) Stop execution`), do NOT offer execute-plan. Report the parsed summary (status, commit, plan_path, review_paths, structural_only) and stop. The user inspects the saved plan and review files manually; if they want to execute the unapproved plan, they invoke `execute-plan` themselves.
+
+**When the parsed `status` is `failed`**, surface the `FAILURE_REASON` line to the user and skip the execute-plan offer until the underlying issue is resolved. Do not retry refine-plan automatically.
 
 ## Edge cases
 

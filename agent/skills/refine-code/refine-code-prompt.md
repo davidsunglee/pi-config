@@ -107,6 +107,15 @@ When `{CARRY_OVER_REVIEW}` is empty (first-era runs, etc.), skip the carry-over 
    - `{REVIEWER_PROVENANCE}` — the verbatim line `**Reviewer:** <provider>/<model> via <cli>` constructed from the EXACT `model` and `cli` you will pass to THIS pass's `subagent_run_serial` task in Step 3. For first-pass full reviews, this is `crossProvider.capable` and its dispatch CLI.
 
 3. **Dispatch `code-reviewer`** with model `crossProvider.capable` and corresponding `cli` from the model matrix:
+
+   **Capture freshness baseline.** Immediately before dispatching the reviewer, capture the pre-dispatch mtime of `{REVIEW_OUTPUT_PATH}` (the absolute era-versioned path constructed in Step 2). Bash form:
+
+   ```bash
+   REVIEW_BASELINE=$(python3 -c "import os, sys; p=sys.argv[1]; print(os.path.getmtime(p) if os.path.exists(p) else 0)" "<REVIEW_OUTPUT_PATH>")
+   ```
+
+   Hold `REVIEW_BASELINE` in your coordinator state across the dispatch. The fallback in Step 3a will compare the reviewer's on-disk write against this baseline.
+
    ```
    subagent_run_serial { tasks: [
      { name: "code-reviewer", agent: "code-reviewer", task: "<filled review-code-prompt.md>", model: "<crossProvider.capable from model-tiers.json>", cli: "<dispatch for crossProvider.capable>" }
@@ -114,7 +123,7 @@ When `{CARRY_OVER_REVIEW}` is empty (first-era runs, etc.), skip the carry-over 
    ```
    Then extract and validate the reviewer's artifact handoff:
 
-   - **3a–3c.** Run `parse-artifact-handoff.py --marker REVIEW_ARTIFACT --final-message <finalMessage-path> --expected-path {REVIEW_OUTPUT_PATH} --check-existence --check-non-empty`; on any failure it emits the appropriate `STATUS: failed` reason from `## Failure Modes`. Capture the returned path as `<reviewer_path>`.
+   - **3a–3c.** Run `parse-artifact-handoff.py --marker REVIEW_ARTIFACT --final-message <finalMessage-path> --expected-path {REVIEW_OUTPUT_PATH} --check-existence --check-non-empty --freshness-baseline <REVIEW_BASELINE>`; on any failure it emits the appropriate `STATUS: failed` reason from `## Failure Modes`. Capture the returned path as `<reviewer_path>`. When the parser's stdout JSON `used_fallback` field is `true`, treat the on-disk review file as authoritative (per the existing 3e contract) and continue with the BYTE-EQUAL provenance check and the `validate-review-provenance.py` defense-in-depth check. Failure of either provenance check still triggers `STATUS: failed` with the existing provenance malformed reason.
    - **3d. On-disk first-line provenance check.** Find the first non-empty line of `<reviewer_path>`. The primary check: the line MUST be BYTE-EQUAL to the EXACT `{REVIEWER_PROVENANCE}` string you supplied for THIS dispatch. As defense-in-depth, run `validate-review-provenance.py --review-file <reviewer_path> --allowed-tiers crossProvider.capable`; on failure emit `STATUS: failed` with reason `reviewer artifact handoff failed: provenance malformed at <reviewer_path>: <specific check>` and exit.
    - **3e. Read the file as the authoritative review.** On all checks passing, treat the on-disk file content as the authoritative review for verdict assessment, batching, remediator dispatch, and (downstream) hybrid re-review `{PREVIOUS_FINDINGS}` construction. Do NOT use `finalMessage` content beyond the marker line.
 
@@ -192,7 +201,15 @@ When `Approved with concerns` triggers Final Verification, the reviewer's waived
    - `{REVIEW_OUTPUT_PATH}` — the SAME absolute path used in Iteration 1 (no era change within the era — hybrid re-reviews overwrite the same file).
    - `{REVIEWER_PROVENANCE}` — the verbatim line `**Reviewer:** <provider>/<model> via <cli>` constructed from `standard` and its corresponding `cli`, freshly constructed for THIS hybrid re-review iteration.
 
-5. **Dispatch `code-reviewer`** with model `standard` and corresponding `cli` from the model matrix (hybrid re-reviews are scoped and cheaper). Then extract and validate the reviewer's artifact handoff using the SAME substeps 3a–3e procedure as Iteration 1 Step 3 (`parse-artifact-handoff.py`, BYTE-EQUAL provenance check, `validate-review-provenance.py --allowed-tiers standard`). The reviewer overwrites the era-versioned file in place — the new first non-empty line reflects this iteration's `standard`-tier provenance.
+5. **Capture freshness baseline.** Immediately before dispatching the reviewer, capture the pre-dispatch mtime of `{REVIEW_OUTPUT_PATH}` (the absolute era-versioned path constructed in Step 2). Bash form:
+
+   ```bash
+   REVIEW_BASELINE=$(python3 -c "import os, sys; p=sys.argv[1]; print(os.path.getmtime(p) if os.path.exists(p) else 0)" "<REVIEW_OUTPUT_PATH>")
+   ```
+
+   Hold `REVIEW_BASELINE` in your coordinator state across the dispatch. The fallback in Step 3a will compare the reviewer's on-disk write against this baseline.
+
+   **Dispatch `code-reviewer`** with model `standard` and corresponding `cli` from the model matrix (hybrid re-reviews are scoped and cheaper). Then extract and validate the reviewer's artifact handoff using the SAME substeps 3a–3e procedure as Iteration 1 Step 3 (`parse-artifact-handoff.py --marker REVIEW_ARTIFACT --freshness-baseline <REVIEW_BASELINE>`, BYTE-EQUAL provenance check, `validate-review-provenance.py --allowed-tiers standard`). When the parser's stdout JSON `used_fallback` field is `true`, treat the on-disk review file as authoritative (per the existing 3e contract) and continue with the BYTE-EQUAL provenance check and the `validate-review-provenance.py` defense-in-depth check. Failure of either provenance check still triggers `STATUS: failed` with the existing provenance malformed reason. The reviewer overwrites the era-versioned file in place — the new first non-empty line reflects this iteration's `standard`-tier provenance.
 
 6. **Track the iteration's remediation log entry in your coordinator state.** The reviewer is the sole writer of the review file under this contract; you do NOT write to the reviewer artifact. The remediation log is tracked in your coordinator state across iterations and surfaces in the final Output Format via `Issues fixed`/`Issues remaining` counts and (on `STATUS: not_approved_within_budget`) the `## Remaining Issues` section.
 
@@ -202,7 +219,15 @@ When `Approved with concerns` triggers Final Verification, the reviewer's waived
 
 When a review pass finds no Critical/Important issues (hybrid reviews converge):
 
-1. **Dispatch `code-reviewer`** with model `crossProvider.capable` and corresponding `cli` for a **full-diff** verification. Fill EVERY placeholder used by `review-code-prompt.md`:
+1. **Capture freshness baseline.** Immediately before dispatching the reviewer, capture the pre-dispatch mtime of `{REVIEW_OUTPUT_PATH}` (the absolute era-versioned path constructed in Step 2). Bash form:
+
+   ```bash
+   REVIEW_BASELINE=$(python3 -c "import os, sys; p=sys.argv[1]; print(os.path.getmtime(p) if os.path.exists(p) else 0)" "<REVIEW_OUTPUT_PATH>")
+   ```
+
+   Hold `REVIEW_BASELINE` in your coordinator state across the dispatch. The fallback in Step 3a will compare the reviewer's on-disk write against this baseline.
+
+   **Dispatch `code-reviewer`** with model `crossProvider.capable` and corresponding `cli` for a **full-diff** verification. Fill EVERY placeholder used by `review-code-prompt.md`:
    - `{WHAT_WAS_IMPLEMENTED}` — the same value used in Iteration 1 Step 2 (the implementation summary supplied to this protocol). Final Verification re-uses this content unchanged so the reviewer sees the original implementation context.
    - `{PLAN_OR_REQUIREMENTS}` — the same value used in Iteration 1 Step 2 (the plan or requirements text supplied to this protocol). Final Verification re-uses this content unchanged so the reviewer evaluates the post-remediation diff against the original plan/requirements.
    - `{BASE_SHA}` — original BASE_SHA from this prompt (pre-implementation)
@@ -214,7 +239,7 @@ When a review pass finds no Critical/Important issues (hybrid reviews converge):
 
    Every placeholder above MUST be filled before dispatch — leaving `{WHAT_WAS_IMPLEMENTED}` or `{PLAN_OR_REQUIREMENTS}` unfilled would dispatch the reviewer with literal `{WHAT_WAS_IMPLEMENTED}` / `{PLAN_OR_REQUIREMENTS}` strings in its task prompt and produce an unreliable final-verification verdict.
 
-   Then extract and validate the reviewer's artifact handoff using the SAME substeps 3a–3e procedure as Iteration 1 Step 3 (`parse-artifact-handoff.py`, BYTE-EQUAL provenance check, `validate-review-provenance.py --allowed-tiers crossProvider.capable`). On validation success, treat the on-disk file content as the authoritative final-verification review.
+   Then extract and validate the reviewer's artifact handoff using the SAME substeps 3a–3e procedure as Iteration 1 Step 3 (`parse-artifact-handoff.py --marker REVIEW_ARTIFACT --freshness-baseline <REVIEW_BASELINE>`, BYTE-EQUAL provenance check, `validate-review-provenance.py --allowed-tiers crossProvider.capable`). When the parser's stdout JSON `used_fallback` field is `true`, treat the on-disk review file as authoritative (per the existing 3e contract) and continue with the BYTE-EQUAL provenance check and the `validate-review-provenance.py` defense-in-depth check. Failure of either provenance check still triggers `STATUS: failed` with the existing provenance malformed reason. On validation success, treat the on-disk file content as the authoritative final-verification review.
 
 2. **Parse the final-verification verdict** from the on-disk review file (the same `**Verdict:**` line check as Iteration 1 Step 4). Branch:
 

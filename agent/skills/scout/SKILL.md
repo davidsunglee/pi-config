@@ -77,6 +77,14 @@ Read `agent/skills/scout/scout-prompt.md` from disk and substitute every placeho
 
 ## Step 5: Dispatch via subagent_run_serial
 
+**Baseline-capture for the missing-marker fallback.** Immediately before dispatching, capture the pre-dispatch mtime of `{OUTPUT_PATH}` so Step 6 can validate that any on-disk brief is fresh even if the marker line is missing. Run:
+
+```bash
+BRIEF_BASELINE=$(python3 -c "import os, sys; p=sys.argv[1]; print(os.path.getmtime(p) if os.path.exists(p) else 0)" "{OUTPUT_PATH}")
+```
+
+Hold `BRIEF_BASELINE` in skill state across the dispatch. A value of `0` indicates the file did not exist before dispatch; any positive value indicates the file's mtime at dispatch time.
+
 Dispatch the scout subagent synchronously. `wait: true` is a top-level orchestration option, not a per-task field:
 
 ```
@@ -102,7 +110,7 @@ Evaluate `results[0]` from the dispatch in this exact order. The first matching 
 
 **(a) `exitCode != 0`:** surface the failure verbatim, include `transcriptPath` when available, and stop. Do not retry.
 
-**(b)–(c) Marker / path / existence check:** run `agent/skills/_shared/scripts/parse-artifact-handoff.py --marker BRIEF_ARTIFACT --final-message <path-to-finalMessage> --expected-path <{OUTPUT_PATH}> --check-existence --check-non-empty`. If the script exits non-zero, surface its output verbatim with `transcriptPath` when available and stop. Do not retry.
+**(b)–(c) Marker / path / existence check:** run `agent/skills/_shared/scripts/parse-artifact-handoff.py --marker BRIEF_ARTIFACT --final-message <path-to-finalMessage> --expected-path <{OUTPUT_PATH}> --check-existence --check-non-empty --freshness-baseline <BRIEF_BASELINE>`. If the script exits non-zero, surface its output verbatim with `transcriptPath` when available and stop. Do not retry. When `used_fallback` is `true` in the script's stdout JSON, log a one-line warning to the user noting that the on-disk file at `{OUTPUT_PATH}` was used as the brief artifact even though the dispatched subagent did not emit a `BRIEF_ARTIFACT:` terminal marker.
 
 **(success):** all three checks pass — proceed to Step 7.
 

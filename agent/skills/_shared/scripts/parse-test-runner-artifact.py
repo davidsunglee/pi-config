@@ -15,6 +15,15 @@ Failure labels (emitted in stderr JSON .failure on non-zero exit):
   failing_identifiers_count_mismatch  -- raw line count != FAILING_IDENTIFIERS_COUNT
   non_reconcilable_count_mismatch     -- entry count != NON_RECONCILABLE_COUNT
   raw_output_marker_missing  -- '--- RAW RUN OUTPUT BELOW ---' line absent
+
+When --freshness-baseline is supplied together with --final-message and --expected-path,
+a missing-marker fallback is performed: if the on-disk artifact is fresh (mtime > baseline)
+and non-empty, the missing marker is accepted and the artifact's structural-format
+validation is then run as today.
+
+Success JSON output includes a top-level 'used_fallback' boolean:
+  true  -- the missing-marker fallback was used for the marker portion of the parse
+  false -- the marker was present and valid, or the handoff invocation was skipped
 """
 
 import argparse
@@ -218,6 +227,10 @@ Failure labels (in stderr JSON .failure):
   failing_identifiers_count_mismatch raw line count != FAILING_IDENTIFIERS_COUNT
   non_reconcilable_count_mismatch    entry count != NON_RECONCILABLE_COUNT
   raw_output_marker_missing          '--- RAW RUN OUTPUT BELOW ---' line absent
+
+Success JSON output includes 'used_fallback' boolean: true when the missing-marker
+fallback was used, false when the marker was present and valid or the handoff
+invocation was skipped.
 """,
     )
     parser.add_argument("--artifact", required=True, metavar="PATH",
@@ -226,27 +239,36 @@ Failure labels (in stderr JSON .failure):
                         help="Path to the subagent final-message file (used with --expected-path).")
     parser.add_argument("--expected-path", metavar="PATH",
                         help="Expected artifact path extracted from --final-message.")
+    parser.add_argument("--freshness-baseline", metavar="UNIX_MTIME",
+                        help="Pre-dispatch mtime of the expected artifact. When supplied together with --final-message and --expected-path, a missing TEST_RESULT_ARTIFACT marker is acceptable if the on-disk artifact is fresh (mtime > baseline) and non-empty.")
     args = parser.parse_args()
 
+    used_fallback = False
     if args.final_message and args.expected_path:
         handoff_script = Path(__file__).resolve().parent / "parse-artifact-handoff.py"
+        argv = [
+            sys.executable, str(handoff_script),
+            "--marker", "TEST_RESULT_ARTIFACT",
+            "--final-message", args.final_message,
+            "--expected-path", args.expected_path,
+            "--check-existence",
+            "--check-non-empty",
+        ]
+        if args.freshness_baseline is not None:
+            argv.extend(["--freshness-baseline", args.freshness_baseline])
         result = subprocess.run(
-            [
-                sys.executable, str(handoff_script),
-                "--marker", "TEST_RESULT_ARTIFACT",
-                "--final-message", args.final_message,
-                "--expected-path", args.expected_path,
-                "--check-existence",
-                "--check-non-empty",
-            ],
+            argv,
             capture_output=True,
             text=True,
         )
         if result.returncode != 0:
             sys.stderr.write(result.stderr)
             sys.exit(result.returncode)
+        handoff_data = json.loads(result.stdout)
+        used_fallback = bool(handoff_data.get("used_fallback", False))
 
     data = parse_artifact(args.artifact)
+    data["used_fallback"] = used_fallback
     print(json.dumps(data, indent=2))
     sys.exit(0)
 

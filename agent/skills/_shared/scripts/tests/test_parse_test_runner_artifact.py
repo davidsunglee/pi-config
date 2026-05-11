@@ -4,6 +4,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 
 SCRIPT = os.path.join(
@@ -148,6 +149,7 @@ class TestSuccessJsonShape(unittest.TestCase):
                     "failing_identifiers",
                     "non_reconcilable_count",
                     "non_reconcilable_failures",
+                    "used_fallback",
                 },
             )
         finally:
@@ -446,6 +448,102 @@ class TestNoPhaseInlineContent(unittest.TestCase):
             self.assertIn('"phase": null', stdout)
         finally:
             os.unlink(path)
+
+
+class TestFinalMessageHandoffFallback(unittest.TestCase):
+    def test_missing_marker_fresh_artifact_succeeds(self):
+        artifact_path = write_temp_artifact(CLEAN_ARTIFACT)
+        artifact_mtime = os.path.getmtime(artifact_path)
+        message_content = "Some preamble.\n"
+        message_path = write_temp_message(message_content)
+        baseline = artifact_mtime - 60
+        try:
+            rc, data, _, _ = run_script(
+                "--artifact", artifact_path,
+                "--final-message", message_path,
+                "--expected-path", artifact_path,
+                "--freshness-baseline", str(baseline),
+            )
+            self.assertEqual(rc, 0)
+            self.assertIsNotNone(data)
+            self.assertEqual(data["exit_code"], 0)
+            self.assertEqual(data["failing_identifiers"], [])
+            self.assertTrue(data.get("used_fallback"))
+        finally:
+            os.unlink(artifact_path)
+            os.unlink(message_path)
+
+    def test_missing_marker_stale_artifact_fails(self):
+        artifact_path = write_temp_artifact(CLEAN_ARTIFACT)
+        artifact_mtime = os.path.getmtime(artifact_path)
+        message_content = "Some preamble.\n"
+        message_path = write_temp_message(message_content)
+        baseline = artifact_mtime + 60
+        try:
+            rc, _, _, stderr = run_script(
+                "--artifact", artifact_path,
+                "--final-message", message_path,
+                "--expected-path", artifact_path,
+                "--freshness-baseline", str(baseline),
+            )
+            self.assertNotEqual(rc, 0)
+            self.assertIn("missing TEST_RESULT_ARTIFACT marker", stderr)
+        finally:
+            os.unlink(artifact_path)
+            os.unlink(message_path)
+
+    def test_missing_marker_no_baseline_still_strict(self):
+        artifact_path = write_temp_artifact(CLEAN_ARTIFACT)
+        message_content = "Some preamble.\n"
+        message_path = write_temp_message(message_content)
+        try:
+            rc, _, _, stderr = run_script(
+                "--artifact", artifact_path,
+                "--final-message", message_path,
+                "--expected-path", artifact_path,
+            )
+            self.assertNotEqual(rc, 0)
+            self.assertIn("missing TEST_RESULT_ARTIFACT marker", stderr)
+        finally:
+            os.unlink(artifact_path)
+            os.unlink(message_path)
+
+    def test_marker_present_baseline_supplied_succeeds(self):
+        artifact_path = write_temp_artifact(CLEAN_ARTIFACT)
+        artifact_mtime = os.path.getmtime(artifact_path)
+        message_content = f"Some preamble.\nTEST_RESULT_ARTIFACT: {artifact_path}\n"
+        message_path = write_temp_message(message_content)
+        baseline = artifact_mtime - 60
+        try:
+            rc, data, _, _ = run_script(
+                "--artifact", artifact_path,
+                "--final-message", message_path,
+                "--expected-path", artifact_path,
+                "--freshness-baseline", str(baseline),
+            )
+            self.assertEqual(rc, 0)
+            self.assertIsNotNone(data)
+            self.assertFalse(data.get("used_fallback"))
+        finally:
+            os.unlink(artifact_path)
+            os.unlink(message_path)
+
+    def test_marker_present_no_baseline_succeeds(self):
+        artifact_path = write_temp_artifact(CLEAN_ARTIFACT)
+        message_content = f"Some preamble.\nTEST_RESULT_ARTIFACT: {artifact_path}\n"
+        message_path = write_temp_message(message_content)
+        try:
+            rc, data, _, _ = run_script(
+                "--artifact", artifact_path,
+                "--final-message", message_path,
+                "--expected-path", artifact_path,
+            )
+            self.assertEqual(rc, 0)
+            self.assertIsNotNone(data)
+            self.assertFalse(data.get("used_fallback"))
+        finally:
+            os.unlink(artifact_path)
+            os.unlink(message_path)
 
 
 if __name__ == "__main__":

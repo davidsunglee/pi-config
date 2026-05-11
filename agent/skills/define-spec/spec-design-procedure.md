@@ -26,7 +26,7 @@ The orchestrator passes the user's raw input as your task body. Detect the shape
 | Shape | Pattern | Behavior |
 | --- | --- | --- |
 | **Todo ID** | after trimming surrounding whitespace and lowercasing the input, the result matches `^TODO-[0-9a-f]{8}$` case-insensitively — so `TODO-BD750B75` and `TODO-bd750b75 ` (trailing space) both match (resolving to canonical lowercase `bd750b75`), while `bd750b75` (no prefix) and `/define-spec TODO-bd750b75` (slash-command leak) still fall through to freeform | Extract the captured 8-char hex as the **raw todo id** (`<raw-id>`) — the part *without* the `TODO-` prefix. Todo files are stored on disk by raw hex filename: read `docs/todos/<raw-id>.md` to get the title and full body (e.g. input `TODO-075cf515` → read `docs/todos/075cf515.md`). Do **not** read `docs/todos/TODO-<raw-id>.md` — that path does not exist. (When dispatched as the `spec-designer` subagent, the agent's tool surface intentionally omits `todo` — direct file read is the expected path. On the orchestrator's inline branch the `todo` tool may be available; either way, reading the file directly is correct.) Set provenance to `Source: TODO-<raw-id>` (the prefix is re-added in the provenance line). Check whether `docs/briefs/TODO-<raw-id>-brief.md` exists; if it does, read it as scout context and set the `Scout brief:` provenance line. If it does not exist, proceed without — do not fail. |
-| **Existing-spec path** | string ends in `.md` and is **either** (a) a relative path that begins with `docs/specs/`, **or** (b) an absolute path that contains the segment `/docs/specs/` (e.g. `/Users/.../<repo>/docs/specs/foo.md` — this is the form the orchestrator's `SPEC_ARTIFACT: <absolute path>` emits and the review prompt's Refine option replays back in), **and** the file exists on disk | Read the existing draft. Treat it as starting context. Preserve its preamble lines (`Source:`, `Scout brief:`) verbatim on rewrite. Q&A focuses on filling gaps and refining unclear sections. **Overwrite the same path** at the end (use the input path as-is — do not normalize between relative and absolute). The spec self-review pass (Step 7) is mandatory. |
+| **Existing-spec path** | string ends in `.md` and is **either** (a) a relative path that begins with `docs/specs/`, **or** (b) an absolute path that contains the segment `/docs/specs/` (e.g. `/Users/.../<repo>/docs/specs/foo.md` — this is the form the orchestrator's `SPEC_ARTIFACT: <absolute path>` emits and the review prompt's Refine option replays back in), **and** the file exists on disk | Read the existing draft. Treat it as starting context. Preserve its preamble lines (`Source:`, `Scout brief:`) verbatim on rewrite. Q&A focuses on filling gaps and refining unclear sections. **Overwrite the absolute path** `{SPEC_OUTPUT_PATH}` at the end — the orchestrator pre-computes and passes this path; do not generate your own filename. The spec self-review pass (Step 7) is mandatory. |
 | **Freeform text** | anything else | Use the text as a seed. Do not look up a scout brief. Do not emit a `Source:` or `Scout brief:` preamble. Run the full Q&A. |
 
 ## Step 2: Codebase survey
@@ -103,7 +103,13 @@ Fix issues by re-asking targeted questions if needed.
 
 ## Step 8: Write the spec
 
-Write to `docs/specs/<YYYY-MM-DD>-<short-topic>.md` using today's date and a kebab-case topic derived from the conversation. **On the existing-spec branch, overwrite the existing path verbatim instead** — do not generate a new filename.
+Write to the orchestrator-supplied absolute path `{SPEC_OUTPUT_PATH}`. The orchestrator (`define-spec/SKILL.md` Step 3a) computes this path before dispatch from the input shape:
+
+- **Todo:** `<working-dir>/docs/specs/<YYYY-MM-DD>-<slug>.md` where `<slug>` is derived deterministically from the todo file's H1 title.
+- **Existing-spec:** the absolute resolution of the user-supplied path (e.g., `<working-dir>/docs/specs/foo.md`).
+- **Freeform:** `<working-dir>/docs/specs/<YYYY-MM-DD>-<slug>.md` where `<slug>` is derived from the first 60 characters of the input.
+
+Use `{SPEC_OUTPUT_PATH}` verbatim as the write target — do not generate your own filename, even when the Q&A surfaces a topic that suggests a different slug. The slug is a filesystem identifier; the spec's content reflects the Q&A. If the conversation reframes the topic, that is fine — the file remains at the orchestrator-supplied path, and the content captures the refined understanding. On the existing-spec branch, this means overwriting the absolute resolution of the user-supplied path; the previous "use the input path as-is" rule no longer applies (the orchestrator already absolutized the path before dispatch).
 
 Spec template (omit any section labeled OPTIONAL whose round did not run):
 
@@ -188,7 +194,7 @@ Where `<absolute path>` is the full filesystem path of the spec file you just wr
 
 In addition to the final-assistant-message marker line above, call `subagent_done(message="SPEC_ARTIFACT: <absolute path>")` as your terminal tool action. The two strings — the final-assistant-message marker line and the `subagent_done` message — must be byte-equal. The orchestrator's watcher prefers the `subagent_done` sentinel when present, then falls back to the transcript's last assistant message; emitting both ensures the marker reaches the parent regardless of which channel the watcher reads.
 
-When the existing-spec branch was fired with a relative input path (e.g. `docs/specs/foo.md`), the file write target stays at the supplied path per Step 1's directive ('use the input path as-is — do not normalize between relative and absolute'). However, the marker line emitted in both channels of `SPEC_ARTIFACT:` MUST be the absolute path of the written file (resolved against the current working directory). The 'use the input path as-is' rule applies to the file-write target only — never to the marker emission.
+The file write target is `{SPEC_OUTPUT_PATH}` (always absolute, supplied by the orchestrator). The marker line emitted in both channels of `SPEC_ARTIFACT:` MUST be byte-equal to `{SPEC_OUTPUT_PATH}`. There is no branch-specific handling — the orchestrator pre-computes `{SPEC_OUTPUT_PATH}` for all three input shapes, so the same emission rule applies uniformly.
 
 If you cannot complete the procedure (user terminates Q&A early, ambiguous input the user refuses to clarify, file write fails, etc.), exit without emitting `SPEC_ARTIFACT:`. The orchestrator will detect the missing line and surface the failure.
 
