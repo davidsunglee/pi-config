@@ -22,7 +22,7 @@ Collect the following from the caller (coder, user, or another skill):
 | Max iterations | no | 3 | Caller or execution settings |
 | Working directory | no | cwd | Worktree or project root |
 | Review output path | no | `docs/reviews/<name>-code-review` | Derived from plan name or caller-specified |
-| Carry-over review | no | empty | Path to a prior era's review file. Internally re-set on (a) Keep iterating re-entry from Step 5. May also be supplied directly by a caller for standalone "fix this set of findings, then verify" use against a hand-crafted review file (see spec Part C "Standalone-use bonus"). |
+| Carry-over review | no | empty | Path to a prior era's review file. Internally re-set on (c) Continue refining code re-entry from Step 5. May also be supplied directly by a caller for standalone "fix this set of findings, then verify" use against a hand-crafted review file (see spec Part C "Standalone-use bonus"). |
 
 If `BASE_SHA` or `HEAD_SHA` is not provided, stop with an error — the skill cannot infer these.
 
@@ -73,9 +73,9 @@ Determine the stashed outcome:
 **`STATUS: not_approved_within_budget`**
 - Stash: remaining findings and the choice menu below — to be presented to the caller only after Step 6 succeeds.
 - Choices to offer (after Step 6 passes):
-  - **(a) Keep iterating** — re-invoke this skill from Step 3 with the same inputs but `HEAD_SHA` updated to current HEAD AND --carry-over-review set to the prior era's review file path (so code-refiner runs a carry-over remediation pass against the prior era's findings before the next review). Budget resets, new cycle.
-  - **(b) Proceed with issues** — caller continues with known issues noted
-  - **(c) Stop execution** — caller halts
+  - **(c) Continue refining code** — re-invoke this skill from Step 3 with the same inputs but `HEAD_SHA` updated to current HEAD AND --carry-over-review set to the prior era's review file path (so code-refiner runs a carry-over remediation pass against the prior era's findings before the next review). Budget resets, new cycle.
+  - **(p) Proceed with issues** — caller continues with known issues noted
+  - **(x) Stop execution** — caller halts
 
 For any other outcome (`STATUS: failed`, dispatch failure, unexpected status), surface it directly to the caller per the Edge Cases section; Step 6 is skipped.
 
@@ -94,7 +94,7 @@ The caller (execute-plan or user) makes the decision. This skill does not auto-c
 >   files, ad hoc Python scripts) to second-guess the coordinator's judgment.
 > - Dispatch ad hoc remediation subagents outside the documented loop. Iteration is owned by
 >   the `code-refiner`'s internal review-remediate cycle; the only sanctioned re-entry from
->   this skill is the (a) keep-iterating choice on `not_approved_within_budget`.
+>   this skill is the (c) continue-refining choice on `not_approved_within_budget`.
 >
 > The only sanctioned post-coordinator path is: parse `finalMessage` for the `STATUS:` line,
 > validate provenance via `agent/skills/_shared/scripts/validate-review-provenance.py`
@@ -119,7 +119,7 @@ On non-zero exit, surface `refine-code: review provenance validation failed at <
 
 When validation passes, forward the code-refiner `finalMessage` verbatim. Preserve [refine-code-prompt.md](refine-code-prompt.md)'s compact `STATUS:` / `## Summary` / `## Review File` format because `execute-plan` parses it with `parse-refine-code-summary.py`; do not wrap or summarize it.
 
-Per-status additions: `approved` — none; `approved_with_concerns` — add a note pointing to the review file's `### Outcome` waiver reasoning; `not_approved_within_budget` — add the (a)/(b)/(c) menu after the forwarded blocks.
+Per-status additions: `approved` — none; `approved_with_concerns` — add a note pointing to the review file's `### Outcome` waiver reasoning; `not_approved_within_budget` — add the (c)/(p)/(x) menu after the forwarded blocks.
 
 This is the only point at which Step 5's success outcome may reach the caller.
 

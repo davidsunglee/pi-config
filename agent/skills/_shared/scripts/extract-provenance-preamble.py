@@ -3,8 +3,11 @@
 
 Supported line shapes (scanned within the bounded preamble region):
   Source: TODO-<8 hex chars>        — captured as source_todo (spec mode)
+    (also accepted as **Source:** TODO-<8 hex chars>)
   Scout brief: docs/briefs/<file>   — captured as scout_brief (spec mode)
+    (also accepted as **Scout brief:** docs/briefs/<file>)
   Git SHA: <40 hex chars>           — captured as git_sha (brief mode)
+    (also accepted as **Git SHA:** <40 hex chars>)
 
 Bound modes:
   --mode spec   : scan lines[0:min(first_h2_index, 40)]; first H2 is the
@@ -29,9 +32,9 @@ import sys
 from fence_aware import compute_in_fence_lines
 
 
-_RE_SOURCE = re.compile(r"^Source: (TODO-[0-9a-f]{8})$")
-_RE_SCOUT = re.compile(r"^Scout brief: (docs/briefs/[^/]+)$")
-_RE_GIT_SHA_LINE = re.compile(r"^Git SHA: (.+)$")
+_RE_SOURCE = re.compile(r"^(?:Source:|\*\*Source:\*\*) (TODO-[0-9a-f]{8})$")
+_RE_SCOUT = re.compile(r"^(?:Scout brief:|\*\*Scout brief:\*\*) (docs/briefs/[^/]+)$")
+_RE_GIT_SHA_LINE = re.compile(r"^(?:Git SHA:|\*\*Git SHA:\*\*) (.+)$")
 _RE_GIT_SHA_VALUE = re.compile(r"^[0-9a-f]{40}$")
 
 

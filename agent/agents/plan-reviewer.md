@@ -84,7 +84,7 @@ Your task prompt may include a designated output artifact path and a verbatim pr
 4a. End your final assistant message with exactly one anchored line on its own line, as the very last line of your output: `REVIEW_ARTIFACT: <absolute path>` where `<absolute path>` is character-for-character identical to `{REVIEW_OUTPUT_PATH}`.
 4b. Call `subagent_done(message="REVIEW_ARTIFACT: <absolute path>")` as your terminal tool action. The `message` argument MUST be byte-equal to the final-assistant-message marker line in 4a. Emitting both channels ensures the marker reaches the refiner regardless of which channel the watcher reads.
 5. Do not emit any other structured markers in your response. The on-disk file is the sole source of truth for verdict, severity counts, and findings — the refiner reads the file from disk; the marker exists only to convey the path.
-6. Conversational text before the marker line is permitted; the refiner anchors on the last `^REVIEW_ARTIFACT: (.+)$` line.
+6. The marker line MUST be the final non-empty line of your assistant message, anchored at column 1 (no leading whitespace, quote markers, or backticks). No prose, Markdown, or other content may follow the marker line on subsequent lines. The same exact string MUST be emitted as the `message` argument to `subagent_done`.
 
 **When `{REVIEW_OUTPUT_PATH}` is empty** (standalone or non-refiner dispatch):
 

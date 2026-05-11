@@ -82,7 +82,9 @@ If this task involves diagnosing a failing test, regression, or unexpected behav
 
 ## Report Format
 
-Use this exact structure:
+Your report MUST begin with a `STATUS:` line. The first non-fenced line of your report MUST be exactly `STATUS: <token>` where `<token>` is one of `DONE`, `DONE_WITH_CONCERNS`, `BLOCKED`, or `NEEDS_CONTEXT`. Do not prefix `STATUS:` with a Markdown heading marker (`#`–`######`), a bullet (`-`, `*`), bolding (`**`), or any other character. Do not place a summary paragraph, greeting, or any other text before the `STATUS:` line.
+
+The lines that follow `STATUS:` use this exact structure:
 
 ```
 STATUS: <DONE | DONE_WITH_CONCERNS | BLOCKED | NEEDS_CONTEXT>

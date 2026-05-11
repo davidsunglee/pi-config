@@ -145,7 +145,7 @@ Your final assistant message MUST end with exactly one anchored line on its own 
 TEST_RESULT_ARTIFACT: <absolute path>
 ```
 
-where `<absolute path>` is character-for-character identical to `## Artifact Output Path`. The orchestrator anchors on the LAST `^TEST_RESULT_ARTIFACT: (.+)$` line of your final message. Conversational text before the marker is permitted.
+where `<absolute path>` is character-for-character identical to `## Artifact Output Path`. The orchestrator anchors on the LAST `^TEST_RESULT_ARTIFACT: (.+)$` line of your final message. The marker line MUST be the final non-empty line of your assistant message, anchored at column 1 (no leading whitespace, quote markers, or backticks). No prose, Markdown, or other content may follow the marker line on subsequent lines.
 
 Additionally, your terminal tool action MUST be:
 

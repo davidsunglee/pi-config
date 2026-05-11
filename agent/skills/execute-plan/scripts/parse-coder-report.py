@@ -14,12 +14,17 @@ Output fields:
   protocol_warnings  — list of non-fatal warning labels
 
 Protocol-error labels (emitted to stderr as JSON, exit 1):
-  status_line_missing    — no line matching ^STATUS:\\s*(\\S+) found
+  status_line_missing    — no line matching ^#{0,6}\\s*STATUS:\\s*(\\S+) found
   status_token_invalid   — token not in {DONE, DONE_WITH_CONCERNS, BLOCKED, NEEDS_CONTEXT}
   report_unreadable      — file could not be opened (OSError)
 
 Warning labels (included in protocol_warnings in stdout JSON, exit 0):
   concerns_block_missing — DONE_WITH_CONCERNS but ## Concerns / Needs / Blocker is empty
+
+Find STATUS line — Optional Markdown heading prefix (# to ######) before STATUS: is accepted.
+STATUS line may optionally be prefixed with one to six Markdown heading markers (# to ######),
+e.g., `## STATUS: DONE`, `###STATUS: DONE`, and bare `STATUS: DONE` all parse. Fenced and
+prose-paraphrased variants still fail.
 
 Section bodies are extracted with the shared fence-aware H2 splitter; `## `-prefixed lines
 inside fenced code blocks are treated as opaque content and do not truncate the surrounding
@@ -69,7 +74,7 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Protocol-error labels (emitted to stderr as JSON, exit 1):
-  status_line_missing    no line matching ^STATUS:\\s*(\\S+) found
+  status_line_missing    no line matching ^#{0,6}\\s*STATUS:\\s*(\\S+) found (with optional Markdown heading prefix)
   status_token_invalid   token not in {DONE, DONE_WITH_CONCERNS, BLOCKED, NEEDS_CONTEXT}
   report_unreadable      file could not be opened (OSError)
 
@@ -104,7 +109,7 @@ Warning label (in stdout JSON protocol_warnings, exit 0):
     for idx, line in enumerate(raw_lines):
         if idx in in_fence:
             continue
-        m = re.match(r"^STATUS:\s*(\S+)", line.rstrip("\n"))
+        m = re.match(r"^#{0,6}\s*STATUS:\s*(\S+)", line.rstrip("\n"))
         if m:
             status_match = m
             break

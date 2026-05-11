@@ -155,6 +155,127 @@ class TestExtractProvenancePreamble(unittest.TestCase):
         finally:
             os.unlink(path)
 
+    def test_spec_mode_extracts_bold_source_todo(self):
+        content = "# Title\n\n**Source:** TODO-abcdef01\n\n## Real heading\n"
+        path = write_tmp(content)
+        try:
+            result = run(["--file", path, "--mode", "spec"])
+            self.assertEqual(result.returncode, 0)
+            data = json.loads(result.stdout)
+            self.assertEqual(data["source_todo"], "TODO-abcdef01")
+        finally:
+            os.unlink(path)
+
+    def test_spec_mode_extracts_bold_scout_brief(self):
+        content = "# Title\n\n**Scout brief:** docs/briefs/sample.md\n\n## Real heading\n"
+        path = write_tmp(content)
+        try:
+            result = run(["--file", path, "--mode", "spec"])
+            self.assertEqual(result.returncode, 0)
+            data = json.loads(result.stdout)
+            self.assertEqual(data["scout_brief"], "docs/briefs/sample.md")
+        finally:
+            os.unlink(path)
+
+    def test_brief_mode_extracts_bold_git_sha(self):
+        content = "# Brief\n**Git SHA:** 1234567890abcdef1234567890abcdef12345678\n"
+        path = write_tmp(content)
+        try:
+            result = run(["--file", path, "--mode", "brief"])
+            self.assertEqual(result.returncode, 0)
+            data = json.loads(result.stdout)
+            self.assertEqual(data["git_sha"], "1234567890abcdef1234567890abcdef12345678")
+        finally:
+            os.unlink(path)
+
+    def test_brief_mode_bold_git_sha_malformed_fails_closed(self):
+        content = "# Brief\n**Git SHA:** not-a-sha\n"
+        path = write_tmp(content)
+        try:
+            result = run(["--file", path, "--mode", "brief"])
+            self.assertEqual(result.returncode, 1)
+            err = json.loads(result.stderr)
+            self.assertEqual(err["failure"], "git_sha_malformed")
+        finally:
+            os.unlink(path)
+
+    def test_spec_mode_bold_provenance_inside_fence_ignored(self):
+        content = (
+            "# Title\n"
+            "\n"
+            "```markdown\n"
+            "**Source:** TODO-abcdef01\n"
+            "**Scout brief:** docs/briefs/sample.md\n"
+            "```\n"
+            "\n"
+            "## Real heading\n"
+        )
+        path = write_tmp(content)
+        try:
+            result = run(["--file", path, "--mode", "spec"])
+            self.assertEqual(result.returncode, 0)
+            data = json.loads(result.stdout)
+            self.assertIsNone(data["source_todo"])
+            self.assertIsNone(data["scout_brief"])
+        finally:
+            os.unlink(path)
+
+    def test_spec_mode_malformed_asterisks_rejected(self):
+        # Test single asterisks
+        content = "*Source:* TODO-abcdef01\n\n## Real heading\n"
+        path = write_tmp(content)
+        try:
+            result = run(["--file", path, "--mode", "spec"])
+            self.assertEqual(result.returncode, 0)
+            data = json.loads(result.stdout)
+            self.assertIsNone(data["source_todo"])
+        finally:
+            os.unlink(path)
+
+        # Test open without close
+        content = "**Source: TODO-abcdef01\n\n## Real heading\n"
+        path = write_tmp(content)
+        try:
+            result = run(["--file", path, "--mode", "spec"])
+            self.assertEqual(result.returncode, 0)
+            data = json.loads(result.stdout)
+            self.assertIsNone(data["source_todo"])
+        finally:
+            os.unlink(path)
+
+        # Test close without open
+        content = "Source:** TODO-abcdef01\n\n## Real heading\n"
+        path = write_tmp(content)
+        try:
+            result = run(["--file", path, "--mode", "spec"])
+            self.assertEqual(result.returncode, 0)
+            data = json.loads(result.stdout)
+            self.assertIsNone(data["source_todo"])
+        finally:
+            os.unlink(path)
+
+        # Test mismatched count
+        content = "*Source:** TODO-abcdef01\n\n## Real heading\n"
+        path = write_tmp(content)
+        try:
+            result = run(["--file", path, "--mode", "spec"])
+            self.assertEqual(result.returncode, 0)
+            data = json.loads(result.stdout)
+            self.assertIsNone(data["source_todo"])
+        finally:
+            os.unlink(path)
+
+    def test_brief_mode_malformed_asterisks_git_sha_rejected(self):
+        content = "# Brief\n*Git SHA:* 1234567890abcdef1234567890abcdef12345678\n"
+        path = write_tmp(content)
+        try:
+            result = run(["--file", path, "--mode", "brief"])
+            self.assertEqual(result.returncode, 0)
+            data = json.loads(result.stdout)
+            self.assertIsNone(data["git_sha"])
+        finally:
+            os.unlink(path)
+
 
 class TestSpecModeFencedHeading(unittest.TestCase):
 

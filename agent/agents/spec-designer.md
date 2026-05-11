@@ -19,3 +19,4 @@ Hard rules:
 - Do not run builds or tests, install packages, create todos, or invoke downstream planning or implementation work.
 - The only file writes allowed are spec markdown writes under `docs/specs/*.md`, and only at the procedure's write step after the Q&A and self-review flow.
 - Do not commit. The orchestrator owns review and commit gates.
+- End your final assistant message with a single anchored line `SPEC_ARTIFACT: <absolute path>` matching the orchestrator-supplied output path exactly. The marker line MUST be the final non-empty line of your assistant message; no further prose, Markdown, or content may follow it on subsequent lines. Also call `subagent_done(message="SPEC_ARTIFACT: <absolute path>")` as your terminal tool action.

@@ -8,12 +8,41 @@ characters. Earlier marker-shaped lines anywhere else in the message are ignored
 
 Supported markers: BRIEF_ARTIFACT, SPEC_ARTIFACT, PLAN_ARTIFACT, REVIEW_ARTIFACT, TEST_RESULT_ARTIFACT
 
+Options:
+  --marker MARKER               Artifact marker to extract.
+  --final-message PATH          Path to the subagent final-message file, or '-' to read from stdin.
+  --expected-path PATH          Assert the extracted path exactly equals this value.
+  --freshness-baseline UNIX_MTIME
+                                Unix mtime captured before dispatch; pass 0 if the expected file
+                                did not exist. When supplied together with --expected-path, a missing
+                                marker is acceptable if the expected file exists, is non-empty, and
+                                has mtime strictly greater than this value.
+  --check-existence             Verify the extracted path exists on disk.
+  --check-non-empty             Verify the extracted path is a file with non-whitespace content.
+  --require-path-suffix SUFFIX  Verify the extracted path ends with this string (e.g., '.md').
+  --require-path-prefix ABS_DIR Verify the extracted path's realpath starts with the realpath of
+                                this absolute directory followed by '/'.
+
 Canonical failure labels (appear in stderr JSON .failure):
   missing <MARKER> marker
   path mismatch: expected <X> got <Y>
   missing or empty at <path>
   path suffix mismatch: expected suffix <X> for path <Y>
   path prefix mismatch: expected prefix <X> for path <Y>
+
+On-disk fallback:
+  When both --expected-path and --freshness-baseline are supplied and the terminal
+  line is not a valid marker, the script attempts a fallback: if the expected file
+  exists, is non-empty, and has an mtime strictly greater than --freshness-baseline,
+  the missing marker is accepted and the success JSON includes "used_fallback": true.
+  This fallback is REJECTED if a marker-shaped line appears in a malformed context
+  (indented, >-quoted, backtick-wrapped, or inside a fenced code block).
+
+Success JSON output fields:
+  path          - The resolved artifact path.
+  marker        - The marker name.
+  checks        - List of checks that passed (e.g., ["marker"], ["marker", "existence"]).
+  used_fallback - True if the on-disk freshness fallback was used; False otherwise.
 """
 
 import argparse
@@ -70,6 +99,16 @@ def main() -> None:
         help="Assert the extracted path exactly equals this value",
     )
     parser.add_argument(
+        "--freshness-baseline",
+        metavar="UNIX_MTIME",
+        type=float,
+        help=(
+            "Unix mtime captured before dispatch; pass 0 if the expected file did not exist. "
+            "When supplied together with --expected-path, a missing marker is acceptable if "
+            "the expected file exists, is non-empty, and has mtime strictly greater than this value."
+        ),
+    )
+    parser.add_argument(
         "--check-existence",
         action="store_true",
         help="Verify the extracted path exists on disk",
@@ -110,13 +149,65 @@ def main() -> None:
 
     pattern = re.compile(r"^" + re.escape(args.marker) + r": (.+)$")
     match = pattern.match(terminal_line)
-    if not match:
-        fail(f"missing {args.marker} marker")
+    marker_match = match
 
-    path = match.group(1)
+    used_fallback = False
 
-    if args.expected_path is not None and path != args.expected_path:
-        fail(f"path mismatch: expected {args.expected_path} got {path}")
+    if marker_match is None:
+        # Fallback decision block: scan for malformed marker attempts
+        malformed_marker_re_outside_fence = re.compile(
+            r"^[ \t>`]+" + re.escape(args.marker) + r":\s*\S"
+        )
+        marker_shape_re = re.compile(r"^" + re.escape(args.marker) + r":\s*\S")
+
+        in_fence = False
+        malformed_marker_seen = False
+
+        for line in content.split("\n"):
+            stripped = line.strip()
+            if stripped.startswith("```"):
+                in_fence = not in_fence
+                continue
+
+            if malformed_marker_re_outside_fence.match(line):
+                malformed_marker_seen = True
+            elif in_fence and marker_shape_re.match(line):
+                malformed_marker_seen = True
+            elif not in_fence and marker_shape_re.match(line) and line != terminal_line:
+                # Non-terminal column-1 marker-shaped line outside a fence
+                m = pattern.match(line)
+                if m and args.expected_path is not None:
+                    extracted_path = m.group(1)
+                    if extracted_path != args.expected_path:
+                        fail(f"path mismatch: expected {args.expected_path} got {extracted_path}")
+
+        if malformed_marker_seen:
+            fail(f"missing {args.marker} marker")
+
+        if args.expected_path is None or args.freshness_baseline is None:
+            fail(f"missing {args.marker} marker")
+
+        # On-disk freshness fallback
+        try:
+            with open(args.expected_path, "r") as fh:
+                file_content = fh.read()
+        except OSError:
+            fail(f"missing or empty at {args.expected_path}")
+
+        if file_content.strip() == "":
+            fail(f"missing or empty at {args.expected_path}")
+
+        current_mtime = os.path.getmtime(args.expected_path)
+        if current_mtime <= args.freshness_baseline:
+            fail(f"missing {args.marker} marker")
+
+        path = args.expected_path
+        used_fallback = True
+    else:
+        path = marker_match.group(1)
+
+        if args.expected_path is not None and path != args.expected_path:
+            fail(f"path mismatch: expected {args.expected_path} got {path}")
 
     checks = ["marker"]
 
@@ -147,7 +238,7 @@ def main() -> None:
             fail(f"path prefix mismatch: expected prefix {args.require_path_prefix} for path {path}")
         checks.append("path-prefix")
 
-    json.dump({"path": path, "marker": args.marker, "checks": checks}, sys.stdout)
+    json.dump({"path": path, "marker": args.marker, "checks": checks, "used_fallback": used_fallback}, sys.stdout)
     sys.stdout.write("\n")
     sys.exit(0)
 

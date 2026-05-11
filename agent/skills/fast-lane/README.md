@@ -33,7 +33,7 @@ Fast lane runs the following phases in order, each with a menu when action or de
 
 7. **Commit** — Invoke the commit skill (no path restriction) to commit the coder's changes with a Conventional Commits message derived from the spec goal. Capture the commit SHA.
 
-8. **Refine-code** — Invoke `refine-code` with BASE_SHA, HEAD_SHA, the spec description, plan contents, max iterations (customizable via run state), and review-output path namespaced with `-fast-lane-review`. Refine-code's existing menu stays as-is. Menu: refine-code's options; proceed on `approved`, `approved_with_concerns`, or `(b) Proceed with issues`.
+8. **Refine-code** — Invoke `refine-code` with BASE_SHA, HEAD_SHA, the spec description, plan contents, max iterations (customizable via run state), and review-output path namespaced with `-fast-lane-review`. Refine-code's existing menu stays as-is. Menu: refine-code's options; proceed on `approved`, `approved_with_concerns`, or `(p) Proceed with issues`.
 
 9. **Todo closure** — If the input was a todo ID or the spec preamble contains `Source: TODO-<id>`, update the todo status to `done` and append a completion line.
 
@@ -104,7 +104,7 @@ Fast lane creates the following on-disk artifacts:
 - **Test-run logs** — `docs/test-runs/<spec-name>/full-suite.log` (always, if test command is detected). For todo-only inputs (no spec involved), substitute `TODO-<id>` for `<spec-name>`.
 - **Baseline logs** — `docs/test-runs/<spec-name>/baseline.log` (optional, created only if `(b) Compare with baseline` is chosen in Step 6). A companion `docs/test-runs/<spec-name>/baseline-failures.json` is created in the same condition.
 - **Review artifacts** — `docs/reviews/<spec-name>-fast-lane-review-v<ERA>.md` (always, after refine-code completes). The `-fast-lane-review` namespacing distinguishes fast-lane review artifacts from deep-workflow reviews targeting the same spec. Follow refine-code's retention policy (kept).
-- **Cleanup on success** — On successful completion (refine-code returns `approved`, `approved_with_concerns`, or `(b) Proceed with issues`), the per-spec test-runs directory is cleaned up via `cleanup-test-runs.py`. Baseline artifacts, once written, are also removed.
+- **Cleanup on success** — On successful completion (refine-code returns `approved`, `approved_with_concerns`, or `(p) Proceed with issues`), the per-spec test-runs directory is cleaned up via `cleanup-test-runs.py`. Baseline artifacts, once written, are also removed.
 - **Preservation on stop** — Test-runs artifacts are preserved on any stop exit (verification `(x)`, baseline-stash-conflict hard-stop, coder BLOCKED, refine-code budget-exhaustion).
 
 ## Files

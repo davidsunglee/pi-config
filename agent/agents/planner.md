@@ -239,7 +239,7 @@ After saving the plan in initial-generation mode:
    PLAN_ARTIFACT: <absolute path>
    ```
 
-   Where `<absolute path>` is character-for-character identical to the `{OUTPUT_PATH}` supplied in your task prompt. No surrounding backticks, no trailing commentary on the same line.
+   Where `<absolute path>` is character-for-character identical to the `{OUTPUT_PATH}` supplied in your task prompt. No surrounding backticks, no trailing commentary on the same line. The marker line MUST be the final non-empty line of your assistant message; no further prose, Markdown, or content may follow it on subsequent lines.
 
 2. Call `subagent_done(message="PLAN_ARTIFACT: <absolute path>")` as your terminal tool action. The `message` argument must be byte-equal to the final-assistant-message marker line.
 

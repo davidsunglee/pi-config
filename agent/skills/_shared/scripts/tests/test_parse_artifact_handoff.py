@@ -434,5 +434,286 @@ class TestParseArtifactHandoff(unittest.TestCase):
                 os.unlink(msg_path_c)
 
 
+class TestFreshnessBaselineFallback(unittest.TestCase):
+
+    def _make_fresh_artifact(self, content="real review"):
+        """Create a temp file with content and return (path, mtime)."""
+        f = tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False)
+        f.write(content)
+        f.close()
+        mtime = os.path.getmtime(f.name)
+        return f.name, mtime
+
+    def _make_message(self, body):
+        """Write body to a temp file and return its path."""
+        f = tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False)
+        f.write(body)
+        f.close()
+        return f.name
+
+    def test_missing_marker_fresh_file_accepted(self):
+        artifact_path, mtime = self._make_fresh_artifact("real review")
+        msg_path = self._make_message("Some preamble.\nNo marker here.\n")
+        try:
+            result = run_script(
+                "--marker", "BRIEF_ARTIFACT",
+                "--final-message", msg_path,
+                "--expected-path", artifact_path,
+                "--freshness-baseline", str(mtime - 60),
+            )
+            self.assertEqual(result.returncode, 0, msg=f"stderr: {result.stderr}")
+            data = json.loads(result.stdout)
+            self.assertTrue(data["used_fallback"])
+            self.assertEqual(data["path"], artifact_path)
+        finally:
+            os.unlink(artifact_path)
+            os.unlink(msg_path)
+
+    def test_missing_marker_stale_file_rejected(self):
+        artifact_path, mtime = self._make_fresh_artifact("real review")
+        msg_path = self._make_message("No marker here.\n")
+        try:
+            result = run_script(
+                "--marker", "BRIEF_ARTIFACT",
+                "--final-message", msg_path,
+                "--expected-path", artifact_path,
+                "--freshness-baseline", str(mtime),  # equal, not strictly greater
+            )
+            self.assertNotEqual(result.returncode, 0)
+            data = json.loads(result.stderr)
+            self.assertEqual(data["failure"], "missing BRIEF_ARTIFACT marker")
+        finally:
+            os.unlink(artifact_path)
+            os.unlink(msg_path)
+
+    def test_missing_marker_missing_file_rejected(self):
+        nonexistent_path = "/tmp/does-not-exist-freshness-test-abc123.md"
+        msg_path = self._make_message("No marker here.\n")
+        try:
+            result = run_script(
+                "--marker", "BRIEF_ARTIFACT",
+                "--final-message", msg_path,
+                "--expected-path", nonexistent_path,
+                "--freshness-baseline", "0",
+            )
+            self.assertNotEqual(result.returncode, 0)
+            data = json.loads(result.stderr)
+            self.assertEqual(data["failure"], f"missing or empty at {nonexistent_path}")
+        finally:
+            os.unlink(msg_path)
+
+    def test_missing_marker_empty_file_rejected(self):
+        artifact_path, mtime = self._make_fresh_artifact("   \n\t\n  \n")
+        msg_path = self._make_message("No marker here.\n")
+        try:
+            result = run_script(
+                "--marker", "BRIEF_ARTIFACT",
+                "--final-message", msg_path,
+                "--expected-path", artifact_path,
+                "--freshness-baseline", str(mtime - 60),
+            )
+            self.assertNotEqual(result.returncode, 0)
+            data = json.loads(result.stderr)
+            self.assertEqual(data["failure"], f"missing or empty at {artifact_path}")
+        finally:
+            os.unlink(artifact_path)
+            os.unlink(msg_path)
+
+    def test_missing_marker_no_baseline_strict(self):
+        artifact_path, mtime = self._make_fresh_artifact("real content")
+        msg_path = self._make_message("No marker here.\n")
+        try:
+            result = run_script(
+                "--marker", "BRIEF_ARTIFACT",
+                "--final-message", msg_path,
+                "--expected-path", artifact_path,
+                # no --freshness-baseline
+            )
+            self.assertNotEqual(result.returncode, 0)
+            data = json.loads(result.stderr)
+            self.assertEqual(data["failure"], "missing BRIEF_ARTIFACT marker")
+        finally:
+            os.unlink(artifact_path)
+            os.unlink(msg_path)
+
+    def test_missing_marker_no_expected_path_strict(self):
+        msg_path = self._make_message("No marker here.\n")
+        try:
+            result = run_script(
+                "--marker", "BRIEF_ARTIFACT",
+                "--final-message", msg_path,
+                "--freshness-baseline", "0",
+                # no --expected-path
+            )
+            self.assertNotEqual(result.returncode, 0)
+            data = json.loads(result.stderr)
+            self.assertEqual(data["failure"], "missing BRIEF_ARTIFACT marker")
+        finally:
+            os.unlink(msg_path)
+
+    def test_marker_present_path_mismatch_still_fails_with_baseline(self):
+        artifact_path, mtime = self._make_fresh_artifact("real content")
+        msg_path = self._make_message("BRIEF_ARTIFACT: /other/path\n")
+        try:
+            result = run_script(
+                "--marker", "BRIEF_ARTIFACT",
+                "--final-message", msg_path,
+                "--expected-path", artifact_path,
+                "--freshness-baseline", str(mtime - 60),
+            )
+            self.assertNotEqual(result.returncode, 0)
+            data = json.loads(result.stderr)
+            self.assertTrue(
+                data["failure"].startswith("path mismatch: expected"),
+                msg=f"Unexpected failure: {data['failure']}",
+            )
+        finally:
+            os.unlink(artifact_path)
+            os.unlink(msg_path)
+
+    def test_marker_present_used_fallback_false(self):
+        artifact_path, mtime = self._make_fresh_artifact("real content")
+        msg_path = self._make_message(f"BRIEF_ARTIFACT: {artifact_path}\n")
+        try:
+            result = run_script(
+                "--marker", "BRIEF_ARTIFACT",
+                "--final-message", msg_path,
+                "--expected-path", artifact_path,
+                "--freshness-baseline", str(mtime - 60),
+            )
+            self.assertEqual(result.returncode, 0, msg=f"stderr: {result.stderr}")
+            data = json.loads(result.stdout)
+            self.assertFalse(data["used_fallback"])
+        finally:
+            os.unlink(artifact_path)
+            os.unlink(msg_path)
+
+    def test_marker_in_fenced_block_rejects_fallback(self):
+        artifact_path, mtime = self._make_fresh_artifact("real content")
+        body = "```\nBRIEF_ARTIFACT: /x\n```\n\nDone."
+        msg_path = self._make_message(body)
+        try:
+            result = run_script(
+                "--marker", "BRIEF_ARTIFACT",
+                "--final-message", msg_path,
+                "--expected-path", artifact_path,
+                "--freshness-baseline", str(mtime - 60),
+            )
+            self.assertNotEqual(result.returncode, 0)
+            data = json.loads(result.stderr)
+            self.assertEqual(data["failure"], "missing BRIEF_ARTIFACT marker")
+        finally:
+            os.unlink(artifact_path)
+            os.unlink(msg_path)
+
+    def test_marker_in_quoted_block_rejects_fallback(self):
+        artifact_path, mtime = self._make_fresh_artifact("real content")
+        msg_path = self._make_message("> BRIEF_ARTIFACT: /x\n\nDone.\n")
+        try:
+            result = run_script(
+                "--marker", "BRIEF_ARTIFACT",
+                "--final-message", msg_path,
+                "--expected-path", artifact_path,
+                "--freshness-baseline", str(mtime - 60),
+            )
+            self.assertNotEqual(result.returncode, 0)
+            data = json.loads(result.stderr)
+            self.assertEqual(data["failure"], "missing BRIEF_ARTIFACT marker")
+        finally:
+            os.unlink(artifact_path)
+            os.unlink(msg_path)
+
+    def test_marker_indented_rejects_fallback(self):
+        artifact_path, mtime = self._make_fresh_artifact("real content")
+        msg_path = self._make_message("    BRIEF_ARTIFACT: /x\n\nDone.\n")
+        try:
+            result = run_script(
+                "--marker", "BRIEF_ARTIFACT",
+                "--final-message", msg_path,
+                "--expected-path", artifact_path,
+                "--freshness-baseline", str(mtime - 60),
+            )
+            self.assertNotEqual(result.returncode, 0)
+            data = json.loads(result.stderr)
+            self.assertEqual(data["failure"], "missing BRIEF_ARTIFACT marker")
+        finally:
+            os.unlink(artifact_path)
+            os.unlink(msg_path)
+
+    def test_marker_backticked_rejects_fallback(self):
+        artifact_path, mtime = self._make_fresh_artifact("real content")
+        msg_path = self._make_message("`BRIEF_ARTIFACT: /x`\n\nDone.\n")
+        try:
+            result = run_script(
+                "--marker", "BRIEF_ARTIFACT",
+                "--final-message", msg_path,
+                "--expected-path", artifact_path,
+                "--freshness-baseline", str(mtime - 60),
+            )
+            self.assertNotEqual(result.returncode, 0)
+            data = json.loads(result.stderr)
+            self.assertEqual(data["failure"], "missing BRIEF_ARTIFACT marker")
+        finally:
+            os.unlink(artifact_path)
+            os.unlink(msg_path)
+
+    def test_no_marker_shaped_lines_fallback_accepts(self):
+        artifact_path, mtime = self._make_fresh_artifact("real content")
+        msg_path = self._make_message("Some preamble.\nAll done.\n")
+        try:
+            result = run_script(
+                "--marker", "BRIEF_ARTIFACT",
+                "--final-message", msg_path,
+                "--expected-path", artifact_path,
+                "--freshness-baseline", str(mtime - 60),
+            )
+            self.assertEqual(result.returncode, 0, msg=f"stderr: {result.stderr}")
+            data = json.loads(result.stdout)
+            self.assertTrue(data["used_fallback"])
+        finally:
+            os.unlink(artifact_path)
+            os.unlink(msg_path)
+
+    def test_marker_followed_by_summary_accepted(self):
+        artifact_path, mtime = self._make_fresh_artifact("real content")
+        body = f"BRIEF_ARTIFACT: {artifact_path}\n\nSummary: I wrote the brief and verified the headings.\n"
+        msg_path = self._make_message(body)
+        try:
+            result = run_script(
+                "--marker", "BRIEF_ARTIFACT",
+                "--final-message", msg_path,
+                "--expected-path", artifact_path,
+                "--freshness-baseline", str(mtime - 60),
+            )
+            self.assertEqual(result.returncode, 0, msg=f"stderr: {result.stderr}")
+            data = json.loads(result.stdout)
+            self.assertTrue(data["used_fallback"])
+            self.assertEqual(data["path"], artifact_path)
+        finally:
+            os.unlink(artifact_path)
+            os.unlink(msg_path)
+
+    def test_non_terminal_marker_path_mismatch_rejected(self):
+        artifact_path, mtime = self._make_fresh_artifact("real content")
+        body = f"BRIEF_ARTIFACT: /tmp/wrong-path.md\n\nSummary: marker emitted but path is wrong.\n"
+        msg_path = self._make_message(body)
+        try:
+            result = run_script(
+                "--marker", "BRIEF_ARTIFACT",
+                "--final-message", msg_path,
+                "--expected-path", artifact_path,
+                "--freshness-baseline", str(mtime - 60),
+            )
+            self.assertNotEqual(result.returncode, 0)
+            data = json.loads(result.stderr)
+            self.assertEqual(
+                data["failure"],
+                f"path mismatch: expected {artifact_path} got /tmp/wrong-path.md",
+            )
+        finally:
+            os.unlink(artifact_path)
+            os.unlink(msg_path)
+
+
 if __name__ == "__main__":
     unittest.main()

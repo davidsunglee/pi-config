@@ -44,6 +44,8 @@ Protocol-error kinds (stderr JSON, exit non-zero):
   missing_files_block       — a task has no **Files:** block before **Steps:**/**Acceptance criteria:**
   missing_model_recommendation — **Model recommendation:** is absent or its value is not cheap|standard|capable
   out_of_order_task_number  — task numbers are not strictly ascending from 1 with no gaps
+  malformed_task_heading    — a "### Task N" heading does not use one of the accepted separators (:, —, –, -);
+                              fields: kind, line (1-based), observed (full heading text)
 
 Options:
   --plan                    Path to the plan markdown file
@@ -65,7 +67,8 @@ from plan_fence_hardening import detect_ambiguous_nested_fences  # noqa: E402
 
 VALID_MODELS = {"cheap", "standard", "capable"}
 
-TASK_HEADING_RE = re.compile(r"^### Task (\d+):\s*(.*)")
+TASK_HEADING_RE = re.compile(r"^### Task (\d+)\s*[:—–-]\s*(.*)$")
+MALFORMED_TASK_HEADING_RE = re.compile(r"^### Task \d")
 SECTION_HEADING_RE = re.compile(r"^## ")
 DEP_LINE_RE = re.compile(r"^-\s+Task\s+(\d+)\s+depends\s+on:\s*(.+)")
 
@@ -76,10 +79,12 @@ SECTION_RULES = [
     {"key": "architecture_summary", "patterns": [r"^## Architecture summary\s*$", r"^\*\*Architecture summary\*\*:"], "requires_body": True},
     {"key": "tech_stack", "patterns": [r"^## Tech stack\s*$", r"^\*\*Tech stack\*\*:"], "requires_body": True},
     {"key": "file_structure", "patterns": [r"^## File Structure"], "requires_body": False},
-    {"key": "numbered_tasks", "patterns": [r"^### Task \d+:"], "requires_body": False},
+    {"key": "numbered_tasks", "patterns": [r"^### Task \d+\s*[:—–-]"], "requires_body": False},
     {"key": "dependencies", "patterns": [r"^## Dependencies\s*$"], "requires_body": False},
     {"key": "risk_assessment", "patterns": [r"^## Risk [Aa]ssessment\s*$"], "requires_body": False},
 ]
+
+IGNORECASE_SECTIONS = {"architecture_summary", "tech_stack", "risk_assessment"}
 
 
 def validate_required_sections(text):
@@ -89,8 +94,7 @@ def validate_required_sections(text):
 
     in_fence = compute_in_fence_lines(lines)
 
-    def check_section(patterns, requires_body):
-        compiled = [re.compile(p) for p in patterns]
+    def check_section_compiled(compiled, requires_body):
         matches = []
         for idx, raw_line in enumerate(lines):
             if idx in in_fence:
@@ -122,8 +126,11 @@ def validate_required_sections(text):
         return False
 
     for rule in SECTION_RULES:
-        if not check_section(rule["patterns"], rule["requires_body"]):
-            errors.append({"kind": "missing_required_section", "section": rule["key"]})
+        name = rule["key"]
+        flags = re.IGNORECASE if name in IGNORECASE_SECTIONS else 0
+        compiled_patterns = [re.compile(p, flags) for p in rule["patterns"]]
+        if not check_section_compiled(compiled_patterns, rule["requires_body"]):
+            errors.append({"kind": "missing_required_section", "section": name})
 
     return errors
 
@@ -239,7 +246,15 @@ def parse_plan(text, max_parallel_hard_cap=MAX_PARALLEL_HARD_CAP):
     # Section validation; skip task parsing if any section is missing
     section_errors = validate_required_sections(text)
     if section_errors:
-        return {"goal": None, "test_command": None, "tasks": []}, section_errors
+        # Still scan for malformed task headings so callers get targeted errors alongside
+        # missing-section errors when every task heading is malformed.
+        early_in_fence = compute_in_fence_lines(lines)
+        early_mh_errors = []
+        for ei, raw in enumerate(lines):
+            stripped_raw = raw.rstrip("\n")
+            if ei not in early_in_fence and not TASK_HEADING_RE.match(stripped_raw) and MALFORMED_TASK_HEADING_RE.match(stripped_raw):
+                early_mh_errors.append({"kind": "malformed_task_heading", "line": ei + 1, "observed": stripped_raw})
+        return {"goal": None, "test_command": None, "tasks": []}, section_errors + early_mh_errors
 
     goal = None
     test_command = None
@@ -260,6 +275,11 @@ def parse_plan(text, max_parallel_hard_cap=MAX_PARALLEL_HARD_CAP):
             m = TASK_HEADING_RE.match(line)
             if m:
                 task_starts.append((i, int(m.group(1)), m.group(2).strip()))
+                i += 1
+                continue
+
+            if MALFORMED_TASK_HEADING_RE.match(line):
+                errors.append({"kind": "malformed_task_heading", "line": i + 1, "observed": line})
                 i += 1
                 continue
 
@@ -442,24 +462,24 @@ def parse_plan(text, max_parallel_hard_cap=MAX_PARALLEL_HARD_CAP):
             line = block_lines[j].rstrip("\n")
             stripped = line.strip()
 
-            if stripped == "**Files:**":
+            if stripped.lower() == "**files:**":
                 has_files_block = True
                 state = "files"
                 j += 1
                 continue
 
-            if stripped == "**Steps:**":
+            if stripped.lower() == "**steps:**":
                 state = "steps"
                 j += 1
                 continue
 
-            if stripped == "**Acceptance criteria:**":
+            if stripped.lower() == "**acceptance criteria:**":
                 state = "criteria"
                 j += 1
                 continue
 
-            if stripped.startswith("**Model recommendation:**"):
-                val = stripped[len("**Model recommendation:**"):].strip()
+            if stripped.lower().startswith("**model recommendation:**"):
+                val = stripped[len("**model recommendation:**"):].strip()
                 model_recommendation = val
                 state = "header"
                 j += 1
@@ -495,7 +515,7 @@ def parse_plan(text, max_parallel_hard_cap=MAX_PARALLEL_HARD_CAP):
                     if next_j < nb:
                         next_line = block_lines[next_j].rstrip("\n")
                         next_stripped = next_line.strip()
-                        if next_stripped.startswith("Verify:"):
+                        if next_stripped.lower().startswith("verify:"):
                             verify_text = next_stripped[len("Verify:"):].strip()
                             j = next_j
 

@@ -351,12 +351,12 @@ Invoke the refine-code skill with these inputs (matching the documented interfac
 - `--max-iterations 3` (or the user-customized value from `(r) Refine-code iterations` in Step 2's customize submenu — i.e., the run-state field `refine_max_iterations`).
 - `--review-output-path docs/reviews/<spec-name>-fast-lane-review`. The `-fast-lane-review` namespacing distinguishes fast-lane review artifacts from deep-workflow review artifacts targeting the same spec.
 
-Refine-code's existing menu on `STATUS: not_approved_within_budget` (`(a) Keep iterating` / `(b) Proceed with issues` / `(c) Stop`) stays as-is — fast lane introduces no override. Refine-code's existing provenance validation (`validate-review-provenance.py`) runs as normal.
+Refine-code's existing menu on `STATUS: not_approved_within_budget` ((c) Continue refining code / (p) Proceed with issues / (x) Stop execution) stays as-is — fast lane introduces no override. Refine-code's existing provenance validation (`validate-review-provenance.py`) runs as normal.
 
 Fast lane proceeds to Step 10 (todo closure) on:
 - `STATUS: approved`
 - `STATUS: approved_with_concerns`
-- `STATUS: not_approved_within_budget` with the user choosing `(b) Proceed with issues`
+- `STATUS: not_approved_within_budget` with the user choosing `(p) Proceed with issues`
 
 On `(c) Stop`, fast lane exits without todo closure or branch completion; `docs/test-runs/<spec-name>/` is preserved.
 
@@ -398,7 +398,7 @@ Mirror `agent/skills/execute-plan/SKILL.md` Step 16.2:
   - Coder BLOCKED (Step 5).
   - Refine-code budget-exhaustion `(c) Stop` (Step 9).
 
-- **On successful completion** (refine-code returns `approved` / `approved_with_concerns` / `(b) Proceed with issues`, AND todo closure complete, AND post-completion done), clean up the per-spec test-runs directory:
+- **On successful completion** (refine-code returns `approved` / `approved_with_concerns` / `(p) Proceed with issues`, AND todo closure complete, AND post-completion done), clean up the per-spec test-runs directory:
 
   ~~~
   python3 agent/skills/_shared/scripts/cleanup-test-runs.py docs/test-runs/<spec-name>

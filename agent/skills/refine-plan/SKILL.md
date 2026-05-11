@@ -25,7 +25,7 @@ Collect the following from the caller (user, `generate-plan`, or another skill):
 | `MAX_ITERATIONS` | no | 3 | Caller flag |
 | `AUTO_COMMIT_ON_APPROVAL` | no | `false` | Set true by callers like `generate-plan` so the commit gate runs without prompting |
 | `WORKING_DIR` | no | cwd | Caller flag |
-| `CARRY_OVER_REVIEW` | no | empty | Path to a prior era's review file. Internally re-set by Step 10 § not_approved_within_budget (a) re-entry. May also be supplied directly by a caller for standalone "edit-then-review" use against a hand-crafted review file (see spec Part C "Standalone-use bonus"). |
+| `CARRY_OVER_REVIEW` | no | empty | Path to a prior era's review file. Internally re-set by Step 10 § not_approved_within_budget (c) re-entry. May also be supplied directly by a caller for standalone "edit-then-review" use against a hand-crafted review file (see spec Part C "Standalone-use bonus"). |
 
 If `PLAN_PATH` is missing, stop with: "refine-plan: PLAN_PATH is required."
 
@@ -160,7 +160,7 @@ When all paths pass validation, proceed to Step 10.
 >   reviews) to second-guess the coordinator's judgment.
 > - Edit the plan file directly, or invent extra refinement dispatches outside the
 >   documented loop. Iteration is owned by the `plan-refiner`'s internal review-edit cycle;
->   the only sanctioned re-entry from this skill is the (a) commit-and-continue choice on
+>   the only sanctioned re-entry from this skill is the (c) Continue refining plan choice on
 >   `not_approved_within_budget`, which re-runs from Step 6 onward with `STARTING_ERA`
 >   recomputed.
 >
@@ -202,20 +202,17 @@ Behavior is identical to `STATUS: approved` from here: on `Y` or empty (or with 
 
 Present the budget-exhaustion menu exactly as:
 
-- **(a)** Commit current era's plan + review artifacts, then keep iterating into era v`<STARTING_ERA + 1>` with a fresh budget.
-- **(b)** Stop here and proceed with issues; commit gate runs based on `AUTO_COMMIT_ON_APPROVAL`.
+- **(c) Continue refining plan** — Commit current era's plan + review artifacts (via Step 10a), then keep iterating into era v`<STARTING_ERA + 1>` with a fresh iteration budget. Internally re-set `CARRY_OVER_REVIEW = <era-N review file path that was just committed in Step 10a>` and re-enter Step 6 with `STARTING_ERA` recomputed by re-scanning `docs/plans/reviews/` (the rule remains `max(existing_N) + 1`).
+- **(r) Save plan for manual review** — Commit current era's plan + review artifacts (via Step 10a), then exit `refine-plan` with `STATUS: not_approved_within_budget` and `COMMIT: committed` (plus the existing `PLAN_PATH` / `REVIEW_PATHS` / `STRUCTURAL_ONLY` summary fields).
+- **(x) Stop execution** — Leave the plan and all current-era review artifacts uncommitted on disk; exit `refine-plan` with `STATUS: not_approved_within_budget` and `COMMIT: left_uncommitted`. No files are deleted from disk; the user inspects or removes them manually.
 
-**On `(a)`:** Run Step 10a (commit current era). Step 10a MUST succeed (`COMMIT = committed`) before the next era is dispatched. If Step 10a sets `COMMIT = not_attempted` (commit failed for any reason — pre-commit hook failure, dirty index, underlying error), STOP refinement immediately: preserve `STATUS = not_approved_within_budget` and the `COMMIT = not_attempted [reason]` value from Step 10a, do **NOT** dispatch the next era, and skip directly to Step 11. Continuing into a fresh era after a failed commit would leave the prior era's edits uncommitted while a new era runs — the abandoned-state recovery hazard the spec's two-option menu was designed to prevent.
+**This menu is always presented on `not_approved_within_budget` regardless of `AUTO_COMMIT_ON_APPROVAL`.** The user's choice itself encodes the commit decision; `AUTO_COMMIT_ON_APPROVAL` does not bypass or pre-select any of the three options. (`AUTO_COMMIT_ON_APPROVAL` continues to govern the `approved` and `approved_with_concerns` paths unchanged.)
 
-Only when Step 10a sets `COMMIT = committed` may the skill re-run from Step 6 onward, with `STARTING_ERA` recomputed by re-scanning `docs/plans/reviews/` (it will now reflect the just-committed file plus any uncommitted files; the rule remains `max(existing_N) + 1`). Before re-entering Step 6, set CARRY_OVER_REVIEW = <era-N review file path that was just committed in Step 10a> so the next plan-refiner dispatch performs a carry-over edit pass against era N's findings. Loop until either `STATUS: approved` / `STATUS: approved_with_concerns` (proceed normally) or the user picks `(b)`.
+**On `(c) Continue refining plan`:** Run Step 10a (commit current era). Step 10a MUST succeed (`COMMIT = committed`) before the next era is dispatched. If Step 10a sets `COMMIT = not_attempted` (commit failed for any reason — pre-commit hook failure, dirty index, underlying error), STOP refinement immediately: preserve `STATUS = not_approved_within_budget` and the `COMMIT = not_attempted [reason]` value from Step 10a, do **NOT** dispatch the next era, and skip directly to Step 11. Only when Step 10a sets `COMMIT = committed` may the skill re-run from Step 6 onward — with `STARTING_ERA` recomputed by re-scanning `docs/plans/reviews/` (it will now reflect the just-committed file plus any uncommitted files; the rule remains `max(existing_N) + 1`) and `CARRY_OVER_REVIEW = <era-N review file path that was just committed in Step 10a>` so the next plan-refiner dispatch performs a carry-over edit pass against era N's findings. Loop until either `STATUS: approved` / `STATUS: approved_with_concerns` (proceed normally) or the user picks `(r)` or `(x)`.
 
-**On `(b)`:** In `AUTO_COMMIT_ON_APPROVAL = true` mode, run Step 10a (auto-commit). In standalone mode, prompt:
+**On `(r) Save plan for manual review`:** Run Step 10a (commit current era). On success, set `COMMIT = committed` (with the SHA reported by the commit skill when available). On Step 10a failure, set `COMMIT = not_attempted [reason]`. Either way, proceed to Step 11 — do NOT dispatch the next era. The summary surfaces `STATUS: not_approved_within_budget` plus the resolved `COMMIT` value.
 
-```
-Commit current plan + review artifacts? (y/n)
-```
-
-Run Step 10a on `Y`/empty; set `COMMIT = left_uncommitted` on `n`.
+**On `(x) Stop execution`:** Set `COMMIT = left_uncommitted`. Do NOT invoke Step 10a. Do NOT delete any files from disk. Proceed to Step 11. The summary surfaces `STATUS: not_approved_within_budget` and `COMMIT: left_uncommitted`.
 
 ### `STATUS: failed`
 
@@ -253,7 +250,7 @@ If `STATUS: failed`, include an additional line:
 FAILURE_REASON: <one-line reason>
 ```
 
-The `REVIEW_PATHS` list contains every review file written during the entire `refine-plan` run (one per era that ran, including any era-(b) decisions and option-(a) commit-and-continue eras).
+The `REVIEW_PATHS` list contains every review file written during the entire `refine-plan` run (one per era that ran, including any era-(r) decisions and option-(c) commit-and-continue eras).
 
 ## Edge Cases
 

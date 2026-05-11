@@ -1074,5 +1074,280 @@ class TestSafeLongBacktickOuterFence(unittest.TestCase):
         self.assertEqual(self.data["tasks"][0]["model_recommendation"], "standard")
 
 
+def _make_plan(
+    goal_section="## Goal\nTest goal.",
+    arch_section="## Architecture summary\nTest.",
+    tech_section="## Tech stack\nPython.",
+    file_structure_section="## File Structure\n- file.py",
+    task_section="",
+    deps_section="## Dependencies\n",
+    risk_section="## Risk Assessment\nLow.",
+    test_cmd_section="## Test Command\n```bash\ntest\n```",
+):
+    """Build a complete plan string from section parts."""
+    parts = [
+        goal_section,
+        "",
+        arch_section,
+        "",
+        tech_section,
+        "",
+        file_structure_section,
+        "",
+        task_section,
+        "",
+        deps_section,
+        "",
+        risk_section,
+        "",
+        test_cmd_section,
+    ]
+    return "\n".join(parts)
+
+
+def _make_task(number, title, sep=":", model="cheap", extra_files=None, criterion_prefix="", verify_prefix=""):
+    """Build a single task block."""
+    files_line = extra_files or f"- Create: file{number}.py"
+    crit_verify = f"  {verify_prefix}Verify: run it." if not verify_prefix else f"  {verify_prefix}run it."
+    return (
+        f"### Task {number}{sep} {title}\n\n"
+        f"**Files:**\n"
+        f"{files_line}\n\n"
+        f"**Steps:**\n"
+        f"- [ ] **Step 1:** Do something\n\n"
+        f"**Acceptance criteria:**\n"
+        f"- {criterion_prefix}Some criterion.\n"
+        f"{crit_verify}\n\n"
+        f"**Model recommendation:** {model}"
+    )
+
+
+def _parse_plan_str(content):
+    import tempfile
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False, encoding="utf-8") as f:
+        f.write(content)
+        temp_plan = f.name
+    try:
+        result = run_script("--plan", temp_plan)
+        data = json.loads(result.stdout) if result.returncode == 0 else None
+        errors = json.loads(result.stderr)["errors"] if result.returncode != 0 else []
+        return result, data, errors
+    finally:
+        Path(temp_plan).unlink(missing_ok=True)
+
+
+class TestSeparatorTolerance(unittest.TestCase):
+    def test_all_separators_parse(self):
+        for sep in [":", "—", "–", "-"]:
+            task_section = (
+                _make_task(1, "First task", sep=sep) + "\n\n" +
+                _make_task(2, "Second task", sep=sep)
+            )
+            plan = _make_plan(task_section=task_section, deps_section="## Dependencies\n- Task 2 depends on: Task 1")
+            result, data, errors = _parse_plan_str(plan)
+            self.assertEqual(result.returncode, 0, f"sep={sep!r} failed: {errors}")
+            tasks = data["tasks"]
+            self.assertEqual(tasks[0]["number"], 1, f"sep={sep!r}: task 1 number mismatch")
+            self.assertEqual(tasks[0]["title"], "First task", f"sep={sep!r}: task 1 title mismatch")
+            self.assertEqual(tasks[1]["number"], 2, f"sep={sep!r}: task 2 number mismatch")
+            self.assertGreaterEqual(len(data["waves"]), 1, f"sep={sep!r}: no waves")
+
+
+class TestMalformedTaskHeading(unittest.TestCase):
+    def _plan_with_malformed(self, malformed_heading):
+        task_section = (
+            f"{malformed_heading}\n\n"
+            f"**Files:**\n- Create: file.py\n\n"
+            f"**Steps:**\n- [ ] **Step 1:** Do something\n\n"
+            f"**Acceptance criteria:**\n- Some criterion.\n  Verify: run it.\n\n"
+            f"**Model recommendation:** cheap"
+        )
+        return _make_plan(task_section=task_section)
+
+    def test_no_separator_heading(self):
+        plan = self._plan_with_malformed("### Task 1")
+        result, data, errors = _parse_plan_str(plan)
+        self.assertNotEqual(result.returncode, 0, "Should fail for malformed heading")
+        mh = [e for e in errors if e.get("kind") == "malformed_task_heading"]
+        self.assertTrue(len(mh) > 0, f"Expected malformed_task_heading in errors, got: {errors}")
+        observed_values = [e.get("observed") for e in mh]
+        self.assertIn("### Task 1", observed_values, f"Expected '### Task 1' in observed, got: {observed_values}")
+        lines_field = [e.get("line") for e in mh if e.get("observed") == "### Task 1"]
+        self.assertTrue(all(isinstance(l, int) and l > 0 for l in lines_field), "line should be positive int")
+
+    def test_title_runs_into_digit(self):
+        plan = self._plan_with_malformed("### Task 1Title")
+        result, data, errors = _parse_plan_str(plan)
+        self.assertNotEqual(result.returncode, 0, "Should fail for malformed heading")
+        mh = [e for e in errors if e.get("kind") == "malformed_task_heading"]
+        self.assertTrue(len(mh) > 0, f"Expected malformed_task_heading in errors, got: {errors}")
+        observed_values = [e.get("observed") for e in mh]
+        self.assertIn("### Task 1Title", observed_values)
+
+
+class TestSectionHeadingCaseTolerance(unittest.TestCase):
+    def test_title_case_section_headings(self):
+        task_section = _make_task(1, "Parse plan headings") + "\n\n" + _make_task(2, "Emit JSON output")
+        plan = _make_plan(
+            arch_section="## Architecture Summary\nTest.",
+            tech_section="## Tech Stack\nPython.",
+            task_section=task_section,
+            deps_section="## Dependencies\n- Task 2 depends on: Task 1",
+            risk_section="## Risk Assessment\nLow.",
+        )
+        result, data, errors = _parse_plan_str(plan)
+        self.assertEqual(result.returncode, 0, f"Title-case sections failed: {errors}")
+        self.assertEqual(len(data["tasks"]), 2)
+
+
+class TestUnrelaxedSectionHeadingsStayStrict(unittest.TestCase):
+    def _base_plan(self):
+        task_section = _make_task(1, "Parse plan headings") + "\n\n" + _make_task(2, "Emit JSON output")
+        return _make_plan(
+            task_section=task_section,
+            deps_section="## Dependencies\n- Task 2 depends on: Task 1",
+        )
+
+    def test_lowercase_goal_fails(self):
+        plan = self._base_plan().replace("## Goal\n", "## goal\n")
+        result, data, errors = _parse_plan_str(plan)
+        self.assertNotEqual(result.returncode, 0, "lowercase '## goal' should fail")
+        sections = [e["section"] for e in errors if e.get("kind") == "missing_required_section"]
+        self.assertIn("goal", sections, f"Expected 'goal' in missing sections, got: {sections}")
+
+    def test_lowercase_file_structure_fails(self):
+        plan = self._base_plan().replace("## File Structure\n", "## file structure\n")
+        result, data, errors = _parse_plan_str(plan)
+        self.assertNotEqual(result.returncode, 0, "lowercase '## file structure' should fail")
+        sections = [e["section"] for e in errors if e.get("kind") == "missing_required_section"]
+        self.assertIn("file_structure", sections, f"Expected 'file_structure' in missing sections, got: {sections}")
+
+    def test_lowercase_dependencies_fails(self):
+        plan = self._base_plan().replace("## Dependencies\n", "## dependencies\n")
+        result, data, errors = _parse_plan_str(plan)
+        self.assertNotEqual(result.returncode, 0, "lowercase '## dependencies' should fail")
+        sections = [e["section"] for e in errors if e.get("kind") == "missing_required_section"]
+        self.assertIn("dependencies", sections, f"Expected 'dependencies' in missing sections, got: {sections}")
+
+
+class TestLabelCaseTolerance(unittest.TestCase):
+    def _make_plan_with_labels(self, files_label="**Files:**", steps_label="**Steps:**",
+                                criteria_label="**Acceptance criteria:**",
+                                model_label="**Model recommendation:**",
+                                verify_prefix="Verify:"):
+        task_section = (
+            "### Task 1: Title case labels\n\n"
+            f"{files_label}\n"
+            "- Create: file.py\n\n"
+            f"{steps_label}\n"
+            "- [ ] **Step 1:** Do something\n\n"
+            f"{criteria_label}\n"
+            "- Some criterion.\n"
+            f"  {verify_prefix} run it.\n\n"
+            f"{model_label} cheap"
+        )
+        return _make_plan(task_section=task_section)
+
+    def test_title_case_acceptance_criteria_and_model_recommendation(self):
+        plan = self._make_plan_with_labels(
+            criteria_label="**Acceptance Criteria:**",
+            model_label="**Model Recommendation:**",
+        )
+        result, data, errors = _parse_plan_str(plan)
+        self.assertEqual(result.returncode, 0, f"Title-case labels failed: {errors}")
+        self.assertTrue(len(data["tasks"][0]["criteria"]) > 0, "criteria should be populated")
+        self.assertEqual(data["tasks"][0]["model_recommendation"], "cheap")
+
+    def test_lowercase_verify(self):
+        plan = self._make_plan_with_labels(verify_prefix="verify:")
+        result, data, errors = _parse_plan_str(plan)
+        self.assertEqual(result.returncode, 0, f"Lowercase 'verify:' failed: {errors}")
+        crit = data["tasks"][0]["criteria"]
+        self.assertTrue(len(crit) > 0, "criteria should be populated")
+        self.assertTrue(all(c["verify"] for c in crit), "verify should be non-empty")
+
+
+class TestFilePrefixCaseTolerance(unittest.TestCase):
+    def _make_plan_with_file_prefixes(self, file_lines):
+        task_section = (
+            "### Task 1: Mixed case file prefixes\n\n"
+            "**Files:**\n" +
+            "\n".join(file_lines) + "\n\n"
+            "**Steps:**\n"
+            "- [ ] **Step 1:** Do something\n\n"
+            "**Acceptance criteria:**\n"
+            "- Some criterion.\n"
+            "  Verify: run it.\n\n"
+            "**Model recommendation:** cheap"
+        )
+        return _make_plan(task_section=task_section)
+
+    def test_mixed_case_prefixes(self):
+        plan = self._make_plan_with_file_prefixes([
+            "- create: path/to/a.ts",
+            "- MODIFY: path/to/b.ts",
+            "- Test: path/to/c.ts",
+            "- cReAtE: path/to/d.ts",
+        ])
+        result, data, errors = _parse_plan_str(plan)
+        self.assertEqual(result.returncode, 0, f"Mixed-case prefixes failed: {errors}")
+        files = data["tasks"][0]["files"]
+        self.assertIn("path/to/a.ts", files["create"])
+        self.assertIn("path/to/d.ts", files["create"])
+        self.assertIn("path/to/b.ts", files["modify"])
+        self.assertIn("path/to/c.ts", files["test"])
+
+    def test_canonical_case_prefixes(self):
+        plan = self._make_plan_with_file_prefixes([
+            "- Create: path/to/a.ts",
+            "- Modify: path/to/b.ts",
+            "- Test: path/to/c.ts",
+        ])
+        result, data, errors = _parse_plan_str(plan)
+        self.assertEqual(result.returncode, 0, f"Canonical-case prefixes failed: {errors}")
+        files = data["tasks"][0]["files"]
+        self.assertIn("path/to/a.ts", files["create"])
+        self.assertIn("path/to/b.ts", files["modify"])
+        self.assertIn("path/to/c.ts", files["test"])
+
+
+class TestVagueAliasRejected(unittest.TestCase):
+    def test_implementation_section_not_a_task(self):
+        plan = _make_plan(
+            task_section=(
+                "## Implementation\n\n"
+                "Some implementation detail here.\n"
+            ),
+        )
+        result, data, errors = _parse_plan_str(plan)
+        self.assertNotEqual(result.returncode, 0, "## Implementation should not satisfy numbered_tasks")
+        sections = [e["section"] for e in errors if e.get("kind") == "missing_required_section"]
+        self.assertIn("numbered_tasks", sections, f"Expected 'numbered_tasks' in missing sections, got: {sections}")
+
+
+class TestFencedVariantsIgnored(unittest.TestCase):
+    def test_fenced_task_heading_ignored(self):
+        task_section = (
+            "### Task 1: Real task\n\n"
+            "**Files:**\n"
+            "- Create: file.py\n\n"
+            "**Steps:**\n"
+            "- [ ] **Step 1:** Do something\n\n"
+            "```\n"
+            "### Task 99 — Fake fenced task\n"
+            "```\n\n"
+            "**Acceptance criteria:**\n"
+            "- Criterion.\n"
+            "  Verify: run it.\n\n"
+            "**Model recommendation:** cheap"
+        )
+        plan = _make_plan(task_section=task_section)
+        result, data, errors = _parse_plan_str(plan)
+        self.assertEqual(result.returncode, 0, f"Fenced task heading should be ignored: {errors}")
+        task_numbers = [t["number"] for t in data["tasks"]]
+        self.assertEqual(task_numbers, [1], f"Should only have task 1, got: {task_numbers}")
+        self.assertNotIn(99, task_numbers, "Task 99 from inside fence should not appear")
+
+
 if __name__ == "__main__":
     unittest.main()

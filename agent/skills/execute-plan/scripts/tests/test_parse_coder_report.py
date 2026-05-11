@@ -494,5 +494,194 @@ class TestFencedFilesChangedBullet(unittest.TestCase):
             os.unlink(tmp)
 
 
+class TestStatusHeadingPrefixTolerance(unittest.TestCase):
+    """Tests for accepting optional Markdown heading markers before STATUS line."""
+
+    def test_h2_status_done_parses(self):
+        import tempfile
+
+        content = (
+            "## STATUS: DONE\n"
+            "\n"
+            "## Completed\n"
+            "Done.\n"
+            "\n"
+            "## Tests\n"
+            "Pass.\n"
+            "\n"
+            "## Files Changed\n"
+            "- `real/file.py`\n"
+            "\n"
+            "## Self-Review Findings\n"
+            "None.\n"
+        )
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:
+            f.write(content)
+            tmp = f.name
+
+        try:
+            rc, data, _, _, _ = run_script("--report", tmp)
+            self.assertEqual(rc, 0)
+            self.assertEqual(data["status"], "DONE")
+        finally:
+            os.unlink(tmp)
+
+    def test_h3_status_blocked_parses(self):
+        import tempfile
+
+        content = (
+            "### STATUS: BLOCKED\n"
+            "\n"
+            "## Completed\n"
+            "Done.\n"
+            "\n"
+            "## Tests\n"
+            "Pass.\n"
+            "\n"
+            "## Files Changed\n"
+            "- `real/file.py`\n"
+            "\n"
+            "## Self-Review Findings\n"
+            "None.\n"
+        )
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:
+            f.write(content)
+            tmp = f.name
+
+        try:
+            rc, data, _, _, _ = run_script("--report", tmp)
+            self.assertEqual(rc, 0)
+            self.assertEqual(data["status"], "BLOCKED")
+        finally:
+            os.unlink(tmp)
+
+    def test_h6_status_done_with_concerns_parses(self):
+        import tempfile
+
+        content = (
+            "###### STATUS: DONE_WITH_CONCERNS\n"
+            "\n"
+            "## Completed\n"
+            "Done.\n"
+            "\n"
+            "## Tests\n"
+            "Pass.\n"
+            "\n"
+            "## Files Changed\n"
+            "- `real/file.py`\n"
+            "\n"
+            "## Self-Review Findings\n"
+            "None.\n"
+            "\n"
+            "## Concerns / Needs / Blocker\n"
+            "Some concern.\n"
+        )
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:
+            f.write(content)
+            tmp = f.name
+
+        try:
+            rc, data, _, _, _ = run_script("--report", tmp)
+            self.assertEqual(rc, 0)
+            self.assertEqual(data["status"], "DONE_WITH_CONCERNS")
+        finally:
+            os.unlink(tmp)
+
+    def test_fenced_h2_status_still_fails(self):
+        import tempfile
+
+        content = (
+            "Some preamble.\n"
+            "\n"
+            "```\n"
+            "## STATUS: DONE\n"
+            "Fake fenced status inside fence.\n"
+            "```\n"
+            "\n"
+            "## Completed\n"
+            "Done.\n"
+            "\n"
+            "## Tests\n"
+            "Pass.\n"
+            "\n"
+            "## Files Changed\n"
+            "- `real/file.py`\n"
+            "\n"
+            "## Self-Review Findings\n"
+            "None.\n"
+        )
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:
+            f.write(content)
+            tmp = f.name
+
+        try:
+            rc, data, stderr_data, _, stderr = run_script("--report", tmp)
+            self.assertNotEqual(rc, 0)
+            self.assertIsNotNone(stderr_data, f"stderr was not JSON: {stderr!r}")
+            self.assertEqual(stderr_data["failure"], "status_line_missing")
+        finally:
+            os.unlink(tmp)
+
+    def test_h7_status_not_accepted(self):
+        import tempfile
+
+        content = (
+            "####### STATUS: DONE\n"
+            "\n"
+            "## Completed\n"
+            "Done.\n"
+            "\n"
+            "## Tests\n"
+            "Pass.\n"
+            "\n"
+            "## Files Changed\n"
+            "- `real/file.py`\n"
+            "\n"
+            "## Self-Review Findings\n"
+            "None.\n"
+        )
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:
+            f.write(content)
+            tmp = f.name
+
+        try:
+            rc, data, stderr_data, _, stderr = run_script("--report", tmp)
+            self.assertNotEqual(rc, 0)
+            self.assertIsNotNone(stderr_data, f"stderr was not JSON: {stderr!r}")
+            self.assertEqual(stderr_data["failure"], "status_line_missing")
+        finally:
+            os.unlink(tmp)
+
+    def test_h2_status_unknown_token_still_fails(self):
+        import tempfile
+
+        content = (
+            "## STATUS: BOGUS\n"
+            "\n"
+            "## Completed\n"
+            "Done.\n"
+            "\n"
+            "## Tests\n"
+            "Pass.\n"
+            "\n"
+            "## Files Changed\n"
+            "- `real/file.py`\n"
+            "\n"
+            "## Self-Review Findings\n"
+            "None.\n"
+        )
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:
+            f.write(content)
+            tmp = f.name
+
+        try:
+            rc, data, stderr_data, _, _ = run_script("--report", tmp)
+            self.assertNotEqual(rc, 0)
+            self.assertIsNotNone(stderr_data)
+            self.assertEqual(stderr_data["failure"], "status_token_invalid")
+        finally:
+            os.unlink(tmp)
+
+
 if __name__ == "__main__":
     unittest.main()
