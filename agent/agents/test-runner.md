@@ -154,3 +154,16 @@ subagent_done(message="TEST_RESULT_ARTIFACT: <absolute path>")
 ```
 
 The `message` argument MUST be byte-equal to the final-assistant-message marker line above. Emitting both channels (final message + terminal call) ensures the marker reaches the orchestrator regardless of which channel the watcher reads. No other structured markers may appear anywhere in the response (no `STATUS:`, no other anchored lines).
+
+## Completion Reporting
+
+The `subagent_done` tool call above is REQUIRED as your terminal tool action — it is a tool invocation, not a printed line. Printing the `TEST_RESULT_ARTIFACT:` marker only in your final message, printing "done", or simply ending the response is NOT sufficient on its own; the mux terminal session relies on the `subagent_done` tool call to signal completion to the parent orchestrator.
+
+End-of-task checklist (do these in order, then stop):
+
+1. Verify the test command ran in the supplied working directory and the structured artifact is written exactly once to the supplied output path.
+2. Emit your final assistant message ending with the anchored `TEST_RESULT_ARTIFACT: <absolute path>` line as the final line.
+3. Call `subagent_done(message="TEST_RESULT_ARTIFACT: <absolute path>")` as your terminal tool action, with the `message` argument byte-equal to the marker line in step 2.
+4. Do NOT emit any further output after the `subagent_done` call.
+
+Negative instruction: do not merely describe completion in prose. The `subagent_done` tool call is the only signal the parent treats as completion.

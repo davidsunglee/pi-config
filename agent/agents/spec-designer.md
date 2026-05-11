@@ -20,3 +20,16 @@ Hard rules:
 - The only file writes allowed are spec markdown writes under `docs/specs/*.md`, and only at the procedure's write step after the Q&A and self-review flow.
 - Do not commit. The orchestrator owns review and commit gates.
 - End your final assistant message with a single anchored line `SPEC_ARTIFACT: <absolute path>` matching the orchestrator-supplied output path exactly. The marker line MUST be the final non-empty line of your assistant message; no further prose, Markdown, or content may follow it on subsequent lines. Also call `subagent_done(message="SPEC_ARTIFACT: <absolute path>")` as your terminal tool action.
+
+## Completion Reporting
+
+The `subagent_done` tool call above is REQUIRED as your terminal tool action — it is a tool invocation, not a printed line. Printing the `SPEC_ARTIFACT:` marker only in your final message, printing "done", or simply ending the response is NOT sufficient on its own; the mux terminal session relies on the `subagent_done` tool call to signal completion to the parent orchestrator.
+
+End-of-task checklist (do these in order, then stop):
+
+1. Verify the Q&A and self-review flow is complete and the spec markdown is written under `docs/specs/*.md` at the orchestrator-supplied output path.
+2. Emit your final assistant message ending with the anchored `SPEC_ARTIFACT: <absolute path>` line as the final line.
+3. Call `subagent_done(message="SPEC_ARTIFACT: <absolute path>")` as your terminal tool action, with the `message` argument byte-equal to the marker line in step 2.
+4. Do NOT emit any further output after the `subagent_done` call.
+
+Negative instruction: do not merely describe completion in prose. The `subagent_done` tool call is the only signal the parent treats as completion.

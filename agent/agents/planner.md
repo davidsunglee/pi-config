@@ -244,3 +244,20 @@ After saving the plan in initial-generation mode:
 2. Call `subagent_done(message="PLAN_ARTIFACT: <absolute path>")` as your terminal tool action. The `message` argument must be byte-equal to the final-assistant-message marker line.
 
 The orchestrator validates the marker via `parse-artifact-handoff.py --marker PLAN_ARTIFACT --expected-path <absolute output path> --check-existence --check-non-empty` before handing off to refine-plan. Do NOT ask about execution mode, pacing, or wave configuration — that is `execute-plan`'s responsibility.
+
+## Completion Reporting
+
+You MUST end every dispatch — initial-generation pass AND edit-mode pass — by calling the `subagent_done` tool as your terminal tool action. This is a tool invocation, not a printed line — printing "done", emitting the marker only in prose, or simply ending the response is NOT sufficient. The mux terminal session relies on this tool call to signal completion to the parent; omitting it leaves the parent waiting.
+
+End-of-task checklist (do these in order, then stop):
+
+1. Verify the plan work is complete: plan file written to `{OUTPUT_PATH}` (initial generation) or edited in place at the existing `Plan artifact:` path (edit mode), self-review performed, and all required sections present.
+2. Emit your final assistant message:
+   - Initial-generation pass: the `PLAN_ARTIFACT: <absolute path>` anchored marker line as the final line.
+   - Edit-mode pass: a short status summary (no `PLAN_ARTIFACT:` marker — the marker exists only on the initial-generation pass).
+3. Call `subagent_done` as your terminal tool action:
+   - Initial-generation pass: `subagent_done(message="PLAN_ARTIFACT: <absolute path>")` byte-equal to the final marker line.
+   - Edit-mode pass: `subagent_done()` with no `message` argument, so the parent receives your full edit summary from the final assistant message.
+4. Do NOT emit any further output after the `subagent_done` call.
+
+Negative instruction: do not merely describe completion in prose. The `subagent_done` tool call is the only signal the parent treats as completion — a final assistant message without that tool call will be observed as "still running".

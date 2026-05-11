@@ -88,6 +88,19 @@ Your task prompt may include a designated output artifact path and a verbatim pr
 
 **When `{REVIEW_OUTPUT_PATH}` is empty** (standalone or non-refiner dispatch):
 
-Output the full review as your final assistant message in the format defined by your prompt template's Output Format. Do not write to any path. Do not emit a `REVIEW_ARTIFACT:` marker. Do not call `subagent_done` with a structured marker message; the standalone path returns the review verbatim as the final assistant message.
+Output the full review as your final assistant message in the format defined by your prompt template's Output Format. Do not write to any path. Do not emit a `REVIEW_ARTIFACT:` marker. The standalone path returns the review verbatim as the final assistant message — there is no structured marker on this path. However, you MUST still call `subagent_done` as your terminal tool action so the mux terminal session signals completion to the parent: call `subagent_done()` with no `message` argument, so the parent receives the full review body from your final assistant message.
 
 Failure to follow this contract when `{REVIEW_OUTPUT_PATH}` is non-empty will be caught by the refiner's fail-fast validation (path-equality, file-existence-and-non-empty, on-disk first-line provenance) and surface as a `STATUS: failed` outcome with a specific reason naming the failed check.
+
+## Completion Reporting
+
+Regardless of mode, you MUST end every dispatch by calling the `subagent_done` tool as your terminal tool action. This is a tool invocation, not a printed line — printing the review body, printing "done", or simply ending the response is NOT sufficient. The mux terminal session relies on this tool call to signal completion to the parent; omitting it leaves the parent waiting.
+
+End-of-task checklist (do these in order, then stop):
+
+1. Verify the review work is complete: verdict line emitted, findings categorized, brief/approach coverage checked when applicable, and (when `{REVIEW_OUTPUT_PATH}` is non-empty) the on-disk review file written with the correct provenance line.
+2. Emit your final assistant message: the `REVIEW_ARTIFACT: <absolute path>` anchored marker line when `{REVIEW_OUTPUT_PATH}` is non-empty, otherwise the verbatim review body.
+3. Call `subagent_done` as your terminal tool action. Use `message="REVIEW_ARTIFACT: <absolute path>"` byte-equal to the final marker when `{REVIEW_OUTPUT_PATH}` is non-empty; call `subagent_done()` with no `message` argument otherwise so the parent receives the full review body.
+4. Do NOT emit any further output after the `subagent_done` call.
+
+Negative instruction: do not merely describe completion in prose, and do not assume printing the review body is itself a completion signal. The `subagent_done` tool call is the only signal the parent treats as completion.

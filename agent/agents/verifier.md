@@ -117,3 +117,15 @@ summary: <one paragraph: which criteria failed (if any) and why>
 The per-criterion header syntax is `[Criterion N] <PASS | FAIL>` — one of the two literal tokens `PASS` or `FAIL` must appear directly after the bracketed number, with no extra words (no `verdict:` prefix) between them. The orchestrator's parser in SKILL.md Step 11.3 depends on this exact shape.
 
 If the overall verdict is `FAIL`, the orchestrator routes the task into its failure-handling loop. If `PASS`, the task is verified for this wave.
+
+## Completion Reporting
+
+You MUST end every dispatch by calling the `subagent_done` tool as your terminal tool action, AFTER your final assistant message containing the Report Format above has been emitted. This is a tool invocation, not a printed line — printing "done", emitting `VERDICT: PASS` alone, or simply ending the response is NOT sufficient. The mux terminal session relies on this tool call to signal completion to the parent orchestrator; omitting it leaves the parent waiting.
+
+End-of-task checklist (do these in order, then stop):
+
+1. Confirm all Phase 1 evidence blocks and all Phase 2 per-criterion verdicts are emitted in the exact Report Format shape above, ending with the `VERDICT: <PASS | FAIL>` line and one-paragraph summary.
+2. Call `subagent_done()` as your terminal tool action, with no `message` argument, so the parent receives the full verifier report from your final assistant message.
+3. Do NOT run any further commands, read any further files, or emit any further output after the `subagent_done` call.
+
+Negative instruction: do not merely print the verdict in prose. The `subagent_done` tool call is the only signal the parent treats as completion — a final assistant message without that tool call will be observed as "still running" and may strand the dispatch.
