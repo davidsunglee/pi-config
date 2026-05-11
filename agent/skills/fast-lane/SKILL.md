@@ -67,11 +67,11 @@ Fast lane plan:
     Refine-code iterations:  3
 
 Options:
-  (s)tart                      — proceed with these settings
-  (c)ustomize                  — change a setting
-  (e)dit checklist             — revise the numbered checklist before starting
-  (p)romote to deep workflow   — abandon fast lane and run /generate-plan instead
-  (x) stop                     — exit fast lane (spec/todo remains committed)
+  (s) Start                      — proceed with these settings
+  (c) Customize                  — change a setting
+  (e) Edit checklist             — revise the numbered checklist before starting
+  (p) Promote to deep workflow   — abandon fast lane and run /generate-plan instead
+  (x) Stop                       — exit fast lane (spec/todo remains committed)
 ~~~
 
 ### `(c) Customize` submenu

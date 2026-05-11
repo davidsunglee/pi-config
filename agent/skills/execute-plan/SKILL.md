@@ -30,12 +30,12 @@ Before starting execution, determine the workspace.
 
    Options:
    (c) Continue in this workspace — proceed as-is, mixing plan work with existing changes
-   (q) Quit — cancel execution
    (n) Create a new worktree instead — abandon reuse and fall back to the normal new-worktree flow
+   (x) Stop — cancel execution
    ```
 
    - **(c) Continue:** proceed to Step 1 in the current workspace.
-   - **(q) Quit:** stop with `Plan execution cancelled.`
+   - **(x) Stop:** stop with `Plan execution cancelled.`
    - **(n) New worktree instead:** fall through to the new-worktree flow below (the same flow used when starting from main/master/develop), including the usual suggested branch name derived from the plan filename. The settings summary (Step 3) will then show `new worktree (branch: <suggested-branch>)`.
 
 Once reuse is accepted (clean, or dirty with `(c) Continue`), the settings summary (Step 3) shows `Workspace: current workspace (on <BRANCH_LABEL>)`.
@@ -77,7 +77,10 @@ Execution:          parallel, pause on failure
 Integration test:   <see defaults below>
 Final review:       enabled (max 3 remediation iterations)
 
-Ready to execute: (s)tart / (c)ustomize / (q)uit
+Ready to execute:
+(s) Start
+(c) Customize
+(x) Stop
 ```
 
 **Workspace values:** if reuse was accepted in Step 0 (clean, or dirty with `(c) Continue`), show `current workspace (on <BRANCH_LABEL>)`; otherwise show `new worktree (branch: <suggested-branch>)`. Declined reuse follows the new-worktree default.
@@ -103,7 +106,7 @@ Ready to execute: (s)tart / (c)ustomize / (q)uit
 
 **If `c`:** Ask each setting individually — Workspace (skip if Step 0 reuse was accepted), TDD, Execution mode (Sequential/Parallel), Wave pacing if parallel ((f) Pause only on failure [default] / (w) Pause every wave), Integration test (prompt for command if enabling and none detected), Final review (prompt for max iterations if enabling). After customization, show the final settings summary for confirmation.
 
-**If `q`:** stop with `Plan execution cancelled.`
+**If `x`:** stop with `Plan execution cancelled.`
 
 After settings are confirmed, if Worktree was selected and Step 0 hasn't executed worktree setup yet, execute it now.
 
