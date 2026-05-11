@@ -272,8 +272,10 @@ Steps:
 
    Read its single-line stdout (e.g., `stash@{0}`) and preserve that value for the failure path. **Do NOT** attempt to parse the stash ref from `git stash push`'s `Saved working directory and index state ...` line — that line does not reliably include a usable `stash@{N}` ref. The stash includes `docs/test-runs/<spec-name>/full-suite.log` (untracked file from the verification phase, picked up by `-u`).
 
-2. Dispatch `test-runner` over the clean working tree per `agent/skills/_shared/test-runner-dispatch.md` with:
-   - `artifact_path = docs/test-runs/<spec-name>/baseline.log`
+2. Recreate the artifact parent directory: `mkdir -p <abs-dir>/docs/test-runs/<spec-name>`. The `-u` stash from the previous step swept the untracked `docs/test-runs/<spec-name>/` directory out of the working tree, so the parent must be re-established before the test-runner dispatch (which per `agent/skills/_shared/test-runner-dispatch.md` requires the artifact parent to exist).
+
+   Then dispatch `test-runner` over the clean working tree per `agent/skills/_shared/test-runner-dispatch.md` with:
+   - `artifact_path = <abs-dir>/docs/test-runs/<spec-name>/baseline.log` (absolute path, per the dispatch contract)
    - `phase_label = baseline`
 
    `baseline.log` is created **after** the stash push, so it is NOT part of the stash and remains on disk through pop.
@@ -282,12 +284,12 @@ Steps:
 
    ~~~
    python3 agent/skills/_shared/scripts/reconcile-test-run.py \
-       --artifact docs/test-runs/<spec-name>/baseline.log \
+       --artifact <abs-dir>/docs/test-runs/<spec-name>/baseline.log \
        --mode capture \
-       > docs/test-runs/<spec-name>/baseline-failures.json
+       > <abs-dir>/docs/test-runs/<spec-name>/baseline-failures.json
    ~~~
 
-   `baseline-failures.json` is also created after the stash push, so it remains on disk through pop.
+   `baseline-failures.json` is also created after the stash push, so it remains on disk through pop. The capture JSON's `baseline_failures` field (a list of stable identifiers) is the authoritative pre-change failure set used in Step 5 below.
 
 4. `git stash pop`. If the pop output contains the substring `CONFLICT (` or git exits non-zero with a conflict notice, **hard-stop** with the verbatim message:
 
@@ -304,17 +306,15 @@ Steps:
 
    ~~~
    python3 agent/skills/_shared/scripts/reconcile-test-run.py \
-       --artifact docs/test-runs/<spec-name>/full-suite.log \
+       --artifact <abs-dir>/docs/test-runs/<spec-name>/full-suite.log \
        --mode reconcile \
-       --baseline-failures docs/test-runs/<spec-name>/baseline-failures.json
+       --baseline-failures <abs-dir>/docs/test-runs/<spec-name>/baseline-failures.json
    ~~~
 
-   Capture `.current_non_baseline_stable` (new regressions) and `.current_non_reconcilable`. Compute:
+   Capture `.current_non_baseline_stable` (new regressions) and `.current_non_reconcilable` from the reconcile output. Compute the pre-existing/fixed buckets from the capture JSON's `baseline_failures` field and the reconcile output's `current_failing_stable` field (these are the documented field names — the reconcile output does not expose `failing_identifiers`):
 
-   - pre-existing = `set(baseline_failures) ∩ set(current.failing_identifiers)`
-   - fixed-by-change = `set(baseline_failures) - set(current.failing_identifiers)`
-
-   from the helper output and the capture JSON.
+   - pre-existing = `set(baseline_failures) ∩ set(current_failing_stable)`
+   - fixed-by-change = `set(baseline_failures) - set(current_failing_stable)`
 
 6. Render the three-bucket summary byte-equal to the spec:
 
