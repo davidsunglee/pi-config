@@ -134,13 +134,26 @@ Behavior per choice:
 - **(r) Refine:** invoke `/define-spec <path>` recursively, passing the captured spec path as-is (typically the absolute path from the original `SPEC_ARTIFACT: <absolute path>` line). The procedure's input-shape detector accepts both relative `docs/specs/<name>.md` and absolute paths containing `/docs/specs/`, so the existing-spec branch fires on the recursive run and overwrites the draft with preamble preservation. On the recursive run, the same orchestrator probe + dispatch + validate + commit-gate flow applies.
 - **(x) Stop:** emit `Leaving <path> uncommitted. Edit and commit yourself.` and stop.
 
-## Step 8: Offer `generate-plan`
+## Step 8: Offer fast lane or deep workflow
 
-After a successful commit (Step 6), offer continuation:
+After a successful commit (Step 6), invoke the recommendation helper and offer the three-option continuation menu.
 
-> Spec committed at <path>. Run generate-plan next? (y/n)
+Run `python3 agent/skills/fast-lane/scripts/recommend-workflow.py --spec-path <committed spec path>`. Parse the stdout JSON; on non-zero exit, surface the helper's stderr JSON verbatim, fall back to the deep-workflow recommendation, and proceed to render the menu.
 
-If yes, invoke `generate-plan` with `<path>`. If no, stop.
+> Spec committed at <path>. Recommended next step: <fast lane | deep workflow> because <rationale>.
+>
+> Options:
+> (f) fast lane     — use checklist, serial execution, essential gates
+> (d) deep workflow — run full plan, parallel execution, all gates
+> (x) stop          — leave spec uncommitted for later
+
+Substitute `<fast lane | deep workflow>` from `recommendation` and `<rationale>` from the helper's `rationale` field.
+
+Routing on the user's response:
+
+- `(f) / fast / fast lane` → invoke `/fast-lane <spec-path>`.
+- `(d) / deep / deep workflow / generate-plan` → invoke `/generate-plan <spec-path>` (preserves the current behavior).
+- `(x) / stop / no` → exit silently. The spec remains committed (the menu copy "leave spec uncommitted for later" is verbatim from the spec but here applies to "leave the workflow for later" — the commit has already happened in Step 6).
 
 ## Edge cases
 
