@@ -6,7 +6,7 @@
     "typecheck": "tsc --noEmit",
     "build": "npm run lint && npm run typecheck",
     "test": "find extensions -name '*.test.ts' -print0 | xargs -0 node --experimental-strip-types --experimental-test-coverage --test",
-    "test:helpers": "python3 -m unittest discover -s skills/_shared/scripts/tests -p \"test_*.py\" && python3 -m unittest discover -s skills/execute-plan/scripts/tests -p \"test_*.py\" && python3 -m unittest discover -s skills/refine-code/scripts/tests -p \"test_*.py\" && python3 -m unittest discover -s skills/refine-plan/scripts/tests -p \"test_*.py\" && python3 -m unittest discover -s skills/define-spec/scripts/tests -p \"test_*.py\"",
+    "test:helpers": "python3 -m unittest discover -s skills/_shared/scripts/tests -p \"test_*.py\" && python3 -m unittest discover -s skills/execute-plan/scripts/tests -p \"test_*.py\" && python3 -m unittest discover -s skills/refine-code/scripts/tests -p \"test_*.py\" && python3 -m unittest discover -s skills/refine-plan/scripts/tests -p \"test_*.py\" && python3 -m unittest discover -s skills/define-spec/scripts/tests -p \"test_*.py\" && python3 -m unittest discover -s skills/fast-lane/scripts/tests -p \"test_*.py\"",
     "check": "npm run build && npm test && npm run test:helpers"
   },
   "devDependencies": {
