@@ -18,10 +18,18 @@ The caller supplies exactly four inputs:
 The caller follows this protocol in fixed order:
 
 1. **Ensure parent directory exists.** Run `mkdir -p` on the parent directory of `artifact_path` before dispatch.
+1.5. **Capture freshness baseline.** Immediately after `mkdir -p`, capture the pre-dispatch mtime of `artifact_path` so step 5 can validate that any on-disk artifact is fresh even if the marker line is missing. Bash form:
+
+```bash
+ARTIFACT_BASELINE=$(python3 -c "import os, sys; p=sys.argv[1]; print(os.path.getmtime(p) if os.path.exists(p) else 0)" "<artifact_path>")
+```
+
+Hold `ARTIFACT_BASELINE` across the dispatch.
+
 2. **Resolve `(model, cli)` for the dispatch.** Invoke `agent/skills/_shared/scripts/resolve-model-dispatch.py --tier crossProvider.cheap --agent test-runner`. The tier is hardcoded as `crossProvider.cheap`; it is not caller-configurable. On resolution failure, surface byte-equal canonical Templates (1)–(4) per `agent/skills/_shared/model-tier-resolution.md` and stop the call site.
 3. **Fill the prompt template.** Fill `agent/skills/_shared/test-runner-prompt.md` from the four inputs. Conditionally include the phase section based on `phase_label` presence/non-emptiness: the caller fills `{PHASE_SECTION}` with the literal block `## Phase Label\n\n<phase_label>\n` when supplied and non-empty, or with the empty string when omitted or empty.
 4. **Dispatch.** Call `subagent_run_serial { tasks: [{ name: "test-runner: <phase label or 'no-phase'>", agent: "test-runner", task: <filled prompt>, model: <resolved>, cli: <resolved> }] }`.
-5. **Validate handoff and parse the artifact.** Validate the artifact handoff marker, then parse the artifact via `agent/skills/_shared/scripts/parse-test-runner-artifact.py --artifact <artifact_path> --final-message <path-to-finalMessage-or-stdin> --expected-path <artifact_path>`.
+5. **Validate handoff and parse the artifact.** Validate the artifact handoff marker, then parse the artifact via `agent/skills/_shared/scripts/parse-test-runner-artifact.py --artifact <artifact_path> --final-message <path-to-finalMessage-or-stdin> --expected-path <artifact_path> --freshness-baseline <ARTIFACT_BASELINE>`. When the parser's stdout JSON includes `used_fallback: true` (i.e., the test-runner did not emit a `TEST_RESULT_ARTIFACT:` terminal marker but the on-disk artifact is fresh and well-formed), the caller logs a one-line warning to the user.
 
 ## Output on success
 
@@ -47,7 +55,7 @@ Failures are reported as one of these structured reasons (label-style, not free-
 
 - **`dispatch_unavailable`** — `subagent_run_serial` is not exposed in this environment.
 - **`dispatch_failed`** — Test-runner dispatch returned an error (model unavailable, transport error, etc.).
-- **`handoff_missing`** — No anchored `TEST_RESULT_ARTIFACT:` line in the dispatched final message.
+- **`handoff_missing`** — No anchored `TEST_RESULT_ARTIFACT:` line in the dispatched final message AND the on-disk artifact at `artifact_path` is missing/empty/stale (the freshness-baseline fallback did not accept).
 - **`handoff_path_mismatch`** — Marker path does not equal `artifact_path`.
 - **`artifact_missing`** — File does not exist or is empty.
 - **`artifact_malformed`** — `parse-test-runner-artifact.py` checks fail (header order, integer-parse, count reconciliation, raw-output marker, etc.).
