@@ -674,6 +674,65 @@ class TestFreshnessBaselineFallback(unittest.TestCase):
             os.unlink(artifact_path)
             os.unlink(msg_path)
 
+    def test_terminal_marker_in_unclosed_fence_rejects_fallback(self):
+        # Regression: a terminal marker line that sits inside an open fenced
+        # block must not be accepted as a valid marker, and must also block
+        # the on-disk freshness fallback (the marker emission is malformed).
+        artifact_path, mtime = self._make_fresh_artifact("real content")
+        body = f"Preamble.\n```\nBRIEF_ARTIFACT: {artifact_path}\n"  # unclosed fence
+        msg_path = self._make_message(body)
+        try:
+            result = run_script(
+                "--marker", "BRIEF_ARTIFACT",
+                "--final-message", msg_path,
+                "--expected-path", artifact_path,
+                "--freshness-baseline", str(mtime - 60),
+            )
+            self.assertNotEqual(result.returncode, 0)
+            data = json.loads(result.stderr)
+            self.assertEqual(data["failure"], "missing BRIEF_ARTIFACT marker")
+        finally:
+            os.unlink(artifact_path)
+            os.unlink(msg_path)
+
+    def test_terminal_marker_in_unclosed_fence_strict_rejected(self):
+        # Strict mode (no freshness baseline): terminal marker inside an
+        # open fenced block must be rejected as missing.
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+            f.write("```\nBRIEF_ARTIFACT: /tmp/x.md\n")
+            tmp_path = f.name
+        try:
+            result = run_script("--marker", "BRIEF_ARTIFACT", "--final-message", tmp_path)
+            self.assertNotEqual(result.returncode, 0)
+            data = json.loads(result.stderr)
+            self.assertEqual(data["failure"], "missing BRIEF_ARTIFACT marker")
+        finally:
+            os.unlink(tmp_path)
+
+    def test_terminal_marker_after_closed_fence_accepted(self):
+        # Control: a properly closed fence before the terminal marker must
+        # not affect acceptance.
+        artifact_path, mtime = self._make_fresh_artifact("real content")
+        body = (
+            "Preamble.\n```\nsome code\n```\n\n"
+            f"BRIEF_ARTIFACT: {artifact_path}\n"
+        )
+        msg_path = self._make_message(body)
+        try:
+            result = run_script(
+                "--marker", "BRIEF_ARTIFACT",
+                "--final-message", msg_path,
+                "--expected-path", artifact_path,
+                "--freshness-baseline", str(mtime - 60),
+            )
+            self.assertEqual(result.returncode, 0, msg=f"stderr: {result.stderr}")
+            data = json.loads(result.stdout)
+            self.assertFalse(data["used_fallback"])
+            self.assertEqual(data["path"], artifact_path)
+        finally:
+            os.unlink(artifact_path)
+            os.unlink(msg_path)
+
     def test_marker_followed_by_summary_accepted(self):
         artifact_path, mtime = self._make_fresh_artifact("real content")
         body = f"BRIEF_ARTIFACT: {artifact_path}\n\nSummary: I wrote the brief and verified the headings.\n"

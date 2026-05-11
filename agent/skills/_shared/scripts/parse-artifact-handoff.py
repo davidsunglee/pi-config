@@ -139,16 +139,28 @@ def main() -> None:
 
     lines = content.split("\n")
     terminal_line = None
-    for line in reversed(lines):
-        if line.strip() != "":
-            terminal_line = line
+    terminal_index = None
+    for i in range(len(lines) - 1, -1, -1):
+        if lines[i].strip() != "":
+            terminal_line = lines[i]
+            terminal_index = i
             break
 
     if terminal_line is None:
         fail(f"missing {args.marker} marker")
 
+    # Determine whether the terminal line sits inside an open fenced block.
+    # A terminal marker emitted inside an unclosed fence is malformed and
+    # must be rejected (both for direct acceptance and for fallback).
+    fence_open_at_terminal = False
+    _in_fence_scan = False
+    for i in range(terminal_index):
+        if lines[i].strip().startswith("```"):
+            _in_fence_scan = not _in_fence_scan
+    fence_open_at_terminal = _in_fence_scan
+
     pattern = re.compile(r"^" + re.escape(args.marker) + r": (.+)$")
-    match = pattern.match(terminal_line)
+    match = None if fence_open_at_terminal else pattern.match(terminal_line)
     marker_match = match
 
     used_fallback = False
