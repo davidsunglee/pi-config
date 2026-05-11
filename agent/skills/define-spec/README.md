@@ -47,7 +47,11 @@ The orchestrator validates that path before presenting it for review. It also ha
 
 After the spec is written, the skill pauses for user review. Only on explicit user approval does it invoke the `commit` skill for the exact spec path. Rejected drafts can be redone, left on disk, or deleted.
 
-After a successful commit, the skill offers to continue into `generate-plan` with the spec path.
+After a successful commit, the skill offers a three-option continuation menu: `(f) fast lane` (the lightweight workflow at `agent/skills/fast-lane/`), `(d) deep workflow` (`generate-plan` → `refine-plan` → `execute-plan`), or `(x) stop`. A heuristic recommendation derived from the just-committed spec's content (no Approach section, small Requirements count, no flagged Non-Goals) is surfaced alongside the menu via `agent/skills/fast-lane/scripts/recommend-workflow.py`.
+
+## Continuation menu
+
+After the spec is committed, `define-spec` offers three continuation options to the user. The `fast lane` branch dispatches the [fast-lane](../fast-lane/README.md) skill for a lightweight single-coder implementation workflow. The deep workflow branch chains `generate-plan` → `refine-plan` → `execute-plan` for comprehensive planning and multi-wave execution. The third option allows the user to stop and return to the command line. A heuristic recommends which path best fits the just-committed spec based on its structure and scope.
 
 ## Model and dispatch behavior
 
