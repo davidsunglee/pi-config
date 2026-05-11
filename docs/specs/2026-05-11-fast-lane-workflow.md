@@ -46,9 +46,9 @@ The fast-lane skill itself lives at `agent/skills/fast-lane/` (kebab-case direct
   Spec committed at <path>. Recommended next step: <fast lane | deep workflow> because <short rationale>.
 
   Options:
-  (f) fast lane    — checklist, serial execution, light gates
-  (d) deep workflow — full plan, parallel execution, all gates
-  (x) stop         — spec remains committed for later
+  (f) fast lane     — use checklist, serial execution, essential gates
+  (d) deep workflow — run full plan, parallel execution, all gates
+  (x) stop          — leave spec uncommitted for later
   ```
 
 - The recommendation heuristic uses the just-committed spec's content:
