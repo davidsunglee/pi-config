@@ -2,11 +2,11 @@
 
 ## Why this exists
 
-The `fast-lane/scripts/` directory contains deterministic, testable Python helpers that support the fast-lane workflow coordinator. These helpers analyze specification characteristics and recommend workflow routing based on complexity and structure.
+The `fast-lane/scripts/` directory contains deterministic, testable Python helpers that support the fast-lane workflow coordinator.
 
 ## Helpers
 
-- **recommend-workflow.py** — Analyzes a specification markdown file to recommend either `fast-lane` or `deep-workflow` routing based on presence of an Approach section, requirements count, and flagged keywords in Non-Goals. Example: `python3 recommend-workflow.py --spec-path docs/specs/foo.md --requirements-threshold 6`.
+- **recommend-workflow.py** (legacy / non-authoritative) — A shallow heuristic that inspects a spec markdown file (presence of an `## Approach` section, Requirements bullet count vs. a threshold, flagged keywords in `## Non-Goals`) and emits a `fast-lane` vs. `deep-workflow` JSON recommendation. **No longer authoritative.** `define-spec` Step 8 used to invoke this helper and surface its output directly; that responsibility now lives with the orchestrating LLM, which reads the committed spec and judges scope/risk signals (cross-skill, parser/protocol, provenance/trust, orchestration semantics) that this helper cannot see. The helper is retained as an optional supporting signal extractor and for backwards compatibility — callers must not treat its output as the final recommendation. Example: `python3 recommend-workflow.py --spec-path docs/specs/foo.md --requirements-threshold 6`.
 
 ## Running tests
 

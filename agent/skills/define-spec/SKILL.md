@@ -160,24 +160,50 @@ Behavior per choice:
 
 ## Step 8: Offer fast lane or deep workflow
 
-After a successful commit (Step 6), invoke the recommendation helper and offer the three-option continuation menu.
+After a successful commit (Step 6), make an LLM-native advisory recommendation between fast lane and deep workflow, then render the three-option continuation menu. The recommendation is advisory — the user can always override it by choosing any of the three menu options.
 
-Run `python3 agent/skills/fast-lane/scripts/recommend-workflow.py --spec-path <committed spec path>`. Parse the stdout JSON; on non-zero exit, surface the helper's stderr JSON verbatim, fall back to the deep-workflow recommendation, and proceed to render the menu.
+**Read the committed spec into context.** Read the spec file at the path captured in Step 4 (or Step 3b on inline) into your own context. Do not delegate this judgment to `recommend-workflow.py`; the helper still exists for legacy/compatibility use, but its shallow markdown-shape heuristic is not authoritative for this menu. You may glance at the helper's output as one optional signal, but the recommendation you surface to the user must be your own spec-based judgment.
+
+**Assess scope and risk from the actual spec content.** Look at the Goal, Context (including any "Surveyed files:" list), Requirements, Acceptance Criteria, Non-Goals, and any Approach section — not just markdown counts. Judge what the implementation will actually involve.
+
+Recommend **deep workflow** (`generate-plan` → `execute-plan`) when the spec indicates any of the following:
+
+- multiple workflow skills, agents, or subsystems are affected;
+- parser, protocol, artifact-handoff, provenance, trust-boundary, or freshness semantics are involved;
+- fallback, validation, migration, security, compatibility, or orchestration behavior is changing;
+- git, commit, worktree, branch-completion, or workflow-boundary behavior is affected;
+- requirements or acceptance criteria span several independent concerns;
+- implementation likely needs dependency decomposition, parallelizable work, verifier gates, or integration reconciliation;
+- you are uncertain whether fast lane is sufficient.
+
+Recommend **fast lane** only when the spec is clearly localized and low risk:
+
+- likely 1–3 files or one narrow subsystem;
+- small requirement and acceptance surface;
+- no cross-skill, multi-agent, parser/protocol, provenance/trust, or orchestration semantics;
+- no broad compatibility or migration concerns;
+- a single coder plus standard tests/refinement is likely enough.
+
+**When uncertain, recommend deep workflow** and say so in the rationale.
+
+**Worked regression example.** A spec like `docs/specs/2026-05-11-harden-workflow-boundaries.md` (TODO-40e342b9) spans multiple workflow skills (`execute-plan`, `refine-plan`, `refine-code`, `define-spec`, `scout`, `generate-plan`), touches parser/protocol boundaries (`parse-artifact-handoff.py`, `parse-coder-report.py`, `extract-provenance-preamble.py`, `parse-test-runner-artifact.py`), changes provenance/trust/freshness semantics (missing-marker on-disk fallback with a freshness baseline), and has acceptance criteria across many independent concerns. Recommend **deep workflow** for any spec of this shape — even though it lacks an `## Approach` section and has a short top-level Requirements bullet count, the legacy `recommend-workflow.py` heuristic would mis-route it to fast lane. Do not reproduce that error: this kind of spec is the canonical deep-workflow case.
+
+**Render the menu.** Use this exact shape, substituting `<fast lane | deep workflow>` with your recommendation and `<rationale>` with a concise (one phrase or one sentence) rationale grounded in the spec content you just read:
 
 > Spec committed at <path>. Recommended next step: <fast lane | deep workflow> because <rationale>.
 >
 > Options:
 > (f) fast lane     — use checklist, serial execution, essential gates
 > (d) deep workflow — run full plan, parallel execution, all gates
-> (x) stop          — leave spec uncommitted for later
+> (x) stop          — leave the workflow for later
 
-Substitute `<fast lane | deep workflow>` from `recommendation` and `<rationale>` from the helper's `rationale` field.
+The user can pick either option regardless of the recommendation.
 
 Routing on the user's response:
 
 - `(f) / fast / fast lane` → invoke `/fast-lane <spec-path>`.
-- `(d) / deep / deep workflow / generate-plan` → invoke `/generate-plan <spec-path>` (preserves the current behavior).
-- `(x) / stop / no` → exit silently. The spec remains committed (the menu copy "leave spec uncommitted for later" is verbatim from the spec but here applies to "leave the workflow for later" — the commit has already happened in Step 6).
+- `(d) / deep / deep workflow / generate-plan` → invoke `/generate-plan <spec-path>`.
+- `(x) / stop / no` → exit silently. The spec has already been committed in Step 6 and stays committed; the user is just deferring the implementation workflow.
 
 ## Edge cases
 

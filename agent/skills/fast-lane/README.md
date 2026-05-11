@@ -113,5 +113,5 @@ The fast-lane skill comprises:
 
 - **SKILL.md** — Complete orchestrator specification for the fast-lane workflow, including all steps, menus, edge cases, and artifact management.
 - **fast-lane-coder-prompt.md** — Template prompt dispatched to the `coder` agent, with placeholders for spec content, checklist, working directory, and TDD guidance.
-- **scripts/recommend-workflow.py** — Analyzes a specification markdown file to recommend either `fast-lane` or `deep-workflow` routing based on presence of an Approach section, requirements count, and flagged keywords in Non-Goals.
+- **scripts/recommend-workflow.py** (legacy / non-authoritative) — A shallow markdown-shape heuristic that emits a `fast-lane` vs. `deep-workflow` JSON recommendation based on presence of an Approach section, Requirements bullet count, and flagged keywords in Non-Goals. `define-spec` Step 8 no longer treats this as authoritative; it is retained as an optional supporting signal extractor and for backwards compatibility.
 - **scripts/README.md** — Documentation for the helper scripts, including test discovery and npm integration via `npm run test:helpers`.

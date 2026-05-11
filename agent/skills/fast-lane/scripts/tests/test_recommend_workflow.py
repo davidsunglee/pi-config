@@ -5,7 +5,15 @@ from pathlib import Path
 
 
 class TestRecommendWorkflow(unittest.TestCase):
-    """Tests for recommend-workflow.py script."""
+    """Tests for the legacy/non-authoritative recommend-workflow.py helper.
+
+    The helper is retained for backwards compatibility and as an optional
+    supporting signal. `define-spec` Step 8 no longer treats its output as
+    the authoritative fast-lane vs. deep-workflow recommendation — the
+    orchestrating LLM reads the committed spec and makes the judgment
+    itself. These tests verify the helper's existing JSON contract still
+    holds for any caller that chooses to consume it.
+    """
 
     def setUp(self):
         """Set up test paths."""
