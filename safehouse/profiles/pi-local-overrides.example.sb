@@ -1,0 +1,35 @@
+;; pi-local-overrides.example.sb
+;;
+;; Template for per-machine Safehouse policy overlay. Copy to
+;;   ~/.config/agent-safehouse/pi-local-overrides.sb
+;; and edit. The wrappers pass this file via `safehouse --append-profile`,
+;; so rules here are appended to the generated Safehouse policy and override
+;; nothing implicitly — they only widen or narrow specific paths/operations.
+;;
+;; sandbox-exec uses Scheme-like syntax. Empty file is fine.
+;;
+;; Common patterns (uncomment and adjust as needed):
+
+;; --- Read-only access to a shared library or notes tree ---
+;; (allow file-read*
+;;   (subpath "/Users/USERNAME/Code/shared-lib")
+;;   (subpath "/Users/USERNAME/Documents/work-notes"))
+
+;; --- Read/write access to a sibling repo while working in a nested dir ---
+;; (allow file-read* file-write*
+;;   (subpath "/Users/USERNAME/Code/sibling-repo"))
+
+;; --- Block a sensitive path that Safehouse's defaults would otherwise allow ---
+;; (deny file-read*
+;;   (subpath "/Users/USERNAME/.ssh")
+;;   (subpath "/Users/USERNAME/.aws")
+;;   (subpath "/Users/USERNAME/.gnupg")
+;;   (subpath "/Users/USERNAME/.config/gcloud")
+;;   (literal "/Users/USERNAME/.pi/agent/auth.json"))
+;;
+;; Note: explicit `deny` overrides earlier `allow` rules for the same path
+;; because sandbox-exec evaluates rules in order with last-match-wins.
+
+;; --- Allow a single host-side tool that Safehouse would block ---
+;; (allow process-exec
+;;   (literal "/opt/homebrew/bin/some-extra-tool"))

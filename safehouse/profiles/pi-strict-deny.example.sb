@@ -1,0 +1,51 @@
+;; pi-strict-deny.example.sb
+;;
+;; Stricter deny-oriented overlay. Use when running Pi against an untrusted
+;; repo or an unattended task and you want hard guarantees that specific
+;; secret-bearing paths cannot be read or written even if Safehouse's
+;; defaults would otherwise allow them.
+;;
+;; Replace /Users/USERNAME below with your home directory before use, then
+;; apply with one of:
+;;   safehouse --append-profile=/path/to/pi-strict-deny.sb -- pi
+;;   PI_SAFEHOUSE_OVERRIDES=/path/to/pi-strict-deny.sb pi-safe
+;;
+;; sandbox-exec evaluates rules in order; `deny` rules at the end of the
+;; policy take precedence over earlier `allow` rules for the same path.
+
+;; --- Credential stores and key material ---
+(deny file-read* file-write*
+  (subpath "/Users/USERNAME/.ssh")
+  (subpath "/Users/USERNAME/.aws")
+  (subpath "/Users/USERNAME/.gnupg")
+  (subpath "/Users/USERNAME/.config/gcloud")
+  (subpath "/Users/USERNAME/.config/op")
+  (subpath "/Users/USERNAME/.docker"))
+
+;; --- Pi subscription auth and session history ---
+(deny file-read* file-write*
+  (literal "/Users/USERNAME/.pi/agent/auth.json")
+  (subpath "/Users/USERNAME/.pi/agent/sessions")
+  (literal "/Users/USERNAME/.pi/agent/run-history.jsonl"))
+
+;; --- Shell startup and editor config ---
+(deny file-write*
+  (literal "/Users/USERNAME/.zshrc")
+  (literal "/Users/USERNAME/.zprofile")
+  (literal "/Users/USERNAME/.zshenv")
+  (literal "/Users/USERNAME/.bashrc")
+  (literal "/Users/USERNAME/.bash_profile")
+  (literal "/Users/USERNAME/.profile")
+  (subpath "/Users/USERNAME/.config/zsh")
+  (subpath "/Users/USERNAME/.config/fish"))
+
+;; --- Browser profiles and cookies ---
+(deny file-read* file-write*
+  (subpath "/Users/USERNAME/Library/Application Support/Google/Chrome")
+  (subpath "/Users/USERNAME/Library/Application Support/Firefox")
+  (subpath "/Users/USERNAME/Library/Safari")
+  (subpath "/Users/USERNAME/Library/Cookies"))
+
+;; --- Notes ---
+;; sandbox-exec rule predicates have no glob support; encode any
+;; project-specific .env/.pem paths as individual literal/subpath rules.

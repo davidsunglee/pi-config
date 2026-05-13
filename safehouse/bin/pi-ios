@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# pi-ios — Pi under Safehouse with the Xcode/iOS feature set enabled.
+#
+# Enables Safehouse's `xcode` feature for xcodebuild, Simulator, simctl,
+# devicectl, SwiftPM caches, and the Xcode developer roots. Does NOT enable
+# lldb; use pi-ios-debug only when debugger/task-port access is required.
+#
+# Filesystem/process hardening only. See safehouse/README.md for caveats.
+set -euo pipefail
+
+if ! command -v safehouse >/dev/null 2>&1; then
+  echo "pi-ios: 'safehouse' not found on PATH. Install Agent Safehouse first." >&2
+  exit 127
+fi
+if ! command -v pi >/dev/null 2>&1; then
+  echo "pi-ios: 'pi' not found on PATH." >&2
+  exit 127
+fi
+
+OVERRIDE_FILE="${PI_SAFEHOUSE_OVERRIDES:-$HOME/.config/agent-safehouse/pi-local-overrides.sb}"
+
+args=(--workdir="$PWD" --enable=xcode)
+if [ -f "$OVERRIDE_FILE" ]; then
+  args+=(--append-profile="$OVERRIDE_FILE")
+fi
+
+exec safehouse "${args[@]}" -- pi "$@"

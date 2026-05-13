@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# pi-ios-debug — Pi under Safehouse with Xcode + LLDB enabled.
+#
+# Use ONLY when debugger/task-port workflows are required. The `lldb` feature
+# implies process-control and grants task-port access; do not use it as the
+# default Xcode/iOS wrapper. For ordinary Xcode work, use pi-ios.
+#
+# Filesystem/process hardening only. See safehouse/README.md.
+set -euo pipefail
+
+if ! command -v safehouse >/dev/null 2>&1; then
+  echo "pi-ios-debug: 'safehouse' not found on PATH. Install Agent Safehouse first." >&2
+  exit 127
+fi
+if ! command -v pi >/dev/null 2>&1; then
+  echo "pi-ios-debug: 'pi' not found on PATH." >&2
+  exit 127
+fi
+
+OVERRIDE_FILE="${PI_SAFEHOUSE_OVERRIDES:-$HOME/.config/agent-safehouse/pi-local-overrides.sb}"
+
+args=(--workdir="$PWD" --enable=xcode,lldb)
+if [ -f "$OVERRIDE_FILE" ]; then
+  args+=(--append-profile="$OVERRIDE_FILE")
+fi
+
+exec safehouse "${args[@]}" -- pi "$@"

@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# pi-safe — daily-driver Pi under Agent Safehouse.
+#
+# Filesystem/process hardening only. The current directory is the workdir.
+# Network is open by default in Safehouse; pair with an egress firewall
+# (LuLu/Little Snitch/pf) if outbound visibility matters.
+#
+# See safehouse/README.md for policy guidance and escalation paths.
+set -euo pipefail
+
+if ! command -v safehouse >/dev/null 2>&1; then
+  echo "pi-safe: 'safehouse' not found on PATH. Install Agent Safehouse first." >&2
+  exit 127
+fi
+if ! command -v pi >/dev/null 2>&1; then
+  echo "pi-safe: 'pi' not found on PATH." >&2
+  exit 127
+fi
+
+OVERRIDE_FILE="${PI_SAFEHOUSE_OVERRIDES:-$HOME/.config/agent-safehouse/pi-local-overrides.sb}"
+
+args=(--workdir="$PWD")
+if [ -f "$OVERRIDE_FILE" ]; then
+  args+=(--append-profile="$OVERRIDE_FILE")
+fi
+
+exec safehouse "${args[@]}" -- pi "$@"
