@@ -27,7 +27,6 @@ fi
 # Route documented Safehouse one-off flags (--add-dirs[-ro]=, --env=,
 # --env-pass=, --enable=, --append-profile=) to safehouse instead of pi.
 # `--` ends the safehouse-flag region; everything after is for pi.
-pi_args=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --) shift; break ;;
@@ -36,6 +35,5 @@ while [ $# -gt 0 ]; do
     *) break ;;
   esac
 done
-pi_args+=("$@")
 
-exec safehouse "${args[@]}" -- pi "${pi_args[@]}"
+exec safehouse "${args[@]}" -- pi "$@"

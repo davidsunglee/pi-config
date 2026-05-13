@@ -26,7 +26,6 @@ fi
 
 # Route documented Safehouse one-off flags to safehouse instead of pi.
 # See pi-safe for the rationale and the supported flag list.
-pi_args=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --) shift; break ;;
@@ -35,6 +34,5 @@ while [ $# -gt 0 ]; do
     *) break ;;
   esac
 done
-pi_args+=("$@")
 
-exec safehouse "${args[@]}" -- pi "${pi_args[@]}"
+exec safehouse "${args[@]}" -- pi "$@"

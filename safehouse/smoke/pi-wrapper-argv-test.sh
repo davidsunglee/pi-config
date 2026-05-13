@@ -78,6 +78,14 @@ cwd="$PWD"
 
 # ---- pi-safe ----
 
+# No Pi args: launching the daily-driver alias should still invoke Pi.
+expected="$(printf '%s\n' \
+  "--workdir=$cwd" \
+  -- \
+  pi)"
+actual="$(run_wrapper pi-safe)"
+assert_argv "pi-safe: no args launches pi" "$expected" "$actual"
+
 # Baseline: no extra flags. All user args go to pi after `--`.
 expected="$(printf '%s\n' \
   "--workdir=$cwd" \
@@ -158,6 +166,14 @@ expected="$(printf '%s\n' \
   "--workdir=$cwd" \
   --enable=xcode \
   -- \
+  pi)"
+actual="$(run_wrapper pi-ios)"
+assert_argv "pi-ios: no args launches pi with --enable=xcode" "$expected" "$actual"
+
+expected="$(printf '%s\n' \
+  "--workdir=$cwd" \
+  --enable=xcode \
+  -- \
   pi \
   chat)"
 actual="$(run_wrapper pi-ios chat)"
@@ -174,6 +190,14 @@ actual="$(run_wrapper pi-ios --add-dirs-ro=/tmp/shared-lib chat)"
 assert_argv "pi-ios: --add-dirs-ro routes to safehouse" "$expected" "$actual"
 
 # ---- pi-ios-debug ----
+
+expected="$(printf '%s\n' \
+  "--workdir=$cwd" \
+  --enable=xcode,lldb \
+  -- \
+  pi)"
+actual="$(run_wrapper pi-ios-debug)"
+assert_argv "pi-ios-debug: no args launches pi with --enable=xcode,lldb" "$expected" "$actual"
 
 expected="$(printf '%s\n' \
   "--workdir=$cwd" \
