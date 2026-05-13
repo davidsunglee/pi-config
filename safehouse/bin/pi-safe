@@ -24,4 +24,18 @@ if [ -f "$OVERRIDE_FILE" ]; then
   args+=(--append-profile="$OVERRIDE_FILE")
 fi
 
-exec safehouse "${args[@]}" -- pi "$@"
+# Route documented Safehouse one-off flags (--add-dirs[-ro]=, --env=,
+# --env-pass=, --enable=, --append-profile=) to safehouse instead of pi.
+# `--` ends the safehouse-flag region; everything after is for pi.
+pi_args=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --) shift; break ;;
+    --add-dirs=*|--add-dirs-ro=*|--env=*|--env-pass=*|--enable=*|--append-profile=*)
+      args+=("$1"); shift ;;
+    *) break ;;
+  esac
+done
+pi_args+=("$@")
+
+exec safehouse "${args[@]}" -- pi "${pi_args[@]}"

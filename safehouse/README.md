@@ -99,7 +99,11 @@ falls back onto the primary user's full home directory.
 | `pi-ios-debug` | `--workdir="$PWD" --enable=xcode,lldb` | Only when debugger/task-port access is required. Implies process-control. |
 
 All three wrappers append `~/.config/agent-safehouse/pi-local-overrides.sb`
-if present. They forward every argument to `pi`.
+if present. Leading `--add-dirs=`, `--add-dirs-ro=`, `--env=`, `--env-pass=`,
+`--enable=`, and `--append-profile=` flags are routed to `safehouse`; the
+first non-matching argument (or an explicit `--`) ends the Safehouse-flag
+region and everything after is passed to `pi`. To force an arg through to
+`pi` that would otherwise look like a Safehouse flag, put it after `--`.
 
 ### Choosing a wrapper
 
@@ -254,6 +258,10 @@ For threats that need a real isolation boundary, escalate:
 5. Reading a file in a separate temporary directory is denied.
 6. `safehouse --enable=xcode` can run `xcodebuild -version` (skipped if
    Xcode command-line tools are not installed).
+7. Wrapper argv assembly: each wrapper routes documented Safehouse one-off
+   flags to `safehouse` and the remaining args to `pi`. Verified by
+   `smoke/pi-wrapper-argv-test.sh` using stubbed `safehouse` and `pi`
+   binaries on `PATH`.
 
 Run from anywhere:
 

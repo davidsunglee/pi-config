@@ -9,6 +9,8 @@
 #   4. Read/write inside the chosen workdir works
 #   5. Reading a file outside the workdir is denied
 #   6. `pi-ios` can run `xcodebuild -version` (skipped if no Xcode CLT)
+#   7. Wrapper argv assembly (Safehouse one-off flags routed to safehouse,
+#      pi args after `--`) via stubbed safehouse/pi on PATH.
 #
 # Run from any directory; the script creates its own isolated workdir.
 set -euo pipefail
@@ -112,6 +114,18 @@ if [ -x "$WRAPPER_DIR/pi-ios" ] && command -v xcodebuild >/dev/null 2>&1; then
   fi
 else
   log_skip "xcodebuild under --enable=xcode" "xcodebuild or pi-ios unavailable"
+fi
+
+# 7. Wrapper argv assembly. Self-contained: uses its own stubbed PATH so
+# it never touches the real safehouse or pi binaries.
+if [ -x "$SCRIPT_DIR/pi-wrapper-argv-test.sh" ]; then
+  if "$SCRIPT_DIR/pi-wrapper-argv-test.sh" >/dev/null 2>&1; then
+    log_pass "wrapper argv assembly (pi-safe / pi-ios / pi-ios-debug)"
+  else
+    log_fail "wrapper argv assembly failed (run $SCRIPT_DIR/pi-wrapper-argv-test.sh for details)"
+  fi
+else
+  log_skip "wrapper argv assembly" "pi-wrapper-argv-test.sh missing or not executable"
 fi
 
 echo
