@@ -90,8 +90,15 @@ def _expect_bare(name, lines, i, artifact):
     _fail(label, artifact, f"expected {name!r}, got {line!r}")
 
 
-def _split_non_reconcilable_entries(lines):
-    """Split lines on blank-line boundaries into a list of multi-line entry strings."""
+def _split_non_reconcilable_entries(lines, expected_count=None):
+    """Split lines on blank-line boundaries into multi-line entries.
+
+    When the artifact declares exactly one non-reconcilable failure, treat the
+    entire block as a single composite evidence entry even if the excerpt
+    contains internal blank lines. The test-runner contract explicitly allows a
+    one-entry composite failure when the runner cannot enumerate distinct
+    events; stack traces and package-manager errors often contain blank lines.
+    """
     entries = []
     current = []
     for line in lines:
@@ -103,6 +110,8 @@ def _split_non_reconcilable_entries(lines):
             current.append(line)
     if current:
         entries.append("\n".join(current))
+    if expected_count == 1 and len(entries) > 1:
+        return ["\n".join(lines)]
     return entries
 
 
@@ -192,7 +201,7 @@ def parse_artifact(path):
             failing_identifiers.append(ident)
 
     # Parse non-reconcilable entries
-    non_rec_entries = _split_non_reconcilable_entries(non_rec_lines)
+    non_rec_entries = _split_non_reconcilable_entries(non_rec_lines, non_rec_count)
     if len(non_rec_entries) != non_rec_count:
         _fail(
             "non_reconcilable_count_mismatch",

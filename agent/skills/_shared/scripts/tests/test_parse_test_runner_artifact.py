@@ -94,6 +94,42 @@ class TestNonReconcilable(unittest.TestCase):
         self.assertIn("\n", data["non_reconcilable_failures"][0])
         self.assertIn("\n", data["non_reconcilable_failures"][1])
 
+    def test_single_composite_non_reconcilable_preserves_internal_blank_lines(self):
+        content = (
+            "PHASE: baseline\n"
+            "COMMAND: pnpm test\n"
+            "WORKING_DIRECTORY: /tmp/project\n"
+            "EXIT_CODE: 1\n"
+            "TIMESTAMP: 2026-05-01T10:00:00Z\n"
+            "FAILING_IDENTIFIERS_COUNT: 0\n"
+            "FAILING_IDENTIFIERS:\n"
+            "END_FAILING_IDENTIFIERS\n"
+            "NON_RECONCILABLE_COUNT: 1\n"
+            "NON_RECONCILABLE_FAILURES:\n"
+            "[ERR_PNPM_NO_PKG_MANIFEST] No package.json found\n"
+            "[ERROR] Command failed with exit code 1: pnpm install\n"
+            "\n"
+            "pnpm: Command failed with exit code 1: pnpm install\n"
+            "    at getFinalError (pnpm.mjs:1:1)\n"
+            "\n"
+            "Command exited with code 1\n"
+            "END_NON_RECONCILABLE_FAILURES\n"
+            "\n"
+            "--- RAW RUN OUTPUT BELOW ---\n"
+            "raw output\n"
+        )
+        path = write_temp_artifact(content)
+        try:
+            rc, data, _, _ = run_script("--artifact", path)
+            self.assertEqual(rc, 0)
+            self.assertIsNotNone(data)
+            self.assertEqual(data["non_reconcilable_count"], 1)
+            self.assertEqual(len(data["non_reconcilable_failures"]), 1)
+            self.assertIn("\n\npnpm: Command failed", data["non_reconcilable_failures"][0])
+            self.assertIn("\n\nCommand exited with code 1", data["non_reconcilable_failures"][0])
+        finally:
+            os.unlink(path)
+
 
 class TestBothBucketsPopulated(unittest.TestCase):
     def test_both_buckets_populated(self):
