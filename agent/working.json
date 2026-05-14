@@ -1,5 +1,5 @@
 {
-  "indicatorShape": "spinner",
+  "indicatorShape": "pulse",
   "active": {
     "color": "#81A1C1",
     "gleam": false,
