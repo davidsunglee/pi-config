@@ -128,8 +128,6 @@ The customize submenu MUST NOT expose a TDD toggle or a Test suite check toggle.
 
 ## Step 4: Dispatch the coder
 
-<!-- Dispatch path: per-call thinking override verified in ../pi-interactive-subagent -->
-
 - Resolve `(model, cli)` via:
 
   ~~~
@@ -174,7 +172,7 @@ The customize submenu MUST NOT expose a TDD toggle or a Test suite check toggle.
   }
   ~~~
 
-  The `thinking: "high"` field is a **per-call override** at the `subagent_run_serial` task site. Static inspection of `../pi-interactive-subagent` confirms this is supported: `pi-extension/orchestration/types.ts` includes task-level `thinking`, the pane and headless backends forward `params.thinking`, and `pi-extension/subagents/launch-spec.ts` resolves the effective value as `params.thinking ?? agentDefs?.thinking`. The global `agent/agents/coder.md` default is **NOT** modified by this skill. Running fast lane at the coder's `thinking: medium` default is **NOT** an acceptable outcome.
+  The `thinking: "high"` field is a **per-call override** at the `subagent_run_serial` task site. The global `agent/agents/coder.md` default is **NOT** modified by this skill. Running fast lane at the coder's `thinking: medium` default is **NOT** an acceptable outcome.
 
 ## Step 5: Handle the coder status
 

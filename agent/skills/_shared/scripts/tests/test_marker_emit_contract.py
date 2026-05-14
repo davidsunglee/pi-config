@@ -9,8 +9,7 @@ three rules:
   - contains a subagent_done(message="<MARKER>: ...") instruction
   - does NOT contain the old marker names (BRIEF_WRITTEN, SPEC_WRITTEN)
 
-Tests assert string presence rather than dispatching real subagents — the
-e2e contract is exercised by pi-interactive-subagent's integration tests."""
+Tests assert string presence rather than dispatching real subagents."""
 import os
 import re
 import unittest

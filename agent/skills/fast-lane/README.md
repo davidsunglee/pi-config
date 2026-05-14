@@ -85,7 +85,7 @@ subagent_run_serial {
 }
 ```
 
-The `thinking: "high"` field is a per-call override at the `subagent_run_serial` task site. Static inspection of `../pi-interactive-subagent` verifies this path: `pi-extension/orchestration/types.ts` includes task-level `thinking`, the pane and headless backends forward `params.thinking`, and `pi-extension/subagents/launch-spec.ts` resolves the effective value as `params.thinking ?? agentDefs?.thinking`. The published `SKILL.md` Step 4 carries an HTML comment documenting this mechanism. The global `agent/agents/coder.md` default is never modified by this skill.
+The `thinking: "high"` field is a per-call override at the `subagent_run_serial` task site. The published `SKILL.md` Step 4 documents this mechanism in prose. The global `agent/agents/coder.md` default is never modified by this skill.
 
 ## Customize submenu boundary
 
