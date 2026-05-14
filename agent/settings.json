@@ -2,10 +2,7 @@
   "lastChangelogVersion": "0.74.0",
   "defaultProvider": "openai-codex",
   "defaultModel": "gpt-5.5",
-  "defaultThinkingLevel": "high",
-  "compaction": {
-    "enabled": true
-  },
+  "defaultThinkingLevel": "xhigh",
   "enabledModels": [
     "anthropic/claude-opus-4-7",
     "anthropic/claude-sonnet-4-6",
@@ -20,13 +17,11 @@
   "packages": [
     "~/Code/pi-interactive-subagent",
     "npm:pi-ghostty",
-    "npm:pi-mcp-adapter",
     "npm:pi-web-access",
     "npm:@aliou/pi-processes"
   ],
   "autocompleteMaxVisible": 10,
   "editorPaddingX": 1,
-  "hideThinkingBlock": false,
   "theme": "nord",
   "warnings": {
     "anthropicExtraUsage": false
