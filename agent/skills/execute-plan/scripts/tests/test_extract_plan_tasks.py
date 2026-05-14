@@ -1443,6 +1443,34 @@ class TestSuffixedTaskId(unittest.TestCase):
         kinds = [e.get("kind") for e in errors]
         self.assertIn("out_of_order_task_number", kinds, f"Errors: {errors}")
 
+    def test_ordering_suffix_before_base_fails(self):
+        """A suffixed task declared before its base (e.g. 1, 2a, 2, 3) is out of order."""
+        task_section = (
+            _make_task(1, "First") + "\n\n" +
+            _make_task("2a", "Inserted early") + "\n\n" +
+            _make_task(2, "Second") + "\n\n" +
+            _make_task(3, "Third")
+        )
+        plan = _make_plan(task_section=task_section)
+        result, data, errors = _parse_plan_str(plan)
+        self.assertNotEqual(result.returncode, 0, "Suffix before base should fail")
+        kinds = [e.get("kind") for e in errors]
+        self.assertIn("out_of_order_task_number", kinds, f"Errors: {errors}")
+
+    def test_ordering_suffix_after_next_base_fails(self):
+        """A suffixed task declared after a later base (e.g. 1, 2, 3, 2a) is out of order."""
+        task_section = (
+            _make_task(1, "First") + "\n\n" +
+            _make_task(2, "Second") + "\n\n" +
+            _make_task(3, "Third") + "\n\n" +
+            _make_task("2a", "Inserted late")
+        )
+        plan = _make_plan(task_section=task_section)
+        result, data, errors = _parse_plan_str(plan)
+        self.assertNotEqual(result.returncode, 0, "Suffix after later base should fail")
+        kinds = [e.get("kind") for e in errors]
+        self.assertIn("out_of_order_task_number", kinds, f"Errors: {errors}")
+
     def test_uppercase_suffix_rejected(self):
         task_section = _make_task(1, "First") + "\n\n" + "### Task 1A: bad"
         plan = _make_plan(task_section=task_section)

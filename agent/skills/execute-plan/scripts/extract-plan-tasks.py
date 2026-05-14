@@ -361,14 +361,17 @@ def parse_plan(text, max_parallel_hard_cap=MAX_PARALLEL_HARD_CAP):
         else:
             seen_numbers[num] = True
 
-    # Out-of-order detection: base tasks must be contiguous 1..N in declaration order;
-    # suffixed tasks (e.g., 2a) may appear anywhere as long as their base integer task exists.
+    # Out-of-order detection: declaration order must match the canonical sort key
+    # (numeric base ascending, then suffix). Base tasks must be contiguous 1..N;
+    # suffixed tasks (e.g., 2a) must follow their base integer task immediately
+    # (modulo other suffixes on the same base).
     unique_task_numbers = list(dict.fromkeys(tb["number"] for tb in task_blocks))
     declared_bases = {
         task_id_parts(tid)[0] for tid in unique_task_numbers if task_id_parts(tid)[1] == ""
     }
+    expected_sorted = sorted(unique_task_numbers, key=task_id_sort_key)
     expected_base = 1
-    for tid in unique_task_numbers:
+    for idx, tid in enumerate(unique_task_numbers):
         base, suffix = task_id_parts(tid)
         if suffix == "":
             if base != expected_base:
@@ -387,6 +390,13 @@ def parse_plan(text, max_parallel_hard_cap=MAX_PARALLEL_HARD_CAP):
                     "detail": f"Suffixed Task {tid} has no base Task {base}",
                 })
                 break
+        if tid != expected_sorted[idx]:
+            errors.append({
+                "kind": "out_of_order_task_number",
+                "task_number": tid,
+                "detail": f"Task {tid} is out of order; expected Task {expected_sorted[idx]} at this position",
+            })
+            break
 
     # Parse goal: first paragraph of ## Goal or inline **Goal**:
     i = 0
