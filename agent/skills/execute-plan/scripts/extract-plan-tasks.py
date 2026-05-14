@@ -7,7 +7,7 @@ Output shape (stdout, exit 0):
     "test_command": "<contents of the first fenced block under ## Test Command, regardless of info string>",
     "tasks": [
       {
-        "number": 1,
+        "number": 1,                # int for plain IDs, string (e.g. "2a") for suffixed IDs
         "title": "<heading text after '### Task N:'>",
         "task_spec": "<raw markdown block for this task>",
         "files": {
@@ -20,7 +20,7 @@ Output shape (stdout, exit 0):
           {"text": "criterion text", "verify": "verify instruction"}
         ],
         "model_recommendation": "cheap|standard|capable",
-        "dependencies": [1, 2, ...]
+        "dependencies": [1, 2, ...]  # ints and/or suffixed strings
       }
     ],
     "waves": [
@@ -28,6 +28,10 @@ Output shape (stdout, exit 0):
       {"wave": 2, "subwave": 1, "tasks": [3]}
     ]
   }
+
+  Task IDs accept an optional single-lowercase-letter suffix to support intentionally
+  inserted tasks (e.g. "### Task 15a — CLI entry"). Suffixed IDs are preserved as
+  strings in JSON output; plain numeric IDs remain integers for backwards compatibility.
 
 Protocol-error kinds (stderr JSON, exit non-zero):
   ambiguous_nested_fence    — an outer fence contains an inner fenced block whose closer
@@ -43,7 +47,8 @@ Protocol-error kinds (stderr JSON, exit non-zero):
   duplicate_task_number     — two ### Task N: headings share the same N
   missing_files_block       — a task has no **Files:** block before **Steps:**/**Acceptance criteria:**
   missing_model_recommendation — **Model recommendation:** is absent or its value is not cheap|standard|capable
-  out_of_order_task_number  — task numbers are not strictly ascending from 1 with no gaps
+  out_of_order_task_number  — base task numbers are not strictly ascending from 1 with no gaps,
+                              or a suffixed task ID was declared without its base integer task
   malformed_task_heading    — a "### Task N" heading does not use one of the accepted separators (:, —, –, -);
                               fields: kind, line (1-based), observed (full heading text)
 
@@ -67,10 +72,38 @@ from plan_fence_hardening import detect_ambiguous_nested_fences  # noqa: E402
 
 VALID_MODELS = {"cheap", "standard", "capable"}
 
-TASK_HEADING_RE = re.compile(r"^### Task (\d+)\s*[:—–-]\s*(.*)$")
+TASK_ID_PATTERN = r"\d+[a-z]?"
+TASK_ID_FULL_RE = re.compile(rf"^({TASK_ID_PATTERN})$")
+TASK_HEADING_RE = re.compile(rf"^### Task ({TASK_ID_PATTERN})\s*[:—–-]\s*(.*)$")
 MALFORMED_TASK_HEADING_RE = re.compile(r"^### Task \d")
 SECTION_HEADING_RE = re.compile(r"^## ")
-DEP_LINE_RE = re.compile(r"^-\s+Task\s+(\d+)\s+depends\s+on:\s*(.+)")
+DEP_LINE_RE = re.compile(rf"^-\s+Task\s+({TASK_ID_PATTERN})\s+depends\s+on:\s*(.+)")
+DEP_INNER_RE = re.compile(rf"Task\s+({TASK_ID_PATTERN})")
+
+
+def normalize_task_id(raw):
+    """Return int when raw has no suffix, otherwise the raw string. None if invalid."""
+    m = TASK_ID_FULL_RE.match(raw)
+    if not m:
+        return None
+    text = m.group(1)
+    if text[-1].isalpha():
+        return text
+    return int(text)
+
+
+def task_id_parts(task_id):
+    """Return (base_int, suffix_str) for an int or suffixed-string task id."""
+    if isinstance(task_id, int):
+        return task_id, ""
+    text = str(task_id)
+    if text and text[-1].isalpha():
+        return int(text[:-1]), text[-1]
+    return int(text), ""
+
+
+def task_id_sort_key(task_id):
+    return task_id_parts(task_id)
 
 MAX_PARALLEL_HARD_CAP = 8
 
@@ -79,7 +112,7 @@ SECTION_RULES = [
     {"key": "architecture_summary", "patterns": [r"^## Architecture summary\s*$", r"^\*\*Architecture summary\*\*:"], "requires_body": True},
     {"key": "tech_stack", "patterns": [r"^## Tech stack\s*$", r"^\*\*Tech stack\*\*:"], "requires_body": True},
     {"key": "file_structure", "patterns": [r"^## File Structure"], "requires_body": False},
-    {"key": "numbered_tasks", "patterns": [r"^### Task \d+\s*[:—–-]"], "requires_body": False},
+    {"key": "numbered_tasks", "patterns": [rf"^### Task {TASK_ID_PATTERN}\s*[:—–-]"], "requires_body": False},
     {"key": "dependencies", "patterns": [r"^## Dependencies\s*$"], "requires_body": False},
     {"key": "risk_assessment", "patterns": [r"^## Risk [Aa]ssessment\s*$"], "requires_body": False},
 ]
@@ -176,7 +209,7 @@ def detect_dependency_cycle(dep_raw):
         rec_set.remove(node)
         return None
 
-    for node in sorted(all_nodes):
+    for node in sorted(all_nodes, key=task_id_sort_key):
         if node not in visited:
             cycle = dfs(node)
             if cycle is not None:
@@ -194,7 +227,7 @@ def compute_waves(tasks, dep_raw, max_parallel_hard_cap):
 
     while remaining:
         wave_tasks = [
-            t for t in sorted(remaining)
+            t for t in sorted(remaining, key=task_id_sort_key)
             if all(d in wave_assignment for d in dep_raw.get(t, []))
         ]
         if not wave_tasks:
@@ -208,7 +241,7 @@ def compute_waves(tasks, dep_raw, max_parallel_hard_cap):
     for t, w in wave_assignment.items():
         waves_dict.setdefault(w, []).append(t)
     for w in waves_dict:
-        waves_dict[w].sort()
+        waves_dict[w].sort(key=task_id_sort_key)
 
     result = []
     for w in sorted(waves_dict.keys()):
@@ -274,7 +307,7 @@ def parse_plan(text, max_parallel_hard_cap=MAX_PARALLEL_HARD_CAP):
         if i not in in_fence:
             m = TASK_HEADING_RE.match(line)
             if m:
-                task_starts.append((i, int(m.group(1)), m.group(2).strip()))
+                task_starts.append((i, normalize_task_id(m.group(1)), m.group(2).strip()))
                 i += 1
                 continue
 
@@ -328,16 +361,32 @@ def parse_plan(text, max_parallel_hard_cap=MAX_PARALLEL_HARD_CAP):
         else:
             seen_numbers[num] = True
 
-    # Out-of-order detection (only on unique numbers)
+    # Out-of-order detection: base tasks must be contiguous 1..N in declaration order;
+    # suffixed tasks (e.g., 2a) may appear anywhere as long as their base integer task exists.
     unique_task_numbers = list(dict.fromkeys(tb["number"] for tb in task_blocks))
-    for expected, actual in enumerate(unique_task_numbers, start=1):
-        if actual != expected:
-            errors.append({
-                "kind": "out_of_order_task_number",
-                "task_number": actual,
-                "detail": f"Expected Task {expected} but found Task {actual}",
-            })
-            break
+    declared_bases = {
+        task_id_parts(tid)[0] for tid in unique_task_numbers if task_id_parts(tid)[1] == ""
+    }
+    expected_base = 1
+    for tid in unique_task_numbers:
+        base, suffix = task_id_parts(tid)
+        if suffix == "":
+            if base != expected_base:
+                errors.append({
+                    "kind": "out_of_order_task_number",
+                    "task_number": tid,
+                    "detail": f"Expected Task {expected_base} but found Task {tid}",
+                })
+                break
+            expected_base += 1
+        else:
+            if base not in declared_bases:
+                errors.append({
+                    "kind": "out_of_order_task_number",
+                    "task_number": tid,
+                    "detail": f"Suffixed Task {tid} has no base Task {base}",
+                })
+                break
 
     # Parse goal: first paragraph of ## Goal or inline **Goal**:
     i = 0
@@ -423,14 +472,14 @@ def parse_plan(text, max_parallel_hard_cap=MAX_PARALLEL_HARD_CAP):
                     break
                 m = DEP_LINE_RE.match(line.strip())
                 if m:
-                    task_num = int(m.group(1))
+                    task_num = normalize_task_id(m.group(1))
                     deps_str = m.group(2)
                     dep_nums = []
                     for part in deps_str.split(","):
                         part = part.strip()
-                        dm = re.match(r"Task\s+(\d+)", part)
+                        dm = DEP_INNER_RE.match(part)
                         if dm:
-                            dep_nums.append(int(dm.group(1)))
+                            dep_nums.append(normalize_task_id(dm.group(1)))
                     dep_raw[task_num] = dep_nums
                 i += 1
             break
@@ -616,9 +665,10 @@ def main():
     parser.add_argument("--plan", required=True, help="Path to the plan markdown file")
     parser.add_argument(
         "--task-number",
-        type=int,
+        type=str,
         default=None,
-        help="If given, return only this task (still as a single-element tasks array)",
+        help="If given, return only this task (still as a single-element tasks array). "
+             "Accepts integer IDs (e.g. '1') or suffixed IDs (e.g. '2a').",
     )
     parser.add_argument(
         "--max-parallel-hard-cap",
@@ -638,7 +688,8 @@ def main():
         sys.exit(1)
 
     if args.task_number is not None:
-        matching = [t for t in result["tasks"] if t["number"] == args.task_number]
+        wanted = normalize_task_id(args.task_number)
+        matching = [t for t in result["tasks"] if t["number"] == wanted]
         result["tasks"] = matching
 
     print(json.dumps(result, indent=2))

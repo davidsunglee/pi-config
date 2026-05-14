@@ -1349,5 +1349,137 @@ class TestFencedVariantsIgnored(unittest.TestCase):
         self.assertNotIn(99, task_numbers, "Task 99 from inside fence should not appear")
 
 
+class TestSuffixedTaskId(unittest.TestCase):
+    """Allow intentionally inserted task IDs with a single lowercase suffix (e.g. 15a)."""
+
+    def test_suffixed_heading_parses(self):
+        task_section = (
+            _make_task(1, "First") + "\n\n" +
+            _make_task(2, "Second") + "\n\n" +
+            _make_task("2a", "Inserted") + "\n\n" +
+            _make_task(3, "Third")
+        )
+        plan = _make_plan(task_section=task_section)
+        result, data, errors = _parse_plan_str(plan)
+        self.assertEqual(result.returncode, 0, f"Suffixed heading should parse: {errors}")
+        numbers = [t["number"] for t in data["tasks"]]
+        self.assertIn("2a", numbers, f"Suffixed id missing: {numbers}")
+        self.assertIn(2, numbers, f"Base 2 missing: {numbers}")
+
+    def test_suffixed_em_dash_heading_parses(self):
+        task_section = (
+            _make_task(1, "First") + "\n\n" +
+            _make_task(15, "Fifteen") + "\n\n" +
+            _make_task("15a", "CLI entry", sep="—") + "\n\n" +
+            _make_task(16, "Sixteen")
+        )
+        # Need bases 1..14 to satisfy contiguity; for this isolated test reuse only 1, 15, 16, 15a.
+        # The contiguous check requires 1, 2, 3, ... so this will fail unless we satisfy it.
+        # Build the full sequence instead.
+        bodies = []
+        for n in range(1, 17):
+            bodies.append(_make_task(n, f"T{n}"))
+        bodies.insert(15, _make_task("15a", "CLI entry", sep="—"))  # after task 15
+        task_section = "\n\n".join(bodies)
+        plan = _make_plan(task_section=task_section)
+        result, data, errors = _parse_plan_str(plan)
+        self.assertEqual(result.returncode, 0, f"Should parse: {errors}")
+        numbers = [t["number"] for t in data["tasks"]]
+        self.assertIn("15a", numbers)
+
+    def test_dependency_references_suffix(self):
+        task_section = (
+            _make_task(1, "First") + "\n\n" +
+            _make_task(2, "Second") + "\n\n" +
+            _make_task("2a", "Inserted") + "\n\n" +
+            _make_task(3, "Third")
+        )
+        plan = _make_plan(
+            task_section=task_section,
+            deps_section="## Dependencies\n- Task 2a depends on: Task 2\n- Task 3 depends on: Task 2a",
+        )
+        result, data, errors = _parse_plan_str(plan)
+        self.assertEqual(result.returncode, 0, f"Should parse: {errors}")
+        task_by_id = {t["number"]: t for t in data["tasks"]}
+        self.assertIn("2a", task_by_id)
+        self.assertEqual(task_by_id["2a"]["dependencies"], [2])
+        self.assertEqual(task_by_id[3]["dependencies"], ["2a"])
+
+    def test_wave_placement_with_suffix(self):
+        task_section = (
+            _make_task(1, "First") + "\n\n" +
+            _make_task(2, "Second") + "\n\n" +
+            _make_task("2a", "Inserted") + "\n\n" +
+            _make_task(3, "Third")
+        )
+        plan = _make_plan(
+            task_section=task_section,
+            deps_section="## Dependencies\n- Task 2a depends on: Task 2\n- Task 3 depends on: Task 2a",
+        )
+        result, data, errors = _parse_plan_str(plan)
+        self.assertEqual(result.returncode, 0)
+        waves = data["waves"]
+        # Wave 1: tasks 1 and 2 (no deps)
+        # Wave 2: 2a (depends on 2)
+        # Wave 3: 3 (depends on 2a)
+        wave_for = {}
+        for entry in waves:
+            for t in entry["tasks"]:
+                wave_for[t] = entry["wave"]
+        self.assertEqual(wave_for[1], 1)
+        self.assertEqual(wave_for[2], 1)
+        self.assertEqual(wave_for["2a"], 2)
+        self.assertEqual(wave_for[3], 3)
+
+    def test_ordering_suffix_without_base_fails(self):
+        task_section = (
+            _make_task(1, "First") + "\n\n" +
+            _make_task("2a", "Orphan suffix") + "\n\n" +
+            _make_task(3, "Third")
+        )
+        plan = _make_plan(task_section=task_section)
+        result, data, errors = _parse_plan_str(plan)
+        self.assertNotEqual(result.returncode, 0, "Suffix without base should fail")
+        kinds = [e.get("kind") for e in errors]
+        self.assertIn("out_of_order_task_number", kinds, f"Errors: {errors}")
+
+    def test_uppercase_suffix_rejected(self):
+        task_section = _make_task(1, "First") + "\n\n" + "### Task 1A: bad"
+        plan = _make_plan(task_section=task_section)
+        result, data, errors = _parse_plan_str(plan)
+        self.assertNotEqual(result.returncode, 0, "Uppercase suffix should be malformed")
+        kinds = [e.get("kind") for e in errors]
+        self.assertIn("malformed_task_heading", kinds, f"Errors: {errors}")
+
+    def test_multi_letter_suffix_rejected(self):
+        task_section = _make_task(1, "First") + "\n\n" + "### Task 1ab: bad"
+        plan = _make_plan(task_section=task_section)
+        result, data, errors = _parse_plan_str(plan)
+        self.assertNotEqual(result.returncode, 0, "Multi-letter suffix should be malformed")
+        kinds = [e.get("kind") for e in errors]
+        self.assertIn("malformed_task_heading", kinds, f"Errors: {errors}")
+
+    def test_filter_by_suffixed_task_number(self):
+        task_section = (
+            _make_task(1, "First") + "\n\n" +
+            _make_task(2, "Second") + "\n\n" +
+            _make_task("2a", "Inserted") + "\n\n" +
+            _make_task(3, "Third")
+        )
+        plan = _make_plan(task_section=task_section)
+        import tempfile
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False, encoding="utf-8") as f:
+            f.write(plan)
+            temp_plan = f.name
+        try:
+            result = run_script("--plan", temp_plan, "--task-number", "2a")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            data = json.loads(result.stdout)
+            self.assertEqual(len(data["tasks"]), 1)
+            self.assertEqual(data["tasks"][0]["number"], "2a")
+        finally:
+            Path(temp_plan).unlink(missing_ok=True)
+
+
 if __name__ == "__main__":
     unittest.main()
