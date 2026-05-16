@@ -1,0 +1,58 @@
+{
+  "name": "Agentic Codespaces Baseline",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "remoteUser": "coder",
+  "updateRemoteUserUID": true,
+  "containerEnv": {
+    "SHELL": "/usr/bin/zsh",
+    "EDITOR": "nvim",
+    "VISUAL": "nvim",
+    "NPM_CONFIG_PREFIX": "/home/coder/.local",
+    "CLAUDE_CONFIG_DIR": "/home/coder/.claude"
+  },
+  "mounts": [
+    "source=agentic-codespaces-pi-${devcontainerId},target=/home/coder/.pi,type=volume",
+    "source=agentic-codespaces-claude-${devcontainerId},target=/home/coder/.claude,type=volume",
+    "source=agentic-codespaces-codex-${devcontainerId},target=/home/coder/.codex,type=volume",
+    "source=agentic-codespaces-opencode-config-${devcontainerId},target=/home/coder/.config/opencode,type=volume",
+    "source=agentic-codespaces-opencode-data-${devcontainerId},target=/home/coder/.local/share/opencode,type=volume",
+    "source=agentic-codespaces-npm-cache-${devcontainerId},target=/home/coder/.npm,type=volume",
+    "source=agentic-codespaces-pnpm-store-${devcontainerId},target=/home/coder/.local/share/pnpm,type=volume",
+    "source=agentic-codespaces-bun-cache-${devcontainerId},target=/home/coder/.cache/bun,type=volume",
+    "source=agentic-codespaces-uv-cache-${devcontainerId},target=/home/coder/.cache/uv,type=volume",
+    "source=agentic-codespaces-pip-cache-${devcontainerId},target=/home/coder/.cache/pip,type=volume",
+    "source=agentic-codespaces-zsh-history-${devcontainerId},target=/home/coder/.local/state/zsh,type=volume",
+    "source=agentic-codespaces-zoxide-${devcontainerId},target=/home/coder/.local/share/zoxide,type=volume"
+  ],
+  "postCreateCommand": "git config --global --add safe.directory ${containerWorkspaceFolder}",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "charliermarsh.ruff",
+        "dbaeumer.vscode-eslint",
+        "eamodio.gitlens",
+        "GitHub.vscode-pull-request-github",
+        "EditorConfig.EditorConfig"
+      ],
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "zsh",
+        "terminal.integrated.profiles.linux": {
+          "zsh": {
+            "path": "/usr/bin/zsh",
+            "args": ["-l"]
+          }
+        },
+        "diffEditor.renderSideBySide": true,
+        "diffEditor.ignoreTrimWhitespace": false,
+        "scm.diffDecorations": "all",
+        "git.openRepositoryInParentFolders": "always",
+        "gitlens.showWelcomeOnInstall": false,
+        "gitlens.showWhatsNewAfterUpgrades": false
+      }
+    }
+  }
+}
