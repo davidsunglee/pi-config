@@ -26,6 +26,17 @@
     "source=agentic-codespaces-zsh-history-${devcontainerId},target=/home/coder/.local/state/zsh,type=volume",
     "source=agentic-codespaces-zoxide-${devcontainerId},target=/home/coder/.local/share/zoxide,type=volume"
   ],
+  "forwardPorts": [1455, 53692],
+  "portsAttributes": {
+    "1455": {
+      "label": "Pi ChatGPT/Codex OAuth callback",
+      "onAutoForward": "silent"
+    },
+    "53692": {
+      "label": "Pi Claude OAuth callback",
+      "onAutoForward": "silent"
+    }
+  },
   "postCreateCommand": "git config --global --add safe.directory ${containerWorkspaceFolder}",
   "customizations": {
     "vscode": {
