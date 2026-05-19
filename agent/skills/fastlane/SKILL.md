@@ -1,5 +1,5 @@
 ---
-name: fast-lane
+name: fastlane
 description: "Lightweight implementation workflow after define-spec for small features and non-trivial bug fixes. Generates a checklist, dispatches one coder, runs the project test suite, commits, invokes refine-code at reduced budget, and offers branch completion. Does not create a worktree, does not dispatch a verifier, does not push."
 ---
 
@@ -14,7 +14,7 @@ Detect the shape of the input strictly. Mirror `agent/skills/define-spec/spec-de
 - **Todo ID** — if the input matches `^TODO-[0-9a-f]{8}$` (case-insensitive after strip/lowercase), it is a todo ID. Strip the `TODO-` prefix to obtain `<bare-id>` (the 8-character hex tail) and read `docs/todos/<bare-id>.md` — todo files in this repo are stored under the bare ID (e.g., `docs/todos/0aac17a1.md`), NOT under the `TODO-`-prefixed form. Capture the title and body. Retain the original `TODO-<id>` form for user-facing messages and for the `Source: TODO-<id>` line in Step 10 (todo closure). If `docs/todos/<bare-id>.md` does not exist, reject with the verbatim message:
 
   ~~~
-  fast-lane: todo TODO-<id> not found at docs/todos/<bare-id>.md.
+  fastlane: todo TODO-<id> not found at docs/todos/<bare-id>.md.
   ~~~
 
   and stop.
@@ -24,7 +24,7 @@ Detect the shape of the input strictly. Mirror `agent/skills/define-spec/spec-de
 - **Freeform (rejected)** — else reject with the verbatim message:
 
   ~~~
-  fast-lane: input must be a spec path under docs/specs/ or a TODO-<id>. Run /define-spec first to shape a spec.
+  fastlane: input must be a spec path under docs/specs/ or a TODO-<id>. Run /define-spec first to shape a spec.
   ~~~
 
   and stop.
@@ -142,7 +142,7 @@ The customize submenu MUST NOT expose a TDD toggle or a Test suite check toggle.
 
   ~~~
   python3 agent/skills/_shared/scripts/fill-template.py \
-      --template agent/skills/fast-lane/fast-lane-coder-prompt.md \
+      --template agent/skills/fastlane/fastlane-coder-prompt.md \
       --placeholders-json <tmp-json> \
       --output <tmp-prompt> \
       --require-all-replaced
@@ -156,7 +156,7 @@ The customize submenu MUST NOT expose a TDD toggle or a Test suite check toggle.
   subagent_run_serial {
     tasks: [
       {
-        name: "fast-lane-coder",
+        name: "fastlane-coder",
         agent: "coder",
         task: "<filled prompt>",
         model: "<resolved model>",
@@ -258,7 +258,7 @@ On-demand reconciliation branch entered via `(b)` in Step 6.
 
 Steps:
 
-1. `git stash push -u -m "fast-lane-baseline-comparison-<spec-name>"`. Immediately after the push succeeds, capture the stash ref:
+1. `git stash push -u -m "fastlane-baseline-comparison-<spec-name>"`. Immediately after the push succeeds, capture the stash ref:
 
    ~~~
    git stash list -n 1 --format=%gd
@@ -343,7 +343,8 @@ Invoke the refine-code skill with these inputs (matching the documented interfac
 - Description = the spec goal.
 - `--plan-contents` = path to the spec file (for spec-path inputs) or the todo body written to a tmp file (for todo-ID inputs).
 - `--max-iterations 3` (or the user-customized value from `(r) Refine-code iterations` in Step 2's customize submenu — i.e., the run-state field `refine_max_iterations`).
-- `--review-output-path docs/reviews/<spec-name>-fast-lane-review`. The `-fast-lane-review` namespacing distinguishes fast-lane review artifacts from deep-workflow review artifacts targeting the same spec.
+- `--review-output-path docs/reviews/<spec-name>-fastlane-review`.
+  The `-fastlane-review` namespacing distinguishes fastlane review artifacts from deep-workflow review artifacts targeting the same spec.
 
 Refine-code's existing menu on `STATUS: not_approved_within_budget` ((c) Continue refining code / (p) Proceed with issues / (x) Stop execution) stays as-is — fast lane introduces no override. Refine-code's existing provenance validation (`validate-review-provenance.py`) runs as normal.
 
@@ -400,14 +401,14 @@ Mirror `agent/skills/execute-plan/SKILL.md` Step 16.2:
 
   The helper's argument validation refuses any path outside `<cwd>/docs/test-runs/` — see `agent/skills/_shared/scripts/cleanup-test-runs.py` for the exact contract.
 
-- Refine-code review artifacts at `docs/reviews/<spec-name>-fast-lane-review-v<ERA>.md` follow refine-code's existing retention policy (kept).
+- Refine-code review artifacts at `docs/reviews/<spec-name>-fastlane-review-v<ERA>.md` follow refine-code's existing retention policy (kept).
 
 - The checklist remains ephemeral — no on-disk artifact is written for it at any point.
 
-- Post-helper bookkeeping: any Python bytecode caches (`__pycache__`) left behind by helper invocations under `agent/skills/fast-lane/scripts/` are removed on successful completion:
+- Post-helper bookkeeping: any Python bytecode caches (`__pycache__`) left behind by helper invocations under `agent/skills/fastlane/scripts/` are removed on successful completion:
 
   ~~~
-  python3 agent/skills/_shared/scripts/cleanup-pycache.py agent/skills/fast-lane/scripts
+  python3 agent/skills/_shared/scripts/cleanup-pycache.py agent/skills/fastlane/scripts
   ~~~
 
 ## Edge cases

@@ -13,7 +13,7 @@ Fast lane accepts two input shapes:
 - **Spec path** — a relative path under `docs/specs/` or an absolute path containing `/docs/specs/`, ending in `.md`. The file must exist on disk.
 - **TODO-<id>** — a todo identifier in the format `TODO-<8-character-hex>` (case-insensitive). The file `docs/todos/<bare-id>.md` must exist, where `<bare-id>` is the 8-character hex tail without the `TODO-` prefix.
 
-Freeform input that matches neither pattern is rejected with the message: "fast-lane: input must be a spec path under docs/specs/ or a TODO-<id>. Run /define-spec first to shape a spec."
+Freeform input that matches neither pattern is rejected with the message: "fastlane: input must be a spec path under docs/specs/ or a TODO-<id>. Run /define-spec first to shape a spec."
 
 ## Phases
 
@@ -33,7 +33,7 @@ Fast lane runs the following phases in order, each with a menu when action or de
 
 7. **Commit** — Invoke the commit skill (no path restriction) to commit the coder's changes with a Conventional Commits message derived from the spec goal. Capture the commit SHA.
 
-8. **Refine-code** — Invoke `refine-code` with BASE_SHA, HEAD_SHA, the spec description, plan contents, max iterations (customizable via run state), and review-output path namespaced with `-fast-lane-review`. Refine-code's existing menu stays as-is. Menu: refine-code's options; proceed on `approved`, `approved_with_concerns`, or `(p) Proceed with issues`.
+8. **Refine-code** — Invoke `refine-code` with BASE_SHA, HEAD_SHA, the spec description, plan contents, max iterations (customizable via run state), and review-output path namespaced with `-fastlane-review`. Refine-code's existing menu stays as-is. Menu: refine-code's options; proceed on `approved`, `approved_with_concerns`, or `(p) Proceed with issues`.
 
 9. **Todo closure** — If the input was a todo ID or the spec preamble contains `Source: TODO-<id>`, update the todo status to `done` and append a completion line.
 
@@ -73,7 +73,7 @@ Dispatch is a single task to `agent: "coder"` with `thinking: "high"` per-call o
 subagent_run_serial {
   tasks: [
     {
-      name: "fast-lane-coder",
+      name: "fastlane-coder",
       agent: "coder",
       task: "<filled prompt>",
       model: "<resolved model>",
@@ -103,15 +103,15 @@ Fast lane creates the following on-disk artifacts:
 
 - **Test-run logs** — `docs/test-runs/<spec-name>/full-suite.log` (always, if test command is detected). For todo-only inputs (no spec involved), substitute `TODO-<id>` for `<spec-name>`.
 - **Baseline logs** — `docs/test-runs/<spec-name>/baseline.log` (optional, created only if `(b) Compare with baseline` is chosen in Step 6). A companion `docs/test-runs/<spec-name>/baseline-failures.json` is created in the same condition.
-- **Review artifacts** — `docs/reviews/<spec-name>-fast-lane-review-v<ERA>.md` (always, after refine-code completes). The `-fast-lane-review` namespacing distinguishes fast-lane review artifacts from deep-workflow reviews targeting the same spec. Follow refine-code's retention policy (kept).
+- **Review artifacts** — `docs/reviews/<spec-name>-fastlane-review-v<ERA>.md` (always, after refine-code completes). The `-fastlane-review` namespacing distinguishes fastlane review artifacts from deep-workflow reviews targeting the same spec. Follow refine-code's retention policy (kept).
 - **Cleanup on success** — On successful completion (refine-code returns `approved`, `approved_with_concerns`, or `(p) Proceed with issues`), the per-spec test-runs directory is cleaned up via `cleanup-test-runs.py`. Baseline artifacts, once written, are also removed.
 - **Preservation on stop** — Test-runs artifacts are preserved on any stop exit (verification `(x)`, baseline-stash-conflict hard-stop, coder BLOCKED, refine-code budget-exhaustion).
 
 ## Files
 
-The fast-lane skill comprises:
+The fastlane skill comprises:
 
-- **SKILL.md** — Complete orchestrator specification for the fast-lane workflow, including all steps, menus, edge cases, and artifact management.
-- **fast-lane-coder-prompt.md** — Template prompt dispatched to the `coder` agent, with placeholders for spec content, checklist, working directory, and TDD guidance.
-- **scripts/recommend-workflow.py** (legacy / non-authoritative) — A shallow markdown-shape heuristic that emits a `fast-lane` vs. `deep-workflow` JSON recommendation based on presence of an Approach section, Requirements bullet count, and flagged keywords in Non-Goals. `define-spec` Step 8 no longer treats this as authoritative; it is retained as an optional supporting signal extractor and for backwards compatibility.
+- **SKILL.md** — Complete orchestrator specification for the fastlane workflow, including all steps, menus, edge cases, and artifact management.
+- **fastlane-coder-prompt.md** — Template prompt dispatched to the `coder` agent, with placeholders for spec content, checklist, working directory, and TDD guidance.
+- **scripts/recommend-workflow.py** (legacy / non-authoritative) — A shallow markdown-shape heuristic that emits a `fastlane` vs. `deep-workflow` JSON recommendation based on presence of an Approach section, Requirements bullet count, and flagged keywords in Non-Goals. `define-spec` Step 8 no longer treats this as authoritative; it is retained as an optional supporting signal extractor and for backwards compatibility.
 - **scripts/README.md** — Documentation for the helper scripts, including test discovery and npm integration via `npm run test:helpers`.

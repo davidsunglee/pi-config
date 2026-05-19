@@ -1,6 +1,6 @@
 # Fast Lane Coder Prompt
 
-Prompt template dispatched to the single fast-lane `coder` subagent. Fill placeholders before sending.
+Prompt template dispatched to the single fastlane `coder` subagent. Fill placeholders before sending.
 
 ## Task Description
 

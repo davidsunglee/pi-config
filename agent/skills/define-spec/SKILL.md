@@ -201,7 +201,7 @@ The user can pick either option regardless of the recommendation.
 
 Routing on the user's response:
 
-- `(f) / fast / fast lane` → invoke `/fast-lane <spec-path>`.
+- `(f) / fast / fast lane` → invoke `/fastlane <spec-path>`.
 - `(d) / deep / deep workflow / generate-plan` → invoke `/generate-plan <spec-path>`.
 - `(x) / stop / no` → exit silently. The spec has already been committed in Step 6 and stays committed; the user is just deferring the implementation workflow.
 

@@ -24,7 +24,7 @@ docs/
   briefs/            Scout briefs, created on demand by scout
   plans/             Implementation plans and plan review artifacts
   reviews/           Code review artifacts
-  test-runs/         Temporary test-runner / fast-lane evidence, created on demand
+  test-runs/         Temporary test-runner / fastlane evidence, created on demand
 ```
 
 Ignored local state includes `.worktrees/`, `agent/auth.json`, `agent/run-history.jsonl`, `agent/sessions/`, `agent/node_modules/`, Python caches, and macOS `.DS_Store` files.
@@ -72,7 +72,7 @@ flowchart TD
     spec["define-spec\nInteractive Q&A\nwrites docs/specs/*"]
     menu{"After spec commit\nchoose path"}
 
-    fastStart["fast-lane\nChecklist + settings"]
+    fastStart["fastlane\nChecklist + settings"]
     fastPreflight["Current-workspace preflight\nno worktree, no verifier, no push"]
     fastCoder["single coder dispatch\nTDD guidance included"]
     fastTests["project test suite\noptional baseline comparison"]
@@ -115,7 +115,7 @@ Important routing rules:
 - `scout` is optional and explicit. When a scout brief is used, it flows into `define-spec`; there is no direct scout-brief-to-plan dispatch. The resulting spec carries the `Scout brief:` provenance line that downstream planners and reviewers read from disk.
 - `define-spec` is optional for the no-scout deep path because `generate-plan` accepts todo IDs, spec/design paths, or freeform text. It is still the preferred input shaper for work that needs user Q&A.
 - After a spec is committed, `define-spec` offers three choices: `(f) fast lane`, `(d) deep workflow`, or `(x) stop`. Its recommendation is advisory and can be overridden.
-- `fast-lane` is for well-scoped changes. It keeps spec discipline and a fresh-context `refine-code` pass, but intentionally drops worktree creation, wave decomposition, verifier dispatch, automatic baseline reconciliation, and automatic push.
+- `fastlane` is for well-scoped changes. It keeps spec discipline and a fresh-context `refine-code` pass, but intentionally drops worktree creation, wave decomposition, verifier dispatch, automatic baseline reconciliation, and automatic push.
 - The deep workflow (`generate-plan` → `refine-plan` → `execute-plan`) is for broader, riskier, or multi-part work. It uses plan review/edit loops, dependency-ordered waves, per-task verification, `test-runner` artifacts, checkpoint commits, and a final review/remediation loop.
 
 ## Skills in this repository
@@ -125,8 +125,8 @@ Skills live under `agent/skills/`. They fall into three broad groups: workflow o
 | Skill | Role |
 | --- | --- |
 | [`scout`](agent/skills/scout/README.md) | Optional non-interactive reconnaissance. Dispatches the `scout` subagent, writes a structured brief to `docs/briefs/`, gates that file on user review/commit, and on todo inputs offers to continue to `define-spec`. |
-| [`define-spec`](agent/skills/define-spec/README.md) | Interactive spec writing from a todo, existing spec, or freeform request. Uses a mux-backed `spec-designer` pane when available, falls back inline, writes `docs/specs/*.md`, gates commit on review, then offers fast-lane/deep/stop. |
-| [`fast-lane`](agent/skills/fast-lane/README.md) | Lightweight implementation path after spec shaping. Accepts a spec path or `TODO-<id>`, builds an ephemeral checklist, dispatches one `coder`, runs tests with optional baseline comparison, commits, invokes reduced-budget `refine-code`, closes linked todos, and never pushes automatically. |
+| [`define-spec`](agent/skills/define-spec/README.md) | Interactive spec writing from a todo, existing spec, or freeform request. Uses a mux-backed `spec-designer` pane when available, falls back inline, writes `docs/specs/*.md`, gates commit on review, then offers fastlane/deep/stop. |
+| [`fastlane`](agent/skills/fastlane/README.md) | Lightweight implementation path after spec shaping. Accepts a spec path or `TODO-<id>`, builds an ephemeral checklist, dispatches one `coder`, runs tests with optional baseline comparison, commits, invokes reduced-budget `refine-code`, closes linked todos, and never pushes automatically. |
 | [`generate-plan`](agent/skills/generate-plan/README.md) | Creates an execution-ready plan from a todo, artifact path, or freeform request. Dispatches `planner`, validates the plan handoff, then hands off to `refine-plan`; it does not own the review loop itself. |
 | [`refine-plan`](agent/skills/refine-plan/README.md) | Iterative plan review/edit loop. Dispatches `plan-refiner`, which alternates `plan-reviewer` and planner edit passes, writes era-versioned reviews under `docs/plans/reviews/`, and returns approval status. The skill owns the plan/review commit gate. |
 | [`execute-plan`](agent/skills/execute-plan/README.md) | Deep implementation engine for structured plans. Handles workspace/worktree choice, settings, dependency waves, parallel `coder` dispatch, `verifier` acceptance checks, `test-runner` baseline/reconcile gates, checkpoint commits, final integration gate, optional `refine-code`, todo closure, and branch finishing. |
@@ -154,11 +154,11 @@ Local agent definitions live in `agent/agents/`. They use fresh context (`sessio
 | `planner` | `generate-plan`, `refine-plan` | Deep codebase planning agent. Writes structured plans and performs surgical plan edits when review findings require changes. |
 | `plan-reviewer` | `refine-plan` | Independent plan reviewer checking structure, requirement coverage, dependencies, testability, and buildability. |
 | `plan-refiner` | `refine-plan` | Coordinator for plan review/edit eras. Dispatches reviewers and planner edit passes, validates artifacts, and reports status without committing. |
-| `coder` | `execute-plan`, `fast-lane`, `refine-code` | Self-contained implementation worker for one plan task, one fast-lane checklist, or a batch of review fixes. Reports typed status. |
+| `coder` | `execute-plan`, `fastlane`, `refine-code` | Self-contained implementation worker for one plan task, one fastlane checklist, or a batch of review fixes. Reports typed status. |
 | `verifier` | `execute-plan` | Per-task acceptance judge. Executes command-style `Verify:` recipes verbatim, inspects the verifier-visible file set, and returns PASS/FAIL per criterion. |
 | `test-runner` | `execute-plan` | Thin runner for one integration test command. Captures raw output, stable failing identifiers, non-reconcilable failures, and emits `TEST_RESULT_ARTIFACT`. |
 | `code-reviewer` | `requesting-code-review`, `refine-code` | Independent production-readiness reviewer for full diffs or remediation-only re-reviews. Writes/returns verdicts with calibrated severity. |
-| `code-refiner` | `refine-code`, `fast-lane`, `execute-plan` | Review/remediate coordinator. Dispatches reviewers and coders, batches findings, commits remediations, tracks budget, and writes review artifacts. |
+| `code-refiner` | `refine-code`, `fastlane`, `execute-plan` | Review/remediate coordinator. Dispatches reviewers and coders, batches findings, commits remediations, tracks budget, and writes review artifacts. |
 
 ## Local extension modules
 

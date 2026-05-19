@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Recommends fast-lane or deep-workflow based on specification characteristics.
+Recommends fastlane or deep-workflow based on specification characteristics.
 
 Analyzes a specification markdown file to determine complexity and approach.
 Outputs a JSON recommendation with reasoning.
@@ -103,7 +103,7 @@ def generate_rationale(has_approach, requirements_count, requirements_threshold,
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Recommend fast-lane or deep-workflow based on specification characteristics.'
+        description='Recommend fastlane or deep-workflow based on specification characteristics.'
     )
     parser.add_argument(
         '--spec-path',
@@ -147,7 +147,7 @@ def main():
 
     # Determine recommendation
     if not has_approach and requirements_count <= args.requirements_threshold and not flagged_non_goals:
-        recommendation = 'fast-lane'
+        recommendation = 'fastlane'
     else:
         recommendation = 'deep-workflow'
 
