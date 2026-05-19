@@ -116,7 +116,7 @@ Run `agent/skills/refine-plan/scripts/parse-refine-plan-summary.py --summary <pa
 
 ### Step 5a: Executable-plan parseability guardrail
 
-**Only when the parsed `status` is `approved` or `approved_with_concerns`**, validate that the plan file is executable by the same parser `execute-plan` would use before offering it to the user. Reviewers occasionally bless plans whose required-section labels use formatting that the executable-plan parser does not yet accept (e.g., legitimate content but a stray label-variant change); catching that here keeps the offer honest. Run:
+**Only when the parsed `status` is `approved` or `approved_with_concerns`**, validate that the plan file is executable by the same parser `execute-plan` would use before offering it to the user. `refine-plan` Step 9.7 already runs this same check before reporting an approved status, so under normal operation this is defense-in-depth — but `generate-plan` re-runs it locally so the execute-plan offer is gated on a fresh check against the on-disk plan (the plan-refiner may have made further edits during the commit gate, and the summary parsing path is permissive). Reviewers occasionally bless plans whose required-section labels use formatting that the executable-plan parser does not yet accept (e.g., legitimate content but a stray label-variant change); catching that here keeps the offer honest. Run:
 
 ```bash
 python3 agent/skills/execute-plan/scripts/extract-plan-tasks.py --plan "<PLAN_PATH from refine-plan summary>" > /dev/null

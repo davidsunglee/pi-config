@@ -144,7 +144,23 @@ Run this validation only on `STATUS: approved`, `STATUS: approved_with_concerns`
 
 For each review file path in the `## Review Files` list parsed in Step 9, invoke `python3 agent/skills/_shared/scripts/validate-review-provenance.py --review-file <path> --allowed-tiers crossProvider.capable,capable`. On non-zero exit, set `STATUS = failed` with reason `review provenance validation failed at <path>: <specific check>` (where `<specific check>` is the `failure` field from the script's stderr JSON) and skip to Step 11. Do NOT proceed to Step 10's commit gate after a validation failure.
 
-When all paths pass validation, proceed to Step 10.
+When all paths pass validation, proceed to Step 9.7.
+
+## Step 9.7: Executable-plan parseability guardrail
+
+Run this validation only when the parsed `STATUS` is `approved` or `approved_with_concerns`; skip for `not_approved_within_budget` and `failed`. The intent: a reviewed plan that this skill is about to declare approved must be parseable by the same parser `execute-plan` uses, so that any downstream caller (the user invoking `refine-plan` standalone, or `generate-plan` consuming this skill's summary) receives an approved status only when the plan is actually executable. Reviewers occasionally bless plans whose required-section labels use formatting the executable-plan parser does not yet accept; catching that here keeps the approved verdict honest across both standalone and orchestrated use.
+
+Run:
+
+```bash
+python3 agent/skills/execute-plan/scripts/extract-plan-tasks.py --plan "<PLAN_PATH from Step 1>" > /dev/null
+```
+
+Plan parsing via `extract-plan-tasks.py` is a sanctioned mechanical activity per [`agent/skills/_shared/orchestrator-verification-boundary.md`](../_shared/orchestrator-verification-boundary.md) — this is parseability validation, not a re-judgment of the plan-refiner's verdict.
+
+On non-zero exit, set `STATUS = failed` with reason `approved plan is not executable: <verbatim parser stderr>` (preserve the parser's structured `{"errors": [...]}` JSON in the reason so the caller can surface it to the user). Do NOT proceed to Step 10's commit gate; skip directly to Step 11 with `COMMIT = not_attempted`. The originally-approved review files have already been written to disk by the `plan-refiner`; they remain in place for inspection but are left uncommitted by this skill.
+
+On exit 0, proceed to Step 10.
 
 ### Boundary: orchestrator MUST NOT re-judge the plan-refiner's verdict
 
