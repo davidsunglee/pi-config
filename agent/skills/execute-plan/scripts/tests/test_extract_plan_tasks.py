@@ -365,6 +365,104 @@ class TestInlineGoalExtraction(unittest.TestCase):
         finally:
             Path(temp_plan).unlink(missing_ok=True)
 
+    def test_inline_goal_label_colon_inside_bold_populates_goal_field(self):
+        """Reviewers commonly emit `**Goal:**` with the colon inside the bold marker.
+
+        The parser must accept this form just like `**Goal**:`.
+        """
+        import tempfile
+
+        plan_path = FIXTURES / "plan-clean.md"
+        text = plan_path.read_text()
+        inline = text.replace(
+            "## Goal\n\nExtract tasks from plan files for automated processing.",
+            "**Goal:** Extract tasks from plan files for automated processing.",
+        )
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:
+            f.write(inline)
+            temp_plan = f.name
+        try:
+            result = run_script("--plan", temp_plan)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            data = json.loads(result.stdout)
+            self.assertEqual(data["goal"], "Extract tasks from plan files for automated processing.")
+        finally:
+            Path(temp_plan).unlink(missing_ok=True)
+
+
+class TestInlineBoldSectionLabelsTolerance(unittest.TestCase):
+    """Regression: required-section detection must accept colon-inside-bold and
+    colon-outside-bold forms for the three inline-label top sections.
+    """
+
+    def _plan_with_inline_top_sections(self, goal_label, arch_label, tech_label):
+        return (
+            f"{goal_label} Extract tasks from plan files for automated processing.\n\n"
+            f"{arch_label} Single-script Python tool that parses markdown and emits JSON.\n\n"
+            f"{tech_label} Python 3, argparse, json.\n\n"
+            "## File Structure\n"
+            "- scripts/extract-plan-tasks.py\n\n"
+            "### Task 1: Parse plan headings\n\n"
+            "**Files:**\n- Create: scripts/extract-plan-tasks.py\n\n"
+            "**Steps:**\n- [ ] **Step 1:** Read the plan file\n\n"
+            "**Acceptance criteria:**\n"
+            "- The script exits zero.\n  Verify: run it.\n\n"
+            "**Model recommendation:** cheap\n\n"
+            "## Dependencies\n\n"
+            "## Risk Assessment\nLow risk.\n\n"
+            "## Test Command\n```bash\necho hi\n```\n"
+        )
+
+    def _run_inline_plan(self, content):
+        import tempfile
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False, encoding="utf-8") as f:
+            f.write(content)
+            temp_plan = f.name
+        try:
+            result = run_script("--plan", temp_plan)
+            data = json.loads(result.stdout) if result.returncode == 0 else None
+            errors = json.loads(result.stderr)["errors"] if result.returncode != 0 else []
+            return result, data, errors
+        finally:
+            Path(temp_plan).unlink(missing_ok=True)
+
+    def test_colon_outside_bold_accepted(self):
+        content = self._plan_with_inline_top_sections(
+            "**Goal**:", "**Architecture summary**:", "**Tech stack**:"
+        )
+        result, data, errors = self._run_inline_plan(content)
+        self.assertEqual(result.returncode, 0, f"colon-outside-bold should pass: {errors}")
+        self.assertEqual(data["goal"], "Extract tasks from plan files for automated processing.")
+
+    def test_colon_inside_bold_accepted(self):
+        content = self._plan_with_inline_top_sections(
+            "**Goal:**", "**Architecture summary:**", "**Tech stack:**"
+        )
+        result, data, errors = self._run_inline_plan(content)
+        self.assertEqual(result.returncode, 0, f"colon-inside-bold should pass: {errors}")
+        self.assertEqual(data["goal"], "Extract tasks from plan files for automated processing.")
+
+    def test_mixed_colon_forms_accepted(self):
+        content = self._plan_with_inline_top_sections(
+            "**Goal:**", "**Architecture summary**:", "**Tech stack:**"
+        )
+        result, data, errors = self._run_inline_plan(content)
+        self.assertEqual(result.returncode, 0, f"mixed colon forms should pass: {errors}")
+        self.assertEqual(data["goal"], "Extract tasks from plan files for automated processing.")
+
+    def test_inline_label_with_empty_body_still_fails(self):
+        """Strict missing-content errors must remain — an empty body should error."""
+        content = self._plan_with_inline_top_sections(
+            "**Goal:**", "**Architecture summary:**", "**Tech stack:**"
+        ).replace(
+            "**Goal:** Extract tasks from plan files for automated processing.\n",
+            "**Goal:**\n",
+        )
+        result, data, errors = self._run_inline_plan(content)
+        self.assertNotEqual(result.returncode, 0, "empty inline goal body should fail")
+        sections = [e.get("section") for e in errors if e.get("kind") == "missing_required_section"]
+        self.assertIn("goal", sections, f"expected 'goal' missing-section error, got: {errors}")
+
 
 class TestWaveGrouping(unittest.TestCase):
 

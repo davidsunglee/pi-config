@@ -108,9 +108,9 @@ def task_id_sort_key(task_id):
 MAX_PARALLEL_HARD_CAP = 8
 
 SECTION_RULES = [
-    {"key": "goal", "patterns": [r"^## Goal\s*$", r"^\*\*Goal\*\*:"], "requires_body": True},
-    {"key": "architecture_summary", "patterns": [r"^## Architecture summary\s*$", r"^\*\*Architecture summary\*\*:"], "requires_body": True},
-    {"key": "tech_stack", "patterns": [r"^## Tech stack\s*$", r"^\*\*Tech stack\*\*:"], "requires_body": True},
+    {"key": "goal", "patterns": [r"^## Goal\s*$", r"^\*\*Goal\*\*:", r"^\*\*Goal:\*\*"], "requires_body": True},
+    {"key": "architecture_summary", "patterns": [r"^## Architecture summary\s*$", r"^\*\*Architecture summary\*\*:", r"^\*\*Architecture summary:\*\*"], "requires_body": True},
+    {"key": "tech_stack", "patterns": [r"^## Tech stack\s*$", r"^\*\*Tech stack\*\*:", r"^\*\*Tech stack:\*\*"], "requires_body": True},
     {"key": "file_structure", "patterns": [r"^## File Structure"], "requires_body": False},
     {"key": "numbered_tasks", "patterns": [rf"^### Task {TASK_ID_PATTERN}\s*[:—–-]"], "requires_body": False},
     {"key": "dependencies", "patterns": [r"^## Dependencies\s*$"], "requires_body": False},
@@ -126,6 +126,24 @@ def validate_required_sections(text):
     errors = []
 
     in_fence = compute_in_fence_lines(lines)
+
+    all_section_patterns = []
+    for rule in SECTION_RULES:
+        flags = re.IGNORECASE if rule["key"] in IGNORECASE_SECTIONS else 0
+        for p in rule["patterns"]:
+            all_section_patterns.append(re.compile(p, flags))
+
+    def is_boundary_line(idx):
+        if idx in in_fence:
+            return False
+        raw = lines[idx]
+        if re.match(r"^#{1,3}\s", raw):
+            return True
+        stripped = raw.strip()
+        for pat in all_section_patterns:
+            if pat.match(stripped):
+                return True
+        return False
 
     def check_section_compiled(compiled, requires_body):
         matches = []
@@ -151,7 +169,7 @@ def validate_required_sections(text):
                 if j in in_fence:
                     j += 1
                     continue
-                if re.match(r"^#{1,3}\s", lines[j]):
+                if is_boundary_line(j):
                     break
                 if lines[j].strip():
                     return True
@@ -415,7 +433,7 @@ def parse_plan(text, max_parallel_hard_cap=MAX_PARALLEL_HARD_CAP):
                 i += 1
             goal = " ".join(goal_lines).strip()
             break
-        inline_goal = re.match(r"^\*\*Goal\*\*:\s*(.*)$", stripped)
+        inline_goal = re.match(r"^\*\*Goal(?:\*\*:|:\*\*)\s*(.*)$", stripped)
         if inline_goal:
             inline_text = inline_goal.group(1).strip()
             if inline_text:

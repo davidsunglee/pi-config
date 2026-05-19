@@ -114,7 +114,17 @@ Invoke `refine-plan` with these arguments:
 
 Run `agent/skills/refine-plan/scripts/parse-refine-plan-summary.py --summary <path-to-finalMessage-or--for-stdin>` against the `refine-plan` summary returned in Step 4. Display the parsed `status`, `commit`, `plan_path`, and `review_paths` fields to the user. When `structural_only == true`, also display the `STRUCTURAL_ONLY: yes` line.
 
-Then, **only when the parsed `status` is `approved` or `approved_with_concerns`**, offer execute-plan:
+### Step 5a: Executable-plan parseability guardrail
+
+**Only when the parsed `status` is `approved` or `approved_with_concerns`**, validate that the plan file is executable by the same parser `execute-plan` would use before offering it to the user. Reviewers occasionally bless plans whose required-section labels use formatting that the executable-plan parser does not yet accept (e.g., legitimate content but a stray label-variant change); catching that here keeps the offer honest. Run:
+
+```bash
+python3 agent/skills/execute-plan/scripts/extract-plan-tasks.py --plan "<PLAN_PATH from refine-plan summary>" > /dev/null
+```
+
+Plan parsing via `extract-plan-tasks.py` is a sanctioned mechanical activity per [`agent/skills/_shared/orchestrator-verification-boundary.md`](../_shared/orchestrator-verification-boundary.md) — this is parseability validation, not a re-judgment of the plan-refiner's verdict. On non-zero exit, surface the parser's stderr (a JSON `{"errors": [...]}` blob) verbatim to the user, prefix it with `generate-plan: approved plan is not executable —`, and skip the execute-plan offer. Report the refine-plan summary (status, commit, plan_path, review_paths, structural_only) so the user can inspect and re-refine. On exit 0, proceed to the offer below.
+
+Then, **only when the parsed `status` is `approved` or `approved_with_concerns`** and the Step 5a parseability check passed, offer execute-plan:
 
 > Plan written to `<PLAN_PATH>`. Want me to run execute-plan with this plan?
 
