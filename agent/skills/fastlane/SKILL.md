@@ -70,7 +70,6 @@ Options:
   (s) Start                      — proceed with these settings
   (c) Customize                  — change a setting
   (e) Edit checklist             — revise the numbered checklist before starting
-  (p) Promote to deep workflow   — abandon fast lane and run /generate-plan instead
   (x) Stop                       — exit fast lane (spec/todo remains committed)
 ~~~
 
@@ -94,8 +93,7 @@ The customize submenu MUST NOT expose a TDD toggle or a Test suite check toggle.
 ### Other top-level options
 
 - `(e) Edit checklist` — let the user revise the numbered checklist (and optionally name a test command), then re-show the top-level confirmation menu.
-- `(p) Promote to deep workflow` — stop fast lane with no state change. Surface the guidance string `Run /generate-plan <spec-path>` and exit.
-- `(x) Stop` — silent exit. The spec/todo remains committed; no rollback.
+- `(x) Stop` — silent exit. The spec/todo remains committed; no rollback. If the user wants to escalate to the deep workflow instead, they can re-run `/generate-plan <spec-path>` manually after stopping.
 
 ## Step 3: Git preflight
 
@@ -204,11 +202,10 @@ Route on `.status`. Mirror `agent/skills/execute-plan/SKILL.md` Step 9.
   <blocker_text, verbatim>
 
   Fast lane cannot continue. Options:
-  (p) Promote to deep workflow
   (x) Stop — leave partial changes uncommitted for manual triage
   ~~~
 
-  `(p)` surfaces the guidance string ``Discard or stash the working tree (`git checkout -- .` or `git stash push -u`), then run `/generate-plan <spec-path>`.`` and exits. Fast lane **does NOT auto-discard or auto-stash** — the user remains in control of their working tree. `(x)` surfaces investigation guidance and exits.
+  `(x)` surfaces investigation guidance and exits. Fast lane **does NOT auto-discard or auto-stash** — the user remains in control of their working tree. If the user wants to escalate to the deep workflow after stopping, they can discard or stash the working tree manually (`git checkout -- .` or `git stash push -u`) and then run `/generate-plan <spec-path>`.
 
 ## Step 6: Verification phase
 
