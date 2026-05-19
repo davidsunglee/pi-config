@@ -9,7 +9,7 @@ class TestRecommendWorkflow(unittest.TestCase):
 
     The helper is retained for backwards compatibility and as an optional
     supporting signal. `define-spec` Step 8 no longer treats its output as
-    the authoritative fast-lane vs. deep-workflow recommendation — the
+    the authoritative fastlane vs. deep-workflow recommendation — the
     orchestrating LLM reads the committed spec and makes the judgment
     itself. These tests verify the helper's existing JSON contract still
     holds for any caller that chooses to consume it.
@@ -27,12 +27,12 @@ class TestRecommendWorkflow(unittest.TestCase):
         return result.stdout, result.stderr, result.returncode
 
     def test_fast_lane_fit_recommends_fast_lane(self):
-        """Test: spec-fast-lane-fit.md recommends fast-lane."""
+        """Test: spec-fast-lane-fit.md recommends fastlane."""
         spec_path = self.fixtures_dir / "spec-fast-lane-fit.md"
         stdout, stderr, code = self.run_script(["--spec-path", str(spec_path)])
         self.assertEqual(code, 0, f"Script failed: {stderr}")
         result = json.loads(stdout)
-        self.assertEqual(result["recommendation"], "fast-lane")
+        self.assertEqual(result["recommendation"], "fastlane")
 
     def test_has_approach_recommends_deep_workflow(self):
         """Test: spec-deep-fit-approach.md recommends deep-workflow with has_approach=True."""
