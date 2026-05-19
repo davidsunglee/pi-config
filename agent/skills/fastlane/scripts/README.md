@@ -1,4 +1,4 @@
-# Fast-lane workflow helpers
+# Fastlane workflow helpers
 
 ## Why this exists
 

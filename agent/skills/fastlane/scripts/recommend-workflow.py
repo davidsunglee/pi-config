@@ -82,7 +82,7 @@ def find_flagged_non_goals(text):
 def generate_rationale(has_approach, requirements_count, requirements_threshold, flagged_non_goals):
     """Generate human-readable rationale for the recommendation."""
     if not has_approach and requirements_count <= requirements_threshold and not flagged_non_goals:
-        # Fast-lane case
+        # Fastlane case
         return f"no Approach section, {requirements_count} requirements (threshold {requirements_threshold}), Non-Goals clean"
     else:
         # Deep-workflow case - collect trigger fragments
