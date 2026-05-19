@@ -165,25 +165,38 @@ On exit 0, proceed to Step 10.
 ### Boundary: orchestrator MUST NOT re-judge the plan-refiner's verdict
 
 > Between parsing the `plan-refiner`'s `finalMessage` (Step 9), validating each review
-> file's provenance (Step 9.5), and routing on `STATUS:` to the commit gate (Step 10), the
-> orchestrator MUST NOT:
+> file's provenance (Step 9.5), running the executable-plan parseability guardrail
+> (Step 9.7), and routing on `STATUS:` to the commit gate (Step 10), the orchestrator
+> MUST NOT:
 >
 > - Read the review files (`docs/plans/reviews/<PLAN_BASENAME>-plan-review-v<ERA>.md`) or
 >   the plan content (`PLAN_PATH`) to form an independent verdict on the plan.
 > - Override or recompute the `STATUS:` line returned by the `plan-refiner` (`approved`,
->   `approved_with_concerns`, `not_approved_within_budget`, `failed`).
+>   `approved_with_concerns`, `not_approved_within_budget`, `failed`) on any grounds other
+>   than the mechanical gate failures defined in Steps 9, 9.5, and 9.7 (path validation,
+>   provenance validation, and executable-plan parseability — each of which may only
+>   downgrade `STATUS` to `failed` with the reason string specified by that step).
 > - Run local checks (grep, ad hoc Python scripts, additional `Read` calls on the plan or
->   reviews) to second-guess the coordinator's judgment.
+>   reviews) to second-guess the coordinator's judgment. The sanctioned mechanical
+>   validators in Steps 9.5 and 9.7 (`validate-review-provenance.py` and
+>   `extract-plan-tasks.py`) are not "local checks" in this sense — they are explicitly
+>   permitted parseability/provenance gates per
+>   [`agent/skills/_shared/orchestrator-verification-boundary.md`](../_shared/orchestrator-verification-boundary.md).
 > - Edit the plan file directly, or invent extra refinement dispatches outside the
 >   documented loop. Iteration is owned by the `plan-refiner`'s internal review-edit cycle;
 >   the only sanctioned re-entry from this skill is the (c) Continue refining plan choice on
 >   `not_approved_within_budget`, which re-runs from Step 6 onward with `STARTING_ERA`
 >   recomputed.
 >
-> The only sanctioned post-coordinator paths are: parse `finalMessage`, validate each review
-> file's provenance via `agent/skills/_shared/scripts/validate-review-provenance.py`, and
-> route on `STATUS:` to Step 10's commit gate. See
-> `agent/skills/_shared/orchestrator-verification-boundary.md` for the shared statement.
+> The sanctioned post-coordinator paths are: parse `finalMessage` (Step 9), validate each
+> review file's provenance via `agent/skills/_shared/scripts/validate-review-provenance.py`
+> (Step 9.5), validate executable-plan parseability via
+> `agent/skills/execute-plan/scripts/extract-plan-tasks.py` (Step 9.7), and route on
+> `STATUS:` to Step 10's commit gate. Step 9.7 MUST run before any `approved` or
+> `approved_with_concerns` verdict reaches Step 10, so that a plan declared approved by
+> this skill is always executable by the same parser `execute-plan` uses. See
+> `agent/skills/_shared/orchestrator-verification-boundary.md` for the shared statement,
+> including its "Plan parsing via `extract-plan-tasks.py`" allowance.
 >
 > Post-helper bookkeeping: any Python bytecode caches (`__pycache__`) left behind by
 > helper-script invocations under `agent/skills/refine-plan/scripts/` are removed via
