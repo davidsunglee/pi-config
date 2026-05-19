@@ -23,7 +23,7 @@ Fast lane runs the following phases in order, each with a menu when action or de
 
 2. **Settings & customize** — Initialize run state (`coder_tier = capable`, `refine_max_iterations = 3`), render the Settings block, and offer the top-level confirmation menu with options to start, customize, edit checklist, promote to deep workflow, or stop. Menu: `(s)/(c)/(e)/(p)/(x)`.
 
-3. **Git preflight** — Capture the current HEAD, check for a dirty working tree, and confirm the current branch. No worktree creation occurs. Menu: `(c)/(x)` for dirty state; `(c)/(x)` for protected branches.
+3. **Git preflight** — Capture the current HEAD and check for a dirty working tree. No worktree creation occurs. Protected branches surface a warning and continue automatically (no prompt). Menu: `(c)/(x)` for dirty state only.
 
 4. **Coder dispatch** — Resolve the coder model tier via `resolve-model-dispatch.py --tier <coder_tier> --agent coder`, fill the coder prompt template, and dispatch the `coder` agent with `thinking: "high"` override. One dispatch per run; re-dispatch only if coder returns `NEEDS_CONTEXT` (once only).
 
