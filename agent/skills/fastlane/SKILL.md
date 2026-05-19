@@ -3,7 +3,7 @@ name: fastlane
 description: "Lightweight implementation workflow after define-spec for small features and non-trivial bug fixes. Generates a checklist, dispatches one coder, runs the project test suite, commits, invokes refine-code at reduced budget, and offers branch completion. Does not create a worktree, does not dispatch a verifier, does not push."
 ---
 
-# Fast Lane
+# Fastlane
 
 Inline orchestrator skill. Every step runs in the orchestrator's session — no coordinator subagent. Composes the commit skill, the refine-code skill, the finishing-a-development-branch skill, and existing shared helpers. The dispatched `coder` is directed by its prompt to consult `test-driven-development` for behavioral changes and `verification-before-completion` before reporting DONE.
 
@@ -53,7 +53,7 @@ Both fields are consumed downstream: `coder_tier` by Step 4 (coder dispatch), `r
 Render the top-level confirmation menu:
 
 ~~~
-Fast lane plan:
+Fastlane plan:
   Source:   <spec path or TODO-<id>>
   Checklist:
     1. <step>
@@ -70,7 +70,7 @@ Options:
   (s) Start                      — proceed with these settings
   (c) Customize                  — change a setting
   (e) Edit checklist             — revise the numbered checklist before starting
-  (x) Stop                       — exit fast lane (spec/todo remains committed)
+  (x) Stop                       — exit fastlane (spec/todo remains committed)
 ~~~
 
 ### `(c) Customize` submenu
@@ -105,7 +105,7 @@ The customize submenu MUST NOT expose a TDD toggle or a Test suite check toggle.
   <git status --porcelain output, verbatim>
 
   Options:
-  (c) Continue — commit existing changes now, then proceed with fast lane
+  (c) Continue — commit existing changes now, then proceed with fastlane
   (x) Stop     — handle existing changes manually
   ~~~
 
@@ -115,10 +115,10 @@ The customize submenu MUST NOT expose a TDD toggle or a Test suite check toggle.
 
   ~~~
   ⚠️ You are on protected branch <branch>.
-  Fast lane will commit directly to this branch.
+  Fastlane will commit directly to this branch.
   ~~~
 
-- **No worktree creation.** Fast lane operates in the current workspace. This skill does NOT invoke `using-git-worktrees` and does NOT create a worktree.
+- **No worktree creation.** Fastlane operates in the current workspace. This skill does NOT invoke `using-git-worktrees` and does NOT create a worktree.
 
 ## Step 4: Dispatch the coder
 
@@ -166,7 +166,7 @@ The customize submenu MUST NOT expose a TDD toggle or a Test suite check toggle.
   }
   ~~~
 
-  The `thinking: "high"` field is a **per-call override** at the `subagent_run_serial` task site. The global `agent/agents/coder.md` default is **NOT** modified by this skill. Running fast lane at the coder's `thinking: medium` default is **NOT** an acceptable outcome.
+  The `thinking: "high"` field is a **per-call override** at the `subagent_run_serial` task site. The global `agent/agents/coder.md` default is **NOT** modified by this skill. Running fastlane at the coder's `thinking: medium` default is **NOT** an acceptable outcome.
 
 ## Step 5: Handle the coder status
 
@@ -201,11 +201,11 @@ Route on `.status`. Mirror `agent/skills/execute-plan/SKILL.md` Step 9.
   🚫 Coder returned BLOCKED:
   <blocker_text, verbatim>
 
-  Fast lane cannot continue. Options:
+  Fastlane cannot continue. Options:
   (x) Stop — leave partial changes uncommitted for manual triage
   ~~~
 
-  `(x)` surfaces investigation guidance and exits. Fast lane **does NOT auto-discard or auto-stash** — the user remains in control of their working tree. If the user wants to escalate to the deep workflow after stopping, they can discard or stash the working tree manually (`git checkout -- .` or `git stash push -u`) and then run `/generate-plan <spec-path>`.
+  `(x)` surfaces investigation guidance and exits. Fastlane **does NOT auto-discard or auto-stash** — the user remains in control of their working tree. If the user wants to escalate to the deep workflow after stopping, they can discard or stash the working tree manually (`git checkout -- .` or `git stash push -u`) and then run `/generate-plan <spec-path>`.
 
 ## Step 6: Verification phase
 
@@ -235,7 +235,7 @@ Route on `.status`. Mirror `agent/skills/execute-plan/SKILL.md` Step 9.
 - If either list is non-empty, surface the verification-failure checkpoint byte-equal:
 
   ~~~
-  ⚠️ Project test suite reported failures after fast lane implementation:
+  ⚠️ Project test suite reported failures after fastlane implementation:
   <failing identifiers, verbatim>
   <non-reconcilable evidence, verbatim>
 
@@ -288,7 +288,7 @@ Steps:
    Stash restoration produced conflicts. Working tree is in a mixed state.
    Stash ref preserved: <ref>
    Resolve manually: `git stash show <ref>`, then `git stash apply <ref>` / `git checkout -- .` as appropriate.
-   Fast lane stopped.
+   Fastlane stopped.
    ~~~
 
    `docs/test-runs/<spec-name>/` is preserved on this hard-stop. The reconcile-reconcile step below does NOT run; the three-bucket summary is NOT rendered.
@@ -343,21 +343,21 @@ Invoke the refine-code skill with these inputs (matching the documented interfac
 - `--review-output-path docs/reviews/<spec-name>-fastlane-review`.
   The `-fastlane-review` namespacing distinguishes fastlane review artifacts from deep-workflow review artifacts targeting the same spec.
 
-Refine-code's existing menu on `STATUS: not_approved_within_budget` ((c) Continue refining code / (p) Proceed with issues / (x) Stop execution) stays as-is — fast lane introduces no override. Refine-code's existing provenance validation (`validate-review-provenance.py`) runs as normal.
+Refine-code's existing menu on `STATUS: not_approved_within_budget` ((c) Continue refining code / (p) Proceed with issues / (x) Stop execution) stays as-is — fastlane introduces no override. Refine-code's existing provenance validation (`validate-review-provenance.py`) runs as normal.
 
-Fast lane proceeds to Step 10 (todo closure) on:
+Fastlane proceeds to Step 10 (todo closure) on:
 - `STATUS: approved`
 - `STATUS: approved_with_concerns`
 - `STATUS: not_approved_within_budget` with the user choosing `(p) Proceed with issues`
 
-On `(c) Stop`, fast lane exits without todo closure or branch completion; `docs/test-runs/<spec-name>/` is preserved.
+On `(c) Stop`, fastlane exits without todo closure or branch completion; `docs/test-runs/<spec-name>/` is preserved.
 
 ## Step 10: Todo closure
 
 Mirror `agent/skills/execute-plan/SKILL.md` Step 16.2:
 
 1. Determine the todo ID:
-   - If the original input to fast lane was a todo ID, use it directly.
+   - If the original input to fastlane was a todo ID, use it directly.
    - Else extract `Source: TODO-<id>` from the spec preamble using a bounded `head -n 40`.
    - Else skip silently.
 
@@ -366,13 +366,13 @@ Mirror `agent/skills/execute-plan/SKILL.md` Step 16.2:
 3. Update the todo status to `done` and append the line:
 
    ~~~
-   Completed via fast lane: <commit SHA>, spec: <spec path>
+   Completed via fastlane: <commit SHA>, spec: <spec path>
    ~~~
 
    Or, when no spec was involved (input was a todo ID):
 
    ~~~
-   Completed via fast lane: <commit SHA>, spec: (input was todo)
+   Completed via fastlane: <commit SHA>, spec: (input was todo)
    ~~~
 
    to the body.
@@ -380,7 +380,7 @@ Mirror `agent/skills/execute-plan/SKILL.md` Step 16.2:
 ## Step 11: Post-completion
 
 - On a feature branch (i.e., not in `{main, master, develop}`), invoke the finishing-a-development-branch skill verbatim. Its existing 4-option menu (merge / push+PR / keep / discard) gives the user explicit control over what happens next.
-- On `main`/`master`/`develop`, the `finishing-a-development-branch` skill is skipped by its existing protected-branch gate. Fast lane reports the run summary and ends; the user runs `git push` manually if desired. Fast lane introduces **no** automatic push.
+- On `main`/`master`/`develop`, the `finishing-a-development-branch` skill is skipped by its existing protected-branch gate. Fastlane reports the run summary and ends; the user runs `git push` manually if desired. Fastlane introduces **no** automatic push.
 
 ## Step 12: Artifacts and cleanup
 
@@ -414,6 +414,6 @@ Mirror `agent/skills/execute-plan/SKILL.md` Step 16.2:
 - **Protected-branch start** (`main`/`master`/`develop`) — covered by Step 3 (warning-only, auto-proceeds; no confirmation prompt).
 - **Coder NEEDS_CONTEXT cycle** — one retry, then a second NEEDS_CONTEXT or any BLOCKED falls through to the BLOCKED handler. Covered by Step 5.
 - **Stash-pop conflict** during baseline comparison — hard-stop with the stash ref preserved. Covered by Step 7.
-- **Refine-code dispatch failure** — helper stderr forwarded verbatim to the user; fast lane stops. Covered by Step 9.
+- **Refine-code dispatch failure** — helper stderr forwarded verbatim to the user; fastlane stops. Covered by Step 9.
 - **Todo missing or already done** at closure — skip silently. Covered by Step 10.
-- **Protected branch at post-completion** — `finishing-a-development-branch`'s existing gate skips it; fast lane introduces no automatic push. Covered by Step 11.
+- **Protected branch at post-completion** — `finishing-a-development-branch`'s existing gate skips it; fastlane introduces no automatic push. Covered by Step 11.

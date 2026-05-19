@@ -1,4 +1,4 @@
-# Fast Lane Coder Prompt
+# Fastlane Coder Prompt
 
 Prompt template dispatched to the single fastlane `coder` subagent. Fill placeholders before sending.
 

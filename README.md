@@ -99,7 +99,7 @@ flowchart TD
     refine -. "optional when no scout" .-> spec
     refine -. "direct deep path\n(no scout)" .-> plan
     spec --> menu
-    menu -->|"f: fast lane"| fastStart
+    menu -->|"f: fastlane"| fastStart
     menu -->|"d: deep workflow"| plan
     menu -->|"x: stop"| stop["stop after spec"]
 
@@ -114,7 +114,7 @@ Important routing rules:
 
 - `scout` is optional and explicit. When a scout brief is used, it flows into `define-spec`; there is no direct scout-brief-to-plan dispatch. The resulting spec carries the `Scout brief:` provenance line that downstream planners and reviewers read from disk.
 - `define-spec` is optional for the no-scout deep path because `generate-plan` accepts todo IDs, spec/design paths, or freeform text. It is still the preferred input shaper for work that needs user Q&A.
-- After a spec is committed, `define-spec` offers three choices: `(f) fast lane`, `(d) deep workflow`, or `(x) stop`. Its recommendation is advisory and can be overridden.
+- After a spec is committed, `define-spec` offers three choices: `(f) fastlane`, `(d) deep workflow`, or `(x) stop`. Its recommendation is advisory and can be overridden.
 - `fastlane` is for well-scoped changes. It keeps spec discipline and a fresh-context `refine-code` pass, but intentionally drops worktree creation, wave decomposition, verifier dispatch, automatic baseline reconciliation, and automatic push.
 - The deep workflow (`generate-plan` → `refine-plan` → `execute-plan`) is for broader, riskier, or multi-part work. It uses plan review/edit loops, dependency-ordered waves, per-task verification, `test-runner` artifacts, checkpoint commits, and a final review/remediation loop.
 

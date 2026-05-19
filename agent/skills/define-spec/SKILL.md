@@ -158,9 +158,9 @@ Behavior per choice:
 - **(r) Refine:** invoke `/define-spec <path>` recursively, passing the captured spec path as-is (typically the absolute path from the original `SPEC_ARTIFACT: <absolute path>` line). The procedure's input-shape detector accepts both relative `docs/specs/<name>.md` and absolute paths containing `/docs/specs/`, so the existing-spec branch fires on the recursive run and overwrites the draft with preamble preservation. On the recursive run, the same orchestrator probe + dispatch + validate + commit-gate flow applies.
 - **(x) Stop:** emit `Leaving <path> uncommitted. Edit and commit yourself.` and stop.
 
-## Step 8: Offer fast lane or deep workflow
+## Step 8: Offer fastlane or deep workflow
 
-After a successful commit (Step 6), make an LLM-native advisory recommendation between fast lane and deep workflow, then render the three-option continuation menu. The recommendation is advisory — the user can always override it by choosing any of the three menu options.
+After a successful commit (Step 6), make an LLM-native advisory recommendation between fastlane and deep workflow, then render the three-option continuation menu. The recommendation is advisory — the user can always override it by choosing any of the three menu options.
 
 **Read the committed spec into context.** Read the spec file at the path captured in Step 4 (or Step 3b on inline) into your own context. Do not delegate this judgment to `recommend-workflow.py`; the helper still exists for legacy/compatibility use, but its shallow markdown-shape heuristic is not authoritative for this menu. You may glance at the helper's output as one optional signal, but the recommendation you surface to the user must be your own spec-based judgment.
 
@@ -174,9 +174,9 @@ Recommend **deep workflow** (`generate-plan` → `execute-plan`) when the spec i
 - git, commit, worktree, branch-completion, or workflow-boundary behavior is affected;
 - requirements or acceptance criteria span several independent concerns;
 - implementation likely needs dependency decomposition, parallelizable work, verifier gates, or integration reconciliation;
-- you are uncertain whether fast lane is sufficient.
+- you are uncertain whether fastlane is sufficient.
 
-Recommend **fast lane** only when the spec is clearly localized and low risk:
+Recommend **fastlane** only when the spec is clearly localized and low risk:
 
 - likely 1–3 files or one narrow subsystem;
 - small requirement and acceptance surface;
@@ -186,14 +186,14 @@ Recommend **fast lane** only when the spec is clearly localized and low risk:
 
 **When uncertain, recommend deep workflow** and say so in the rationale.
 
-**Worked regression example.** A spec like `docs/specs/2026-05-11-harden-workflow-boundaries.md` (TODO-40e342b9) spans multiple workflow skills (`execute-plan`, `refine-plan`, `refine-code`, `define-spec`, `scout`, `generate-plan`), touches parser/protocol boundaries (`parse-artifact-handoff.py`, `parse-coder-report.py`, `extract-provenance-preamble.py`, `parse-test-runner-artifact.py`), changes provenance/trust/freshness semantics (missing-marker on-disk fallback with a freshness baseline), and has acceptance criteria across many independent concerns. Recommend **deep workflow** for any spec of this shape — even though it lacks an `## Approach` section and has a short top-level Requirements bullet count, the legacy `recommend-workflow.py` heuristic would mis-route it to fast lane. Do not reproduce that error: this kind of spec is the canonical deep-workflow case.
+**Worked regression example.** A spec like `docs/specs/2026-05-11-harden-workflow-boundaries.md` (TODO-40e342b9) spans multiple workflow skills (`execute-plan`, `refine-plan`, `refine-code`, `define-spec`, `scout`, `generate-plan`), touches parser/protocol boundaries (`parse-artifact-handoff.py`, `parse-coder-report.py`, `extract-provenance-preamble.py`, `parse-test-runner-artifact.py`), changes provenance/trust/freshness semantics (missing-marker on-disk fallback with a freshness baseline), and has acceptance criteria across many independent concerns. Recommend **deep workflow** for any spec of this shape — even though it lacks an `## Approach` section and has a short top-level Requirements bullet count, the legacy `recommend-workflow.py` heuristic would mis-route it to fastlane. Do not reproduce that error: this kind of spec is the canonical deep-workflow case.
 
-**Render the menu.** Use this exact shape, substituting `<fast lane | deep workflow>` with your recommendation and `<rationale>` with a concise (one phrase or one sentence) rationale grounded in the spec content you just read:
+**Render the menu.** Use this exact shape, substituting `<fastlane | deep workflow>` with your recommendation and `<rationale>` with a concise (one phrase or one sentence) rationale grounded in the spec content you just read:
 
-> Spec committed at <path>. Recommended next step: <fast lane | deep workflow> because <rationale>.
+> Spec committed at <path>. Recommended next step: <fastlane | deep workflow> because <rationale>.
 >
 > Options:
-> (f) fast lane     — use checklist, serial execution, essential gates
+> (f) fastlane      — use checklist, serial execution, essential gates
 > (d) deep workflow — run full plan, parallel execution, all gates
 > (x) stop          — leave the workflow for later
 
@@ -201,7 +201,7 @@ The user can pick either option regardless of the recommendation.
 
 Routing on the user's response:
 
-- `(f) / fast / fast lane` → invoke `/fastlane <spec-path>`.
+- `(f) / fast / fastlane` → invoke `/fastlane <spec-path>`.
 - `(d) / deep / deep workflow / generate-plan` → invoke `/generate-plan <spec-path>`.
 - `(x) / stop / no` → exit silently. The spec has already been committed in Step 6 and stays committed; the user is just deferring the implementation workflow.
 
