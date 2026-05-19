@@ -113,15 +113,11 @@ The customize submenu MUST NOT expose a TDD toggle or a Test suite check toggle.
 
   `(c)` invokes the commit skill with no path restriction (the user supplies the commit message via the skill's standard prompt) and re-captures `BASE_SHA = git rev-parse HEAD` after the commit. `(x)` exits.
 
-- Determine the current branch via `git rev-parse --abbrev-ref HEAD` (or the existing `agent/skills/_shared/scripts/git-workspace-status.py` helper). If the branch is one of `{main, master, develop}`, render the protected-branch checkpoint byte-equal:
+- Determine the current branch via `git rev-parse --abbrev-ref HEAD` (or the existing `agent/skills/_shared/scripts/git-workspace-status.py` helper). If the branch is one of `{main, master, develop}`, render the protected-branch warning byte-equal and proceed automatically (no checkpoint, no prompt):
 
   ~~~
   ⚠️ You are on protected branch <branch>.
   Fast lane will commit directly to this branch.
-
-  Options:
-  (c) Continue on <branch>
-  (x) Stop
   ~~~
 
 - **No worktree creation.** Fast lane operates in the current workspace. This skill does NOT invoke `using-git-worktrees` and does NOT create a worktree.
@@ -417,7 +413,7 @@ Mirror `agent/skills/execute-plan/SKILL.md` Step 16.2:
 ## Edge cases
 
 - **Dirty working tree at preflight** — covered by Step 3 (commit-then-continue or stop).
-- **Protected-branch start** (`main`/`master`/`develop`) — covered by Step 3 (explicit `(c) Continue on <branch>` confirmation).
+- **Protected-branch start** (`main`/`master`/`develop`) — covered by Step 3 (warning-only, auto-proceeds; no confirmation prompt).
 - **Coder NEEDS_CONTEXT cycle** — one retry, then a second NEEDS_CONTEXT or any BLOCKED falls through to the BLOCKED handler. Covered by Step 5.
 - **Stash-pop conflict** during baseline comparison — hard-stop with the stash ref preserved. Covered by Step 7.
 - **Refine-code dispatch failure** — helper stderr forwarded verbatim to the user; fast lane stops. Covered by Step 9.
