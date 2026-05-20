@@ -1,3 +1,0 @@
-The brief is complete. Final handoff:
-
-    BRIEF_ARTIFACT: /tmp/indented.md
