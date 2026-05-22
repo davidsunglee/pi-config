@@ -11,9 +11,6 @@
     "openai-codex/gpt-5.4",
     "openai-codex/gpt-5.4-mini"
   ],
-  "extensions": [
-    "./extensions/env.ts"
-  ],
   "packages": [
     "npm:pi-web-access",
     "npm:@aliou/pi-processes",
