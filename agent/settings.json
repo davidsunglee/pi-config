@@ -18,7 +18,8 @@
     "npm:pi-web-access",
     "npm:@aliou/pi-processes",
     "npm:@aphotic/pi-mux-subagents",
-    "git:github.com/davidsunglee/pi-flow@v0.4.0"
+    "npm:@juicesharp/rpiv-todo",
+    "git:github.com/davidsunglee/pi-flow"
   ],
   "autocompleteMaxVisible": 10,
   "editorPaddingX": 1,
