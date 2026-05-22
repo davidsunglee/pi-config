@@ -1,5 +1,5 @@
 {
-  "lastChangelogVersion": "0.75.3",
+  "lastChangelogVersion": "0.75.4",
   "defaultProvider": "openai-codex",
   "defaultModel": "gpt-5.5",
   "defaultThinkingLevel": "xhigh",
@@ -15,13 +15,14 @@
     "./extensions/env.ts"
   ],
   "packages": [
-    "git:github.com/davidsunglee/pi-interactive-subagent@v4.0.0",
-    "git:github.com/davidsunglee/pi-flow@v0.2.0",
     "npm:pi-web-access",
-    "npm:@aliou/pi-processes"
+    "npm:@aliou/pi-processes",
+    "npm:@aphotic/pi-mux-subagents",
+    "git:github.com/davidsunglee/pi-flow@v0.4.0"
   ],
   "autocompleteMaxVisible": 10,
   "editorPaddingX": 1,
+  "enableSkillCommands": false,
   "theme": "nord",
   "warnings": {
     "anthropicExtraUsage": false
