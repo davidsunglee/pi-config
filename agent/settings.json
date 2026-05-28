@@ -1,5 +1,5 @@
 {
-  "lastChangelogVersion": "0.75.4",
+  "lastChangelogVersion": "0.76.0",
   "defaultProvider": "openai-codex",
   "defaultModel": "gpt-5.5",
   "defaultThinkingLevel": "xhigh",
@@ -14,9 +14,9 @@
   "packages": [
     "npm:pi-web-access",
     "npm:@aliou/pi-processes",
+    "npm:@aphotic/pi-flow",
     "npm:@aphotic/pi-mux-subagents",
-    "npm:@juicesharp/rpiv-todo",
-    "git:github.com/davidsunglee/pi-flow"
+    "npm:@juicesharp/rpiv-todo"
   ],
   "autocompleteMaxVisible": 10,
   "editorPaddingX": 1,
