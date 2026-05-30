@@ -6,14 +6,14 @@
     "typecheck": "tsc --noEmit",
     "build": "npm run lint && npm run typecheck",
     "test": "find extensions -name '*.test.ts' -print0 | xargs -0 node --experimental-strip-types --experimental-test-coverage --test",
-    "test:helpers": "python3 -m unittest discover -s skills/_shared/scripts/tests -p \"test_*.py\" && python3 -m unittest discover -s skills/execute-plan/scripts/tests -p \"test_*.py\" && python3 -m unittest discover -s skills/refine-code/scripts/tests -p \"test_*.py\" && python3 -m unittest discover -s skills/refine-plan/scripts/tests -p \"test_*.py\" && python3 -m unittest discover -s skills/define-spec/scripts/tests -p \"test_*.py\" && python3 -m unittest discover -s skills/fastlane/scripts/tests -p \"test_*.py\"",
+    "test:helpers": "for dir in skills/_shared/scripts/tests skills/execute-plan/scripts/tests skills/refine-code/scripts/tests skills/refine-plan/scripts/tests skills/define-spec/scripts/tests skills/fastlane/scripts/tests; do if [ -d \"$dir\" ]; then python3 -m unittest discover -s \"$dir\" -p \"test_*.py\" || exit $?; fi; done",
     "check": "npm run build && npm test && npm run test:helpers"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@mariozechner/pi-ai": "0.72.1",
-    "@mariozechner/pi-coding-agent": "0.72.1",
-    "@mariozechner/pi-tui": "0.72.1",
+    "@earendil-works/pi-ai": "0.78.0",
+    "@earendil-works/pi-coding-agent": "0.78.0",
+    "@earendil-works/pi-tui": "0.78.0",
     "@types/node": "^25.6.0",
     "eslint": "^10.2.1",
     "typebox": "^1.1.37",
